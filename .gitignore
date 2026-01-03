@@ -1,1 +1,6 @@
 jaxpinn/__pycache__/
+jaxpinn/losses/__pycache__/
+jaxpinn/nn/__pycache__/
+jaxpinn/utils/__pycache__/
+jaxpinn/pde/__pycache__/
+jaxpinn/solver/__pycache__/

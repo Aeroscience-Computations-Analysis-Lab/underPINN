@@ -5,6 +5,7 @@ import jax.numpy as jnp
 from jaxpinn.nn.fbpinn import FBPINN
 from jaxpinn.pde.burgers import BurgersPDE
 from jaxpinn.solver.fbpinn import FBPINNSolver
+from jaxpinn.losses.loss import PINNLoss
 
 from jaxpinn.utils.plotting import (
     make_prediction_grid,
@@ -38,6 +39,22 @@ def make_data():
         jnp.array(u, dtype=jnp.float32),
     )
 
+def make_boundary_data(n=1000):
+    t = np.random.rand(n) * 5.0
+
+    x_left = np.full_like(t, -2 * np.pi)
+    x_right = np.full_like(t, 2 * np.pi)
+
+    x_b = np.concatenate([x_left, x_right])
+    t_b = np.concatenate([t, t])
+
+    u_b = np.zeros_like(x_b)   # u = 0 at boundaries
+
+    return (
+        jnp.array(x_b, dtype=jnp.float32),
+        jnp.array(t_b, dtype=jnp.float32),
+        jnp.array(u_b, dtype=jnp.float32),
+    )
 
 def main():
     print("JAX devices:", jax.devices())
@@ -65,23 +82,41 @@ def main():
     smins = jnp.ones_like(xs_min) * 0.5
     smaxs = jnp.ones_like(xs_max) * 0.5
 
+    
+
     model = FBPINN(layers, shifts, xs_min, xs_max, smins, smaxs)
     pde = BurgersPDE(model)
-    solver = FBPINNSolver(model, pde, lr=1e-3)
+
+    loss = PINNLoss(
+        model=model,
+        pde=pde,
+        loss_type="l2",
+        bc_weight=1.0,
+        reg_weight=0.0,
+        ic_weight=10.0,
+    )
+
+    solver = FBPINNSolver(model, pde, loss=loss, lr=1e-3)
 
     key = jax.random.PRNGKey(0)
     solver.init(key)
 
     x_r, t_r, x_i, u_i = make_data()
 
+    x_b, t_b, u_b = make_boundary_data()    
+
     solver.train(
         x_r,
         t_r,
         x_i,
         u_i,
+        x_b,
+        t_b,
+        u_b,
         epochs=1000,
         batch_r=4096,
         batch_i=512,
+        batch_b=512,
     )
 
     # Create prediction grid
