@@ -4,3 +4,4 @@ jaxpinn/nn/__pycache__/
 jaxpinn/utils/__pycache__/
 jaxpinn/pde/__pycache__/
 jaxpinn/solver/__pycache__/
+jaxpinn/geometry/__pycache__/

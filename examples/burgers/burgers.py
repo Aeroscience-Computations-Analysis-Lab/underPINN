@@ -7,6 +7,9 @@ from jaxpinn.pde.burgers import BurgersPDE
 from jaxpinn.solver.fbpinn import FBPINNSolver
 from jaxpinn.losses.loss import PINNLoss
 
+from jaxpinn.geometry.interval import Interval
+from jaxpinn.geometry.rectangle import Rectangle
+
 from jaxpinn.utils.plotting import (
     make_prediction_grid,
     plot_solution,
@@ -17,38 +20,46 @@ from jaxpinn.utils.plotting import (
 from jaxpinn.utils.serialization import save_prediction_npz
 
 
-def make_data():
-    N = 80000
-    rng = np.random.default_rng(42)
+def make_data(domain, n_collocation=80000, n_ic=1000, seed=42):
+    rng = np.random.default_rng(seed)
 
-    x_r = rng.random(N) * (4 * np.pi) - 2 * np.pi
-    t_r = rng.random(N) * 5.0
+    # ---- Collocation points (interior of space–time domain) ----
+    pts_r = domain.sample(n_collocation, seed=rng.integers(1e9))
+    x_r = pts_r[:, 0]
+    t_r = pts_r[:, 1]
 
-    x = np.linspace(0, 1, 1000) * (4 * np.pi) - 2 * np.pi
-    u = (
-        2.0 * np.exp(-(x + 2.0) ** 2 / 0.5)
-        + 1.5 * np.exp(-(x) ** 2 / 0.3)
-        + 1.0 * np.exp(-(x - 2.0) ** 2 / 0.4)
-        + 0.3 * np.sin(2 * x) * np.exp(-x ** 2 / 8.0)
+    # ---- Initial condition (t = 0 slice) ----
+    x_ic = np.linspace(domain.xmin, domain.xmax, n_ic)
+
+    u_ic = (
+        2.0 * np.exp(-(x_ic + 2.0) ** 2 / 0.5)
+        + 1.5 * np.exp(-(x_ic) ** 2 / 0.3)
+        + 1.0 * np.exp(-(x_ic - 2.0) ** 2 / 0.4)
+        + 0.3 * np.sin(2 * x_ic) * np.exp(-x_ic ** 2 / 8.0)
     )
 
     return (
         jnp.array(x_r, dtype=jnp.float32),
         jnp.array(t_r, dtype=jnp.float32),
-        jnp.array(x, dtype=jnp.float32),
-        jnp.array(u, dtype=jnp.float32),
+        jnp.array(x_ic, dtype=jnp.float32),
+        jnp.array(u_ic, dtype=jnp.float32),
     )
 
-def make_boundary_data(n=1000):
-    t = np.random.rand(n) * 5.0
+def make_boundary_data(domain, n_bc=1000, seed=0):
+    rng = np.random.default_rng(seed)
 
-    x_left = np.full_like(t, -2 * np.pi)
-    x_right = np.full_like(t, 2 * np.pi)
+    # Sample time uniformly
+    t = rng.uniform(domain.ymin, domain.ymax, size=n_bc)
+
+    # Left and right boundaries
+    x_left = np.full_like(t, domain.xmin)
+    x_right = np.full_like(t, domain.xmax)
 
     x_b = np.concatenate([x_left, x_right])
     t_b = np.concatenate([t, t])
 
-    u_b = np.zeros_like(x_b)   # u = 0 at boundaries
+    # Homogeneous Dirichlet BC
+    u_b = np.zeros_like(x_b)
 
     return (
         jnp.array(x_b, dtype=jnp.float32),
@@ -60,6 +71,13 @@ def main():
     print("JAX devices:", jax.devices())
 
     layers = [2, 64, 64, 64, 64, 64, 1]
+
+    space_time_domain = Rectangle(
+        xmin=-2 * np.pi,
+        xmax= 2 * np.pi,
+        ymin=0.0,
+        ymax=5.0,
+    )
 
     shifts = jnp.array([
         [-2.0, 0.0],
@@ -101,10 +119,16 @@ def main():
     key = jax.random.PRNGKey(0)
     solver.init(key)
 
-    x_r, t_r, x_i, u_i = make_data()
+    x_r, t_r, x_i, u_i = make_data(
+        domain=space_time_domain,
+        n_collocation=80000,
+        n_ic=1000,
+    )
 
-    x_b, t_b, u_b = make_boundary_data()    
-
+    x_b, t_b, u_b = make_boundary_data(
+        domain=space_time_domain,
+        n_bc=1000,
+    )
     solver.train(
         x_r,
         t_r,
