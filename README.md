@@ -1,9 +1,9 @@
-# JAXPINN
+# underPINN
 > A Modular, GPU-Accelerated Physics-Informed Neural Network Framework with Attention and Domain Decomposition
 
 ![Static Badge](https://img.shields.io/badge/repo%20status-Active-95eb34) ![Static Badge](https://img.shields.io/badge/license-GPL--3.0-green)
 
-JAXPINN-FBPINN is a high-performance, modular framework for solving partial differential equations (PDEs) using Physics-Informed Neural Networks (PINNs) in JAX + Flax.
+underPINN-FBPINN is a high-performance, modular framework for solving partial differential equations (PDEs) using Physics-Informed Neural Networks (PINNs) in JAX + Flax.
 ## Overview
 The framework supports:
 - Classical PINNs
@@ -23,7 +23,7 @@ The goal is to provide a research-grade yet production-ready PINN engine suitabl
 
 ## Repository Structure
 ```
-jaxpinn/
+underPINN/
 │
 ├── geometry/
 │   ├── base.py
@@ -63,12 +63,12 @@ print(jax.devices())
 ```
 
 
-## Cite JAXPINN
+## Cite underPINN
 
-If you use JAXPINN in your research, academic work, or publications, please cite it as follows:
+If you use underPINN in your research, academic work, or publications, please cite it as follows:
 
 ```
-@article{jaxpinn,
+@article{underPINN,
   author  = {},
   title   = {},
   journal = {},
@@ -79,4 +79,4 @@ If you use JAXPINN in your research, academic work, or publications, please cite
 ```
 ## License
 
-JAXPINN is provided under the GPL-3.0 License. Please see [LICENSE.txt](https://github.com/lohithgsk/PINN/blob/main/LICENSE) for the full license text. 
+underPINN is provided under the GPL-3.0 License. Please see [LICENSE.txt](https://github.com/lohithgsk/PINN/blob/main/LICENSE) for the full license text. 
