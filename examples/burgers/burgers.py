@@ -2,22 +2,22 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from jaxpinn.nn.fbpinn import FBPINN
-from jaxpinn.pde.burgers import BurgersPDE
-from jaxpinn.solver.fbpinn import FBPINNSolver
-from jaxpinn.losses.loss import PINNLoss
+from underPINN.nn.fbpinn import FBPINN
+from underPINN.pde.burgers import BurgersPDE
+from underPINN.solver.fbpinn import FBPINNSolver
+from underPINN.losses.loss import PINNLoss
 
-from jaxpinn.geometry.interval import Interval
-from jaxpinn.geometry.rectangle import Rectangle
+from underPINN.geometry.interval import Interval
+from underPINN.geometry.rectangle import Rectangle
 
-from jaxpinn.utils.plotting import (
+from underPINN.utils.plotting import (
     make_prediction_grid,
     plot_solution,
     plot_losses,
     plot_difference
 )
 
-from jaxpinn.utils.serialization import save_prediction_npz
+from underPINN.utils.serialization import save_prediction_npz
 
 
 def make_data(domain, n_collocation=80000, n_ic=1000, seed=42):
