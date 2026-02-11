@@ -48,7 +48,7 @@ class PINNLoss:
 
     def __call__(self, params, x_r, t_r, x_i, u_i, x_b=None, t_b=None, u_b=None):
         # ---------- PDE residual ----------
-        res = self.pde.residual(params, x_r, t_r)
+        res = self.pde.residual(params, x_r, t_r) # NOTE: MULTI OUTPUT SUPPORT NEEDED
 
         if self.rba:
             # Residual-based adaptivity (detach weights)

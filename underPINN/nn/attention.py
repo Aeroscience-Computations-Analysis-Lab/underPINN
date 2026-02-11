@@ -43,6 +43,20 @@ class DotProductAttention(nn.Module):
         out = alpha[:, :1] * v[:, 0] + alpha[:, 1:] * v[:, 1]
         return self.norm(out + x)
 
+class SimpleGate(nn.Module):
+    """
+    Implements the specific gating logic from the user's PyTorch code:
+    out = (1 - h) * U + h * V
+    where h is the input (assumed to be Tanh output).
+    """
+    dim: int # Unused, kept for API compatibility
+
+    def setup(self):
+        pass
+
+    def __call__(self, x, U, V):
+        # x is the output of the layer (Tanh activation), so it is in (-1, 1)
+        return (1.0 - x) * U + x * V
 
 class HybridAttention(nn.Module):
     dim: int
