@@ -37,9 +37,24 @@ class FBPINNSolver(BaseSolver):
     # BaseSolver interface
     # ------------------------------------------------------------------
 
-    def init(self, key) -> None:
-        self.params = self.model.init(key, jnp.ones((1, 2)))
+    def init(self, key, input_shape: tuple = (1, 2)) -> None:
+        self.params = self.model.init(key, jnp.ones(input_shape))
         self.state = self.opt.init(self.params)
+
+    def load_params(self, params) -> None:
+        """Load pre-trained parameters for transfer learning.
+
+        Replaces current parameters, resets the optimiser momentum
+        buffer, and clears all loss histories so only the fine-tuning
+        phase is recorded.  To fine-tune with a lower learning rate,
+        pass a reduced ``lr`` / ``lr_schedule`` in the
+        :class:`TrainingConfig` you hand to :meth:`train`.
+        """
+        self.params = params
+        self.state  = self.opt.init(params)
+        for h in (self.loss_hist, self.pde_hist, self.ic_hist,
+                  self.bc_hist, self.reg_hist):
+            h.clear()
 
     def train(
         self,
