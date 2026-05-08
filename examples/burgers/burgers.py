@@ -1,11 +1,15 @@
 import numpy as np
 import jax
 import jax.numpy as jnp
+import optax
 
 from underPINN.nn.fbpinn import FBPINN
 from underPINN.pde.burgers import BurgersPDE
 from underPINN.solver.fbpinn import FBPINNSolver
 from underPINN.losses.loss import PINNLoss
+from underPINN.core.config import TrainingConfig
+from underPINN.callbacks.logging import ConsoleLogger
+from underPINN.callbacks.early_stopping import EarlyStopping
 
 from underPINN.geometry.interval import Interval
 from underPINN.geometry.rectangle import Rectangle
@@ -23,12 +27,10 @@ from underPINN.utils.serialization import save_prediction_npz
 def make_data(domain, n_collocation=80000, n_ic=1000, seed=42):
     rng = np.random.default_rng(seed)
 
-    # ---- Collocation points (interior of space–time domain) ----
     pts_r = domain.sample(n_collocation, seed=rng.integers(1e9))
     x_r = pts_r[:, 0]
     t_r = pts_r[:, 1]
 
-    # ---- Initial condition (t = 0 slice) ----
     x_ic = np.linspace(domain.xmin, domain.xmax, n_ic)
 
     u_ic = (
@@ -48,17 +50,13 @@ def make_data(domain, n_collocation=80000, n_ic=1000, seed=42):
 def make_boundary_data(domain, n_bc=1000, seed=0):
     rng = np.random.default_rng(seed)
 
-    # Sample time uniformly
     t = rng.uniform(domain.ymin, domain.ymax, size=n_bc)
 
-    # Left and right boundaries
-    x_left = np.full_like(t, domain.xmin)
+    x_left  = np.full_like(t, domain.xmin)
     x_right = np.full_like(t, domain.xmax)
 
     x_b = np.concatenate([x_left, x_right])
     t_b = np.concatenate([t, t])
-
-    # Homogeneous Dirichlet BC
     u_b = np.zeros_like(x_b)
 
     return (
@@ -70,6 +68,7 @@ def make_boundary_data(domain, n_bc=1000, seed=0):
 def main():
     print("JAX devices:", jax.devices())
 
+    EPOCHS = 5000
     layers = [2, 64, 64, 64, 64, 64, 1]
 
     space_time_domain = Rectangle(
@@ -100,24 +99,35 @@ def main():
     smins = jnp.ones_like(xs_min) * 0.5
     smaxs = jnp.ones_like(xs_max) * 0.5
 
-    
-
     model = FBPINN(layers, shifts, xs_min, xs_max, smins, smaxs)
-    pde = BurgersPDE(model)
+    pde   = BurgersPDE(model, nu=0.01)
 
     loss = PINNLoss(
         model=model,
         pde=pde,
         loss_type="l2",
-        bc_weight=1.0,
+        ic_weight=100.0,
+        bc_weight=5.0,
         reg_weight=0.0,
-        ic_weight=10.0,
+        rba=True,
     )
 
-    solver = FBPINNSolver(model, pde, loss=loss, lr=1e-3)
+    config = TrainingConfig(
+        epochs=EPOCHS,
+        lr=1e-3,
+        lr_schedule=optax.cosine_decay_schedule(1e-3, decay_steps=EPOCHS, alpha=1e-2),
+        batch_r=4096,
+        batch_i=512,
+        batch_b=512,
+        log_every=500,
+        callbacks=[
+            ConsoleLogger(log_every=500),
+            EarlyStopping(patience=500),
+        ],
+    )
 
-    key = jax.random.PRNGKey(0)
-    solver.init(key)
+    solver = FBPINNSolver(model, pde, loss=loss)
+    solver.init(jax.random.PRNGKey(0))
 
     x_r, t_r, x_i, u_i = make_data(
         domain=space_time_domain,
@@ -129,24 +139,17 @@ def main():
         domain=space_time_domain,
         n_bc=1000,
     )
+
     solver.train(
-        x_r,
-        t_r,
-        x_i,
-        u_i,
-        x_b,
-        t_b,
-        u_b,
-        epochs=1000,
-        batch_r=4096,
-        batch_i=512,
-        batch_b=512,
+        x_r, t_r,
+        x_i, u_i,
+        x_b, t_b, u_b,
+        config=config,
     )
 
-    # Create prediction grid
-    x_pred, t_pred, _, _ = make_prediction_grid()
+    # ---- Predictions ----
+    x_pred, t_pred, x_grid, t_grid = make_prediction_grid()
 
-    # Save predictions (THIS CREATES pinn_bfs2.npz)
     save_prediction_npz(
         model=model,
         params=solver.params,
@@ -155,34 +158,28 @@ def main():
         filename="pinn_bfs2.npz",
     )
 
-    # ----- Plot solution -----
-    x_pred, t_pred, x_grid, t_grid = make_prediction_grid()
-
     plot_solution(
-        model,
-        solver.params,
-        x_pred,
-        t_pred,
-        x_grid,
-        t_grid,
+        model, solver.params,
+        x_pred, t_pred, x_grid, t_grid,
         filename="burgers_solution.png",
     )
 
-    # ----- Plot losses -----
     plot_losses(
         solver.loss_hist,
         solver.pde_hist,
         solver.ic_hist,
+        bc_hist=solver.bc_hist,
+        reg_hist=solver.reg_hist,
         filename="training_loss.png",
     )
 
     plot_difference(
-    npz_pred="pinn_bfs2.npz",
-    npz_ref="burgers_complex.npz",
-    nx=400,
-    ny=400,
-    filename="diff_jax.png",
-)
+        npz_pred="pinn_bfs2.npz",
+        npz_ref="burgers_complex.npz",
+        nx=400,
+        ny=400,
+        filename="diff_jax.png",
+    )
 
 
 if __name__ == "__main__":

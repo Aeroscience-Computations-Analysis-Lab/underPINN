@@ -7,14 +7,16 @@ from underPINN.core.base import BaseSolver
 from underPINN.core.config import TrainingConfig
 
 
-class FBPINNSolver(BaseSolver):
-    """Training-loop orchestrator for FBPINN / space-time PDE problems.
+class SteadySolver(BaseSolver):
+    """PINN solver for time-independent 2-D PDEs (e.g. steady heat / Poisson).
 
-    Accepts an optional :class:`~underPINN.core.config.TrainingConfig` to
-    unify hyperparameters and attach callbacks (logging, early stopping …).
+    Training data:
+        xy_r  — interior collocation points  (N_r, 2)
+        xy_b  — boundary points              (N_b, 2)
+        u_b   — Dirichlet boundary values    (N_b,)
 
-    Backward-compatible: all legacy keyword arguments still work when
-    ``config`` is not provided.
+    No initial condition is enforced (steady problem).
+    Supports :class:`~underPINN.core.config.TrainingConfig` + callbacks.
     """
 
     def __init__(self, model, pde, loss, lr: float = 1e-3, lr_schedule=None):
@@ -27,9 +29,7 @@ class FBPINNSolver(BaseSolver):
 
         self.loss_hist: list = []
         self.pde_hist: list = []
-        self.ic_hist: list = []
         self.bc_hist: list = []
-        self.reg_hist: list = []
 
         self._step = self._build_step()
 
@@ -43,36 +43,31 @@ class FBPINNSolver(BaseSolver):
 
     def train(
         self,
-        x_r,
-        t_r,
-        x_i,
-        u_i,
-        x_b,
-        t_b,
-        u_b,
-        epochs: int = 1000,
-        batch_r: int = 4096,
-        batch_i: int = 512,
-        batch_b: int = 512,
+        xy_r: jnp.ndarray,
+        xy_b: jnp.ndarray,
+        u_b: jnp.ndarray,
+        epochs: int = 5000,
+        batch_r: int = 2048,
+        batch_b: int = 256,
         seed: int = 0,
+        log_every: int = 500,
         config: TrainingConfig = None,
     ) -> None:
-        """Run the PDE training loop.
+        """Run the steady-state training loop.
 
         Parameters
         ----------
-        x_r, t_r : collocation points
-        x_i, u_i : initial-condition points and values
-        x_b, t_b, u_b : boundary-condition points, times and values
-        epochs, batch_r, batch_i, batch_b, seed : legacy scalars
+        xy_r : (N_r, 2) interior collocation points
+        xy_b : (N_b, 2) boundary points
+        u_b  : (N_b,)   Dirichlet boundary values
         config : :class:`TrainingConfig` — preferred production path
         """
         if config is not None:
             epochs = config.epochs
             batch_r = config.batch_r
-            batch_i = config.batch_i
             batch_b = config.batch_b
             seed = config.seed
+            log_every = config.log_every
             callbacks = list(config.callbacks)
             if config.lr_schedule is not None:
                 self.opt = self._make_opt(config.lr, config.lr_schedule)
@@ -86,41 +81,31 @@ class FBPINNSolver(BaseSolver):
 
         try:
             for ep in range(epochs):
-                key, k1, k2, k3 = jax.random.split(key, 4)
+                key, k1, k2 = jax.random.split(key, 3)
 
-                idx_r = jax.random.choice(k1, x_r.shape[0], (batch_r,), replace=False)
-                idx_i = jax.random.choice(k2, x_i.shape[0], (batch_i,), replace=False)
-                idx_b = jax.random.choice(k3, x_b.shape[0], (batch_b,), replace=False)
+                idx_r = jax.random.choice(k1, xy_r.shape[0], (batch_r,), replace=False)
+                idx_b = jax.random.choice(k2, xy_b.shape[0], (batch_b,), replace=False)
 
-                self.params, self.state, loss, pde_l, ic_l, bc_l, reg_l = self._step(
-                    self.params,
-                    self.state,
-                    x_r[idx_r], t_r[idx_r],
-                    x_i[idx_i], u_i[idx_i],
-                    x_b[idx_b], t_b[idx_b], u_b[idx_b],
+                self.params, self.state, loss, pde_l, bc_l = self._step(
+                    self.params, self.state,
+                    xy_r[idx_r], xy_b[idx_b], u_b[idx_b],
                 )
 
                 self.loss_hist.append(float(loss))
                 self.pde_hist.append(float(pde_l))
-                self.ic_hist.append(float(ic_l))
                 self.bc_hist.append(float(bc_l))
-                self.reg_hist.append(float(reg_l))
 
                 logs = {
                     "loss": float(loss),
                     "pde": float(pde_l),
-                    "ic": float(ic_l),
                     "bc": float(bc_l),
                 }
 
-                if not callbacks and ep % 10 == 0:
+                if not callbacks and ep % log_every == 0:
                     elapsed = time.time() - start
                     print(
-                        f"Epoch {ep:5d} | "
-                        f"Loss {float(loss):.3e} | "
-                        f"PDE {float(pde_l):.3e} | "
-                        f"IC {float(ic_l):.3e} | "
-                        f"BC {float(bc_l):.3e} | "
+                        f"Epoch {ep:5d} | Loss {float(loss):.3e} | "
+                        f"PDE {float(pde_l):.3e} | BC {float(bc_l):.3e} | "
                         f"Time {elapsed:.2f}s"
                     )
 
@@ -133,7 +118,6 @@ class FBPINNSolver(BaseSolver):
         final_logs = {
             "loss": self.loss_hist[-1] if self.loss_hist else float("nan"),
             "pde": self.pde_hist[-1] if self.pde_hist else float("nan"),
-            "ic": self.ic_hist[-1] if self.ic_hist else float("nan"),
             "bc": self.bc_hist[-1] if self.bc_hist else float("nan"),
         }
         for cb in callbacks:
@@ -160,16 +144,16 @@ class FBPINNSolver(BaseSolver):
         opt = self.opt
 
         @jax.jit
-        def step(params, state, x_r, t_r, x_i, u_i, x_b, t_b, u_b):
+        def step(params, state, xy_r, xy_b, u_b):
             def objective(p):
-                return loss_fn(p, x_r, t_r, x_i, u_i, x_b, t_b, u_b)
+                return loss_fn(p, xy_r, xy_b, u_b)
 
-            (loss, (pde_l, ic_l, bc_l, reg_l)), grads = jax.value_and_grad(
+            (loss, (pde_l, bc_l, reg_l)), grads = jax.value_and_grad(
                 objective, has_aux=True
             )(params)
 
             updates, state = opt.update(grads, state)
             params = optax.apply_updates(params, updates)
-            return params, state, loss, pde_l, ic_l, bc_l, reg_l
+            return params, state, loss, pde_l, bc_l
 
         return step

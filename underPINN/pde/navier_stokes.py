@@ -1,7 +1,9 @@
 import jax
 import jax.numpy as jnp
+from underPINN.core.base import BasePDE
 
-class NavierStokesPDE:
+
+class NavierStokesPDE(BasePDE):
     def __init__(self, model, Re=100.0):
         self.model = model
         self.Re = Re

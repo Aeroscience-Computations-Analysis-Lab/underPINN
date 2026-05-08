@@ -30,7 +30,7 @@ class DotProductAttention(nn.Module):
         self.scale = self.dim ** -0.5
         self.q = nn.Dense(self.dim)
         self.k = nn.Dense(self.dim)
-        self.v = nn.Dense(self.dim)
+        self.v = nn.Dense(self.dim)                                         
         self.norm = nn.LayerNorm()
 
     def __call__(self, x, U, V):

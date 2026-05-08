@@ -1,5 +1,7 @@
 import jax.numpy as jnp
 import jax
+from underPINN.core.base import BaseLoss
+
 
 def l2_loss(x):
     return jnp.mean(x ** 2)
@@ -18,7 +20,7 @@ def weight_l2(params):
     ])
     return jnp.mean(leaves ** 2)
 
-class PINNLoss:
+class PINNLoss(BaseLoss):
     def __init__(
         self,
         model,
@@ -51,11 +53,15 @@ class PINNLoss:
         res = self.pde.residual(params, x_r, t_r) # NOTE: MULTI OUTPUT SUPPORT NEEDED
 
         if self.rba:
-            # Residual-based adaptivity (detach weights)
+            # Residual-based adaptivity: weight each point by its relative
+            # residual magnitude (detached so it doesn't affect the gradient
+            # direction, only the step size per collocation point).
+            # Bug fix: must weight individual squared residuals (element-wise),
+            # not multiply the already-reduced scalar norm — that made RBA a no-op.
             w = jax.lax.stop_gradient(
                 jnp.abs(res) / (jnp.mean(jnp.abs(res)) + self.rba_eps)
             )
-            pde_loss = jnp.mean(w * self.norm(res))
+            pde_loss = jnp.mean(w * res ** 2)
         else:
             pde_loss = self.norm(res)
 

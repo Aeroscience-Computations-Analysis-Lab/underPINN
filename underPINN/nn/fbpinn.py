@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 from flax import linen as nn
 from .subdomain import SubdomainNetwork
+from .attention import HybridAttention
 
 
 def window_1d(x, xmin, xmax, smin, smax):
@@ -21,9 +22,13 @@ class FBPINN(nn.Module):
     xs_max: jnp.ndarray
     smins: jnp.ndarray
     smaxs: jnp.ndarray
+    attention_cls: callable = HybridAttention
 
     def setup(self):
-        self.subnets = [SubdomainNetwork(self.layers) for _ in range(self.shifts.shape[0])]
+        self.subnets = [
+            SubdomainNetwork(self.layers, attention_cls=self.attention_cls)
+            for _ in range(self.shifts.shape[0])
+        ]
 
     def __call__(self, x):
         out = 0.0
