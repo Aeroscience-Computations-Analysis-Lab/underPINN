@@ -29,6 +29,58 @@ from typing import List, Optional
 
 
 # =============================================================================
+#  Lightweight per-run tracker  (used by standalone example scripts)
+# =============================================================================
+
+class BenchmarkTracker:
+    """Minimal wall-clock tracker for standalone example scripts.
+
+    Usage::
+
+        tracker = BenchmarkTracker()
+        tracker.start()
+        # ... training ...
+        tracker.stop()
+        tracker.log("epochs", 5000)
+        tracker.save(case_name="LDC", framework="JAX")
+    """
+
+    def __init__(self):
+        self._t0: float = 0.0
+        self._elapsed: float = 0.0
+        self._logs: dict = {}
+
+    def start(self) -> None:
+        self._t0 = time.time()
+
+    def stop(self) -> float:
+        self._elapsed = time.time() - self._t0
+        return self._elapsed
+
+    def log(self, key: str, value) -> None:
+        self._logs[key] = value
+
+    def save(self, case_name: str = "run", framework: str = "",
+             path: str = "benchmark_log.json") -> None:
+        entry = {
+            "case":      case_name,
+            "framework": framework,
+            "wall_s":    round(self._elapsed, 3),
+            **self._logs,
+        }
+        existing: list = []
+        if os.path.exists(path):
+            try:
+                with open(path) as f:
+                    existing = json.load(f)
+            except (json.JSONDecodeError, ValueError):
+                pass
+        with open(path, "w") as f:
+            json.dump(existing + [entry], f, indent=2)
+        print(f"BenchmarkTracker: {case_name} — {self._elapsed:.1f}s → {path}")
+
+
+# =============================================================================
 #  Data record
 # =============================================================================
 
