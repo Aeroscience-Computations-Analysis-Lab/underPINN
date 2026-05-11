@@ -31,6 +31,7 @@ from underPINN.solver.steady_solver import SteadySolver
 from underPINN.core.config import TrainingConfig
 from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.callbacks.early_stopping import EarlyStopping
+from underPINN.utils.io import save_predictions
 
 
 # ---- Hyper-parameters ----
@@ -146,6 +147,16 @@ def main():
     plt.close(fig2)
 
     print("Plots saved: helmholtz_solution.png, helmholtz_loss.png")
+
+    # ---- Save predictions at collocation points ----
+    u_pred_r  = model.apply(solver.params, xy_r)[:, 0]
+    u_exact_r = pde.exact(xy_r)
+    save_predictions(
+        ".",
+        coords  = {"x": np.array(xy_r[:, 0]), "y": np.array(xy_r[:, 1])},
+        outputs = {"u_pred": u_pred_r},
+        exact   = {"u_exact": u_exact_r},
+    )
 
 
 if __name__ == "__main__":

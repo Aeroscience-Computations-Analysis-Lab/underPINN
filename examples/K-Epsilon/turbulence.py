@@ -13,6 +13,7 @@ from underPINN.pde.k_epsilon import KEpsilonPDE
 from underPINN.solver.rans_solver import RANSSolver, RANSInputWrapper
 
 from underPINN.benchmark_utils.benchmark_suite import BenchmarkTracker
+from underPINN.utils.io import save_predictions
 
 # -------------------------------------------------------------------
 # 1. Custom Geometry Helper 
@@ -242,6 +243,19 @@ def main():
     tracker.stop()
     tracker.log("epochs", 10)
     tracker.save(case_name="Turbulence", framework="JAX")
+
+    # F. Save predictions at interior collocation points
+    pred_col = np.array(model.apply(final_params, jnp.array(x_col)))
+    save_predictions(
+        ".",
+        coords  = {"x": x_col[:, 0].astype(np.float32),
+                   "y": x_col[:, 1].astype(np.float32)},
+        outputs = {"u_pred":   pred_col[:, 0],
+                   "v_pred":   pred_col[:, 1],
+                   "p_pred":   pred_col[:, 2],
+                   "k_pred":   pred_col[:, 3],
+                   "eps_pred": pred_col[:, 4]},
+    )
 
 """     # F. Prediction & Plotting
     # 1. Save Parameters

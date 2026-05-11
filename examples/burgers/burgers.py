@@ -22,6 +22,7 @@ from underPINN.utils.plotting import (
 )
 
 from underPINN.utils.serialization import save_prediction_npz
+from underPINN.utils.io import save_predictions
 
 
 def make_data(domain, n_collocation=80000, n_ic=1000, seed=42):
@@ -147,7 +148,17 @@ def main():
         config=config,
     )
 
-    # ---- Predictions ----
+    # ---- Predictions at collocation points ----
+    pts_r    = jnp.stack([x_r, t_r], axis=1)
+    u_pred_r = model.apply(solver.params, pts_r)[:, 0]
+    save_predictions(
+        ".",
+        coords  = {"x": x_r, "t": t_r},
+        outputs = {"u_pred": u_pred_r},
+        filename = "predictions_collocation.npz",
+    )
+
+    # ---- Predictions on uniform grid ----
     x_pred, t_pred, x_grid, t_grid = make_prediction_grid()
 
     save_prediction_npz(

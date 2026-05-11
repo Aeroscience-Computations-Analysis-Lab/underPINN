@@ -30,6 +30,7 @@ from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.callbacks.early_stopping import EarlyStopping
 from underPINN.utils.metrics import print_errors
 from underPINN.utils.plotting import plot_ode_result
+from underPINN.utils.io import save_predictions
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +80,15 @@ def test_exponential_decay():
         solver.loss_hist, solver.pde_hist, solver.ic_hist,
         title=f"Exponential Decay: du/dt + {LAM}u = 0",
         filename="ode_exponential_decay.png",
+    )
+
+    # Save predictions at collocation points
+    save_predictions(
+        ".",
+        coords  = {"t": t_r},
+        outputs = {"u_pred": pde.u(solver.params, t_r)},
+        exact   = {"u_exact": pde.exact(t_r)},
+        filename="predictions_exp_decay.npz",
     )
 
     return float(jnp.sqrt(jnp.mean((u_pred - u_exact) ** 2)) / jnp.sqrt(jnp.mean(u_exact ** 2)))
@@ -132,6 +142,15 @@ def test_harmonic_oscillator():
         solver.loss_hist, solver.pde_hist, solver.ic_hist,
         title=f"Harmonic Oscillator: d²u/dt² + {OMEGA**2:.0f}u = 0",
         filename="ode_harmonic_oscillator.png",
+    )
+
+    # Save predictions at collocation points
+    save_predictions(
+        ".",
+        coords  = {"t": t_r},
+        outputs = {"u_pred": pde.u(solver.params, t_r)},
+        exact   = {"u_exact": pde.exact(t_r)},
+        filename="predictions_harmonic.npz",
     )
 
     return float(jnp.sqrt(jnp.mean((u_pred - u_exact) ** 2)) / jnp.sqrt(jnp.mean(u_exact ** 2)))

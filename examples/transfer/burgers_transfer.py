@@ -51,6 +51,7 @@ from underPINN.solver.fbpinn import FBPINNSolver
 from underPINN.core.config import TrainingConfig
 from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.callbacks.early_stopping import EarlyStopping
+from underPINN.utils.io import save_predictions
 
 
 # ── Architecture (shared across all runs) ──────────────────────────────────
@@ -201,6 +202,19 @@ def run_parameter_transfer():
     plt.close(fig2)
     print("Saved: transfer_param_soln.png")
 
+    # ── Save predictions at collocation points ───────────────────────────────
+    x_r, t_r = data_tgt[0], data_tgt[1]
+    pts_r = jnp.stack([x_r, t_r], axis=1)
+    for label, model_, solver_ in [("transfer", model_tf, solver_tf),
+                                   ("scratch",  model_sc, solver_sc)]:
+        u_pred_r = model_.apply(solver_.params, pts_r)[:, 0]
+        save_predictions(
+            ".",
+            coords  = {"x": x_r, "t": t_r},
+            outputs = {"u_pred": u_pred_r},
+            filename=f"predictions_burgers_param_{label}.npz",
+        )
+
     tf_final = solver_tf.loss_hist[-1]
     sc_final = solver_sc.loss_hist[-1]
     print(f"\nFinal loss — Transfer: {tf_final:.3e}  |  Scratch: {sc_final:.3e}")
@@ -286,6 +300,19 @@ def run_temporal_transfer():
     fig2.savefig("transfer_temporal_soln.png", dpi=150, bbox_inches="tight")
     plt.close(fig2)
     print("Saved: transfer_temporal_soln.png")
+
+    # ── Save predictions at collocation points ───────────────────────────────
+    x_r, t_r = data_p2[0], data_p2[1]
+    pts_r = jnp.stack([x_r, t_r], axis=1)
+    for label, model_, solver_ in [("transfer", model_p2, solver_p2),
+                                   ("scratch",  model_sc, solver_sc)]:
+        u_pred_r = model_.apply(solver_.params, pts_r)[:, 0]
+        save_predictions(
+            ".",
+            coords  = {"x": x_r, "t": t_r},
+            outputs = {"u_pred": u_pred_r},
+            filename=f"predictions_burgers_temporal_{label}.npz",
+        )
 
 
 # ---------------------------------------------------------------------------

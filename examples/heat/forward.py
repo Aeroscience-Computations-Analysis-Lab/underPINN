@@ -36,6 +36,7 @@ from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.callbacks.early_stopping import EarlyStopping
 from underPINN.utils.metrics import print_errors
 from underPINN.utils.plotting import plot_2d_comparison
+from underPINN.utils.io import save_predictions
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +143,16 @@ def main():
         ny=NY,
         title="2-D Steady Heat (Poisson): ∇²u = -2π²sin(πx)sin(πy)",
         filename="heat_poisson_result.png",
+    )
+
+    # -- Save predictions at collocation (interior residual) points ----------
+    u_pred_r  = pde.u(solver.params, xy_r)
+    u_exact_r = pde.exact(xy_r)
+    save_predictions(
+        ".",
+        coords  = {"x": np.array(xy_r[:, 0]), "y": np.array(xy_r[:, 1])},
+        outputs = {"u_pred": u_pred_r},
+        exact   = {"u_exact": u_exact_r},
     )
 
     # -- Pass/Fail -----------------------------------------------------------
