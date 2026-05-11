@@ -1,0 +1,40 @@
+# Sweep over viscosity ν for the 1-D Burgers equation.
+# Generates 4 runs × 1 = 4 experiments.
+#
+# Usage:
+#   python -m underPINN sweep configs/sweeps/burgers_nu_sweep.yaml
+
+base:
+  problem: burgers
+
+  network:
+    type  : mlp
+    layers: [2, 64, 64, 64, 1]
+
+  data:
+    T            : 2.0
+    n_collocation: 6000
+    n_ic         : 200
+    n_bc         : 300
+
+  training:
+    epochs                 : 5000
+    lr                     : 1.0e-3
+    lr_alpha               : 0.01
+    batch_r                : 2048
+    batch_i                : 256
+    batch_b                : 256
+    log_every              : 500
+    early_stopping_patience: 400
+    seed                   : 0
+
+  loss:
+    ic_weight: 100.0
+    bc_weight: 10.0
+    rba      : true
+
+  output:
+    dir: outputs/sweeps/burgers_nu    # sub-dirs run_000..run_003 added automatically
+
+sweep:
+  physics.nu: [0.1, 0.05, 0.025, 0.01]

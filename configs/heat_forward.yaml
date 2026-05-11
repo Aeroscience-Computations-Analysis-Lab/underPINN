@@ -1,0 +1,32 @@
+problem: heat_forward   # run via:  python examples/heat/forward.py
+
+network:
+  type  : mlp
+  layers: [2, 64, 64, 64, 1]
+
+physics:
+  alpha: 0.01     # thermal diffusivity
+
+data:
+  T            : 1.0
+  n_collocation: 5000
+  n_ic         : 200
+  n_bc         : 300
+
+training:
+  epochs   : 5000
+  lr       : 1.0e-3
+  lr_alpha : 0.01
+  batch_r  : 2048
+  batch_i  : 256
+  batch_b  : 256
+  log_every: 500
+  seed     : 0
+
+loss:
+  ic_weight: 100.0
+  bc_weight: 10.0
+  rba      : true
+
+output:
+  dir: outputs/heat_forward

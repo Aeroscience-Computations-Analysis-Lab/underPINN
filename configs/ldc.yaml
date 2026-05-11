@@ -1,0 +1,31 @@
+problem: ldc   # run via:  python "examples/Lid Driven Cavity/run_ldc.py"
+               # (LDCSolver runner not yet registered; use example script directly)
+
+network:
+  type      : fbpinn
+  layers    : [2, 64, 64, 64, 64, 3]   # (x,y) → (u,v,p)
+  attention : simple_gate               # simple_gate | hybrid_attention
+
+physics:
+  Re: 100.0
+
+data:
+  n_collocation: 8000
+  n_bc         : 800    # total boundary points (all four walls)
+
+training:
+  epochs   : 5000
+  lr       : 1.0e-3
+  lr_alpha : 0.01
+  batch_r  : 2048
+  batch_b  : 256
+  log_every: 500
+  seed     : 0
+
+loss:
+  w_pde   : 1.0
+  w_bc    : 100.0
+  w_lid   : 50.0    # extra weight on the moving top lid (u=1, v=0)
+
+output:
+  dir: outputs/ldc

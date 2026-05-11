@@ -1,0 +1,50 @@
+problem: pipe_flow_unsteady_transfer
+# run via:  python examples/pipe_flow/pipe_flow_unsteady_transfer.py
+
+network:
+  layers: [3, 64, 64, 64, 64, 1]   # (y,z,t) → u
+
+physics:
+  R    : 0.5
+  U_max: 1.0
+
+# ── Strategy 1 — Re Transfer ─────────────────────────────────────────────────
+re_transfer:
+  source_Re: 10.0
+  target_Re: 50.0
+  T        : 3.0
+  n_source_epochs  : 2500
+  n_transfer_epochs: 2000
+  n_scratch_epochs : 4500
+  source_lr  : 1.0e-3
+  transfer_lr: 3.0e-4
+  scratch_lr : 1.0e-3
+
+# ── Strategy 2 — Temporal Transfer ───────────────────────────────────────────
+temporal_transfer:
+  Re  : 10.0
+  T1  : 1.0     # phase-1 horizon
+  T2  : 3.0     # extended horizon
+  n_phase1_epochs  : 2500
+  n_transfer_epochs: 2000
+  n_scratch_epochs : 4500
+  phase1_lr  : 1.0e-3
+  transfer_lr: 3.0e-4
+  scratch_lr : 1.0e-3
+
+# ── Data sampling ─────────────────────────────────────────────────────────────
+data:
+  n_collocation: 6000
+  n_ic         : 600
+  n_bc         : 800
+  batch_r      : 512
+  batch_ic     : 200
+  batch_bc     : 200
+
+loss:
+  w_pde: 1.0
+  w_ic : 100.0
+  w_bc : 50.0
+
+output:
+  dir: outputs/pipe_flow_unsteady_transfer

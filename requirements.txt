@@ -1,0 +1,7 @@
+jax[cpu]
+flax
+optax
+pyyaml
+matplotlib
+scipy
+numpy

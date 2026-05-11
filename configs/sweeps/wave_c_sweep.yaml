@@ -1,0 +1,40 @@
+# Sweep over wave speed c and FourierMLP sigma for the 1-D wave equation.
+# Generates 3 × 2 = 6 experiments (sigma should track c·π).
+#
+# Usage:
+#   python -m underPINN sweep configs/sweeps/wave_c_sweep.yaml
+
+base:
+  problem: wave
+
+  network:
+    layers   : [2, 64, 64, 64, 1]
+    n_fourier: 16
+
+  data:
+    T            : 2.0
+    n_collocation: 6000
+    n_ic         : 300
+    n_bc         : 300
+
+  training:
+    epochs   : 8000
+    lr       : 1.0e-3
+    lr_alpha : 0.01
+    batch_r  : 2048
+    batch_i  : 256
+    batch_b  : 256
+    log_every: 1000
+    seed     : 0
+
+  loss:
+    ic_weight    : 100.0
+    ic_dot_weight: 100.0
+    bc_weight    : 10.0
+
+  output:
+    dir: outputs/sweeps/wave_c   # sub-dirs added automatically
+
+sweep:
+  physics.c         : [0.5, 1.0, 2.0]
+  network.sigma     : [1.6, 3.14]   # π/2 and π (coarse vs exact tuning)

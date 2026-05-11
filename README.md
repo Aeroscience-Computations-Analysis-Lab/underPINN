@@ -14,17 +14,113 @@ underPINN is a research-grade PINN engine that combines classical collocation-ba
 - **Attention networks** — Hybrid attention and gated residual blocks inside each subdomain
 - **FourierMLP** — Trainable random Fourier feature embeddings for oscillatory solutions (Helmholtz, wave)
 - **Residual-based adaptivity (RBA)** — Element-wise loss weighting that focuses training on high-residual regions
+- **RAR-D adaptive resampling** — Periodically replaces collocation points proportionally to `|residual|^k`, focusing compute on high-error regions (Lu et al., 2021)
+- **`lax.scan` training loop** — Fuses N gradient steps into a single XLA kernel, eliminating Python overhead between epochs (50–500× less dispatch overhead on GPU)
 - **Transfer learning** — `load_params` warm-start for parameter transfer (different Re) and temporal transfer (extended time horizon)
 - **Inverse problems** — Joint optimisation of network weights + physics parameters (e.g. recover thermal diffusivity from sparse noisy observations)
 - **Callbacks** — `ConsoleLogger`, `EarlyStopping`, pluggable via `TrainingConfig`
 - **3-D problems** — Full 3-D Navier-Stokes with double-`jacfwd` Hessians, cylindrical pipe geometry
+- **Benchmark suite** — systematic accuracy vs. epoch budget comparisons across all examples with one command, producing accuracy plots, convergence grids, CSV tables, and a Markdown report
+- **YAML-driven experiments** — every hyperparameter lives in a config file; no code changes needed to sweep
 - **GPU / multi-GPU** — Pure JAX/XLA; runs on CPU, single GPU, or multi-GPU with no code changes
+
+---
+
+## CLI — YAML-driven experiments
+
+Run any experiment or hyperparameter sweep without touching Python code:
+
+```bash
+# Single experiment
+python -m underPINN run  configs/burgers.yaml
+python -m underPINN run  configs/pipe_flow.yaml
+
+# Hyperparameter sweep (Cartesian product)
+python -m underPINN sweep configs/sweeps/burgers_nu_sweep.yaml
+python -m underPINN sweep configs/sweeps/pipe_flow_re_sweep.yaml
+
+# Inspect a config (no training)
+python -m underPINN show configs/wave.yaml
+
+# List registered runners
+python -m underPINN list
+```
+
+### Config file anatomy
+
+```yaml
+problem: burgers        # selects the runner
+
+network:
+  type  : mlp           # mlp | fourier_mlp
+  layers: [2, 64, 64, 64, 1]
+
+physics:
+  nu: 0.01              # PDE parameters
+
+data:
+  T: 2.0
+  n_collocation: 6000
+
+training:
+  epochs: 5000
+  lr    : 1.0e-3
+  early_stopping_patience: 400
+
+loss:
+  ic_weight: 100.0
+  rba      : true
+
+output:
+  dir: outputs/burgers  # results, loss curve, and resolved config saved here
+```
+
+### Sweep file anatomy
+
+```yaml
+base:                           # shared config for all runs
+  problem: burgers
+  ...
+
+sweep:                          # dot-separated key → list of values
+  physics.nu       : [0.1, 0.05, 0.025, 0.01]
+  training.epochs  : [3000, 5000]
+```
+
+Each run gets its own sub-directory (`outputs/…/run_000`, `run_001`, …) with a saved `config.yaml` for full reproducibility. Pre-built sweep configs are in `configs/sweeps/`.
 
 ---
 
 ## Repository Structure
 
 ```
+underPINN/
+├── config/
+│   └── loader.py          # load_config, generate_sweep_configs, cfg_get, merge_config
+├── runner/
+│   ├── dispatch.py        # problem → runner registry
+│   ├── burgers.py         # runner: 1-D Burgers
+│   ├── wave.py            # runner: 1-D wave
+│   └── pipe_flow.py       # runner: 3-D pipe flow
+├── __main__.py            # CLI entry point (python -m underPINN)
+│
+configs/                   # ready-to-run YAML configs for every example
+├── burgers.yaml
+├── wave.yaml
+├── helmholtz.yaml
+├── heat_forward.yaml
+├── heat_inverse.yaml
+├── ldc.yaml
+├── airfoil.yaml
+├── pipe_flow.yaml
+├── pipe_flow_unsteady_transfer.yaml
+├── burgers_transfer.yaml
+├── ode.yaml
+└── sweeps/
+    ├── burgers_nu_sweep.yaml
+    ├── pipe_flow_re_sweep.yaml
+    └── wave_c_sweep.yaml
+
 underPINN/
 ├── core/
 │   ├── base.py            # BasePDE, BaseLoss, BaseSolver abstract classes
@@ -74,6 +170,14 @@ underPINN/
 │   ├── base.py            # Callback ABC
 │   ├── logging.py         # ConsoleLogger
 │   └── early_stopping.py  # EarlyStopping
+│
+├── training/
+│   └── resample.py        # rar_d_resample  (RAR-D adaptive collocation)
+│
+├── benchmark_utils/
+│   ├── evaluators.py      # per-problem evaluators with exact solutions
+│   ├── benchmark_suite.py # BenchmarkResult, BenchmarkRunner
+│   └── report.py          # plots, CSV, Markdown report generation
 │
 └── utils/
     ├── plotting.py        # plot_losses, plot_ode_result
@@ -171,9 +275,151 @@ solver_tgt.train(*data_tgt, config=cfg_tgt) # fine-tune at lower lr
 
 ---
 
+## Benchmark Suite
+
+Systematically compare accuracy vs. epoch budget across all problems with a single command:
+
+```bash
+# Run all fast problems with default epoch budgets [500, 1000, 2000, 5000]
+python -m underPINN bench
+
+# Select specific problems and budgets
+python -m underPINN bench \
+    --problems burgers wave helmholtz heat_steady ode_exp ode_harmonic \
+    --epochs 500 1000 2000 5000 \
+    --output outputs/bench
+
+# Include slow problems (3-D pipe flow with double-Hessians)
+python -m underPINN bench --all
+
+# Regenerate plots from a previous run without re-training
+python -m underPINN bench --from-json outputs/bench/results.json
+
+# List available evaluators
+python -m underPINN bench --list-problems
+```
+
+### Outputs written to `outputs/bench/`
+
+| File | Description |
+|---|---|
+| `accuracy_vs_epochs.png` | Log-log rel-L² vs epoch budget, one line per problem |
+| `accuracy_summary_bar.png` | Grouped bar chart of rel-L² at each epoch budget |
+| `wall_time_vs_epochs.png` | Training time vs epoch budget |
+| `ms_per_epoch.png` | Bar chart of training throughput per problem |
+| `loss_grid.png` | Convergence curves for each problem |
+| `benchmark_results.csv` | Full raw data table |
+| `benchmark_summary.md` | Markdown table (one row per problem at max epochs) |
+| `results.json` | Reusable JSON for `--from-json` replays |
+| `loss_hists.npz` | Per-problem loss histories as NumPy arrays |
+
+### Programmatic use
+
+```python
+from underPINN.benchmark_utils import BenchmarkRunner, generate_report
+
+runner = BenchmarkRunner(
+    problems=["burgers", "wave", "ode_exp"],
+    epoch_budgets=[500, 1000, 2000, 5000],
+    seed=0,
+    fast_only=True,   # exclude 3-D pipe flow
+    verbose=True,
+)
+results = runner.run()
+runner.save_json("outputs/bench/results.json")
+generate_report(results, runner, out_dir="outputs/bench")
+```
+
+### Evaluators with exact solutions
+
+| Problem | Exact solution | Metric |
+|---|---|---|
+| 1-D Burgers | RK45 upwind FD reference | rel-L² at t ∈ {0.5, 0.75, 1.0, 1.25, 1.5} |
+| 1-D Wave | `sin(πx) cos(cπt)` | rel-L² on 100×100 grid |
+| 2-D Helmholtz | `sin(πx) sin(πy)` | rel-L² on 50×50 grid |
+| 2-D Steady Heat | `sin(πx) sin(πy)` | rel-L² on 50×50 grid |
+| ODE Exp Decay | `exp(−λt)` | rel-L² on 1000 time points |
+| ODE Harmonic | `cos(ωt)` | rel-L² on 1000 time points |
+| 3-D Pipe Flow | Hagen-Poiseuille | rel-L² on 2000 interior points |
+
+---
+
+## Performance
+
+### `lax.scan` — eliminating Python loop overhead
+
+By default each gradient step makes one Python call into XLA.  On GPU this
+dispatch overhead can dominate wall time for small networks.  Setting
+`n_scan_steps > 1` fuses that many steps into a single compiled kernel:
+
+```python
+config = TrainingConfig(
+    epochs       = 5000,
+    lr           = 1e-3,
+    n_scan_steps = 100,   # 50 outer Python calls instead of 5000
+    callbacks    = [ConsoleLogger(log_every=500)],
+)
+solver.train(*data, config=config)
+```
+
+Callbacks and logging still fire, but only every `n_scan_steps` epochs.
+Works for both `FBPINNSolver` and `ODESolver`.
+
+| `n_scan_steps` | Python calls | Callback granularity |
+|:-:|:-:|:-:|
+| 1 (default) | 5000 | every epoch |
+| 100 | 50 | every 100 epochs |
+| 500 | 10 | every 500 epochs |
+
+### RAR-D — adaptive collocation resampling
+
+Residual-based Adaptive Distribution resampling (Lu et al., 2021) periodically
+replaces collocation points with new ones drawn from high-residual regions,
+allocating more "training budget" where the PDE is hardest to satisfy:
+
+```python
+config = TrainingConfig(
+    epochs              = 5000,
+    lr                  = 1e-3,
+    n_scan_steps        = 100,
+    resample_period     = 5,    # resample every 5 outer steps (= 500 epochs)
+    resample_candidates = 0,    # 0 → auto (5 × batch_r candidate pool)
+    resample_k          = 1.0,  # p ∝ |residual|^k
+)
+solver.train(*data, config=config)
+```
+
+You can also supply a custom domain sampler so candidates are drawn uniformly
+from the geometry instead of by bootstrap:
+
+```python
+from underPINN.training.resample import rar_d_resample
+
+# Standalone call (e.g. inside a custom training loop)
+x_r, t_r = rar_d_resample(
+    pde, params, x_r, t_r,
+    k=1.0,
+    n_candidates=30_000,
+    candidate_sampler=lambda n, key: my_geometry.sample(n, key),
+    key=jax.random.PRNGKey(42),
+)
+```
+
+RAR-D and `lax.scan` compose naturally — resampling fires between outer steps,
+while the inner XLA kernel handles the fast gradient loop.
+
+---
+
 ## Quick Start
 
-### 1-D Burgers equation
+### Using the CLI (recommended)
+
+```bash
+# edit configs/burgers.yaml, then:
+python -m underPINN run configs/burgers.yaml
+```
+
+### Programmatic usage
 
 ```python
 import jax, optax

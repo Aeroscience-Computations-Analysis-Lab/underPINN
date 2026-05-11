@@ -1,0 +1,35 @@
+problem: ode   # run via:  python examples/ode/ode_test.py
+
+network:
+  layers: [1, 64, 64, 64, 1]
+
+# ── Exponential decay  du/dt = -λu ───────────────────────────────────────────
+exponential_decay:
+  lambda: 1.0
+  T     : 5.0
+  u0    : 1.0
+
+# ── Harmonic oscillator  u'' + ω²u = 0 ───────────────────────────────────────
+harmonic_oscillator:
+  omega: 2.0
+  T    : 10.0
+  u0   : 1.0
+  v0   : 0.0   # initial velocity
+
+data:
+  n_collocation: 3000
+  n_ic         : 1
+
+training:
+  epochs                 : 3000
+  lr                     : 1.0e-3
+  lr_alpha               : 0.01
+  log_every              : 500
+  early_stopping_patience: 200
+  seed                   : 0
+
+loss:
+  ic_weight: 100.0
+
+output:
+  dir: outputs/ode

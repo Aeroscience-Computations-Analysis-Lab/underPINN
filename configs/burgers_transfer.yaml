@@ -1,0 +1,47 @@
+problem: burgers_transfer
+# run via:  python examples/transfer/burgers_transfer.py
+
+network:
+  layers: [2, 64, 64, 64, 64, 1]
+
+physics:
+  T: 2.0
+
+# ── Strategy 1 — Parameter Transfer (different ν) ────────────────────────────
+parameter_transfer:
+  source_nu : 0.05
+  target_nu : 0.01
+  n_source_epochs  : 2000
+  n_transfer_epochs: 2000
+  n_scratch_epochs : 4000
+  source_lr  : 1.0e-3
+  transfer_lr: 3.0e-4
+  scratch_lr : 1.0e-3
+
+# ── Strategy 2 — Temporal Transfer ───────────────────────────────────────────
+temporal_transfer:
+  nu  : 0.01
+  T1  : 1.0    # phase-1 horizon
+  T2  : 2.0    # extended horizon
+  n_phase1_epochs  : 2000
+  n_transfer_epochs: 2000
+  n_scratch_epochs : 4000
+  phase1_lr  : 1.0e-3
+  transfer_lr: 3.0e-4
+  scratch_lr : 1.0e-3
+
+data:
+  n_collocation: 6000
+  n_ic         : 200
+  n_bc         : 300
+  batch_r      : 2048
+  batch_i      : 256
+  batch_b      : 256
+
+loss:
+  ic_weight: 100.0
+  bc_weight: 10.0
+  rba      : true
+
+output:
+  dir: outputs/burgers_transfer

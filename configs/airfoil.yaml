@@ -1,0 +1,41 @@
+problem: airfoil   # run via:  python examples/airfoil/airfoil_flow.py
+
+network:
+  type  : mlp
+  layers: [2, 128, 128, 128, 128, 3]   # (x,y) → (u,v,p)
+
+physics:
+  Re    : 200.0
+  aoa   : 5.0     # angle of attack in degrees
+  naca  : "0012"  # 4-digit NACA profile
+  chord : 1.0
+
+domain:
+  xmin: -5.0
+  xmax: 15.0
+  ymin: -8.0
+  ymax:  8.0
+
+data:
+  n_exterior    : 40000   # uniform exterior collocation
+  n_near_surface: 10000   # near-body refinement
+  n_body_bc     : 2000    # no-slip wall points
+  n_farfield_bc : 1600    # farfield boundary (400 per edge)
+
+training:
+  epochs   : 10000
+  lr       : 1.0e-3
+  lr_alpha : 0.01
+  batch_r  : 2048
+  batch_bc : 512
+  log_every: 1000
+  seed     : 0
+
+loss:
+  w_pde   : 1.0
+  w_body  : 50.0
+  w_ff    : 10.0
+  w_pref  : 10.0    # pressure gauge (p=0 at farfield reference point)
+
+output:
+  dir: outputs/airfoil

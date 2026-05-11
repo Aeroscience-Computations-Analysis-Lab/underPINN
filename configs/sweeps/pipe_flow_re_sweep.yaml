@@ -1,0 +1,43 @@
+# Sweep over Reynolds number for 3-D steady pipe flow.
+# Generates 4 runs.
+#
+# Usage:
+#   python -m underPINN sweep configs/sweeps/pipe_flow_re_sweep.yaml
+
+base:
+  problem: pipe_flow
+
+  network:
+    layers: [3, 64, 64, 64, 64, 4]
+
+  physics:
+    R    : 0.5
+    L    : 2.0
+    U_max: 1.0
+
+  data:
+    n_interior: 5000
+    n_wall    : 1500
+    n_inlet   : 400
+    n_outlet  : 400
+
+  training:
+    epochs   : 5000
+    lr       : 1.0e-3
+    lr_alpha : 0.01
+    batch_r  : 256
+    batch_bc : 128
+    log_every: 500
+    seed     : 0
+
+  loss:
+    w_pde   : 1.0
+    w_wall  : 100.0
+    w_inlet : 50.0
+    w_outlet: 20.0
+
+  output:
+    dir: outputs/sweeps/pipe_flow_re   # sub-dirs added automatically
+
+sweep:
+  physics.Re: [1.0, 5.0, 10.0, 50.0]

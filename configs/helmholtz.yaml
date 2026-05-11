@@ -1,0 +1,30 @@
+problem: helmholtz   # run via:  python examples/helmholtz/helmholtz.py
+
+network:
+  type     : fourier_mlp
+  layers   : [2, 128, 128, 128, 1]
+  n_fourier: 32
+  sigma    : 4.0   # set ≈ k for best frequency coverage
+
+physics:
+  k: 4.0           # wavenumber  (Δu + k²u = f)
+
+data:
+  n_collocation: 8000
+  n_bc         : 600   # per edge (4 edges total)
+
+training:
+  epochs   : 10000
+  lr       : 1.0e-3
+  lr_alpha : 0.01
+  batch_r  : 2048
+  batch_b  : 256
+  log_every: 1000
+  seed     : 0
+
+loss:
+  bc_weight: 100.0
+  rba      : true
+
+output:
+  dir: outputs/helmholtz

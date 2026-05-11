@@ -1,0 +1,33 @@
+problem: wave
+
+network:
+  layers   : [2, 64, 64, 64, 1]
+  n_fourier: 16
+  sigma    : 3.14   # ≈ π*c for c=1
+
+physics:
+  c: 1.0            # wave speed
+
+data:
+  T            : 2.0
+  n_collocation: 6000
+  n_ic         : 300
+  n_bc         : 300
+
+training:
+  epochs   : 8000
+  lr       : 1.0e-3
+  lr_alpha : 0.01
+  batch_r  : 2048
+  batch_i  : 256
+  batch_b  : 256
+  log_every: 500
+  seed     : 0
+
+loss:
+  ic_weight    : 100.0
+  ic_dot_weight: 100.0   # weight on u_t(x,0) = 0
+  bc_weight    : 10.0
+
+output:
+  dir: outputs/wave

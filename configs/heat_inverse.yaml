@@ -1,0 +1,35 @@
+problem: heat_inverse   # run via:  python examples/heat/inverse.py
+
+network:
+  type  : mlp
+  layers: [2, 64, 64, 64, 1]
+
+physics:
+  alpha_true : 0.01     # true (hidden) diffusivity
+  alpha_init : 0.10     # initial guess for inverse recovery
+  noise_level: 0.01     # relative noise on observations
+
+data:
+  T              : 1.0
+  n_collocation  : 5000
+  n_ic           : 200
+  n_bc           : 300
+  n_observations : 50   # noisy data points used to recover alpha
+
+training:
+  epochs   : 5000
+  lr       : 1.0e-3
+  lr_alpha : 0.01
+  batch_r  : 2048
+  batch_i  : 256
+  batch_b  : 256
+  log_every: 500
+  seed     : 0
+
+loss:
+  ic_weight  : 100.0
+  bc_weight  : 10.0
+  data_weight: 200.0   # weight on observed data mismatch
+
+output:
+  dir: outputs/heat_inverse
