@@ -1,0 +1,2 @@
+[console_scripts]
+underpinn = underPINN.__main__:main

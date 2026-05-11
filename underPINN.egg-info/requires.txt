@@ -1,0 +1,9 @@
+jax[cpu]>=0.4.26
+flax>=0.8.0
+optax>=0.2.0
+pyyaml>=6.0
+numpy>=1.26
+scipy>=1.12
+matplotlib>=3.8
+shapely>=2.0
+pandas>=2.0

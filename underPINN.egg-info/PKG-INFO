@@ -1,0 +1,16 @@
+Metadata-Version: 2.4
+Name: underPINN
+Version: 0.1.0
+Summary: Physics-Informed Neural Networks framework built on JAX/Flax
+Requires-Python: >=3.9
+License-File: LICENSE
+Requires-Dist: jax[cpu]>=0.4.26
+Requires-Dist: flax>=0.8.0
+Requires-Dist: optax>=0.2.0
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: numpy>=1.26
+Requires-Dist: scipy>=1.12
+Requires-Dist: matplotlib>=3.8
+Requires-Dist: shapely>=2.0
+Requires-Dist: pandas>=2.0
+Dynamic: license-file
