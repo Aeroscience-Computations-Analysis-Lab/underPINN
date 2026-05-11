@@ -260,9 +260,9 @@ class FBPINNSolver(BaseSolver):
             for ep in range(epochs):
                 key, k1, k2, k3 = jax.random.split(key, 4)
 
-                idx_r = jax.random.choice(k1, N_r, (batch_r,), replace=False)
-                idx_i = jax.random.choice(k2, N_i, (batch_i,), replace=False)
-                idx_b = jax.random.choice(k3, N_b, (batch_b,), replace=False)
+                idx_r = jax.random.choice(k1, N_r, (batch_r,), replace=batch_r > N_r)
+                idx_i = jax.random.choice(k2, N_i, (batch_i,), replace=batch_i > N_i)
+                idx_b = jax.random.choice(k3, N_b, (batch_b,), replace=batch_b > N_b)
 
                 self.params, self.state, loss, pde_l, ic_l, bc_l, reg_l = self._step(
                     self.params,
