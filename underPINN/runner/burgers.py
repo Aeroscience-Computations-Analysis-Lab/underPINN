@@ -58,6 +58,7 @@ from underPINN.solver.fbpinn import FBPINNSolver
 from underPINN.core.config import TrainingConfig
 from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.callbacks.early_stopping import EarlyStopping
+from underPINN.utils.io import save_predictions
 
 
 def _build_model(net_cfg):
@@ -160,6 +161,17 @@ def run_burgers(cfg) -> dict:
     np.save(os.path.join(out_dir, "loss_hist.npy"),
             np.array(solver.loss_hist))
     save_config(cfg, os.path.join(out_dir, "config.yaml"))
+
+    # Predictions at collocation (residual) points
+    x_r, t_r = data[0], data[1]
+    pts_r = jnp.stack([x_r, t_r], axis=1)
+    u_pred_r = model.apply(solver.params, pts_r)[:, 0]
+    save_predictions(
+        out_dir,
+        coords  = {"x": np.array(x_r), "t": np.array(t_r)},
+        outputs = {"u_pred": np.array(u_pred_r)},
+        # No simple closed-form for Burgers with Dirichlet BC; exact omitted.
+    )
 
     # ── Loss plot ──────────────────────────────────────────────────────────────
     fig, ax = plt.subplots(figsize=(7, 3))

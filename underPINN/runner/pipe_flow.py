@@ -51,6 +51,7 @@ from underPINN.config.loader import cfg_get, save_config
 from underPINN.nn.mlp import MLP
 from underPINN.pde.navier_stokes_3d import SteadyNS3DPDE
 from underPINN.geometry.pipe import Pipe
+from underPINN.utils.io import save_predictions
 
 
 def run_pipe_flow(cfg) -> dict:
@@ -156,6 +157,24 @@ def run_pipe_flow(cfg) -> dict:
     # ── Save ──────────────────────────────────────────────────────────────────
     np.save(os.path.join(out_dir, "loss_hist.npy"), np.array(loss_hist))
     save_config(cfg, os.path.join(out_dir, "config.yaml"))
+
+    # Predictions at interior collocation points + Hagen-Poiseuille exact
+    uvwp_pred = model.apply(params, xyz_r)   # (N_r, 4)
+    u_ex, v_ex, w_ex, p_ex = pde.exact_poiseuille(xyz_r, R=R, U_max=U_max, L=L)
+    save_predictions(
+        out_dir,
+        coords  = {"x": np.array(xyz_r[:, 0]),
+                   "y": np.array(xyz_r[:, 1]),
+                   "z": np.array(xyz_r[:, 2])},
+        outputs = {"u_pred": np.array(uvwp_pred[:, 0]),
+                   "v_pred": np.array(uvwp_pred[:, 1]),
+                   "w_pred": np.array(uvwp_pred[:, 2]),
+                   "p_pred": np.array(uvwp_pred[:, 3])},
+        exact   = {"u_exact": np.array(u_ex),
+                   "v_exact": np.array(v_ex),
+                   "w_exact": np.array(w_ex),
+                   "p_exact": np.array(p_ex)},
+    )
 
     # Relative L² vs Poiseuille exact
     xyz_val = jnp.array(pipe.sample_interior(3000, seed=99))
