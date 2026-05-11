@@ -38,6 +38,7 @@ from underPINN.nn.mlp import MLP
 from underPINN.pde.diffusion import DiffusionPDE
 from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.callbacks.early_stopping import EarlyStopping
+from underPINN.utils.io import save_predictions
 
 
 # ---- Problem parameters ----
@@ -240,6 +241,18 @@ def main():
     plt.close(fig2)
 
     print("Plots saved: inverse_diffusion_training.png, inverse_diffusion_solution.png")
+
+    # ---- Save predictions at collocation points (also saves identified α) ----
+    nn_p     = all_params["nn"]
+    u_pred_r = model.apply(nn_p, jnp.stack([x_r, t_r], axis=1))[:, 0]
+    u_ex_r   = pde.exact(x_r, t_r, alpha=ALPHA_TRUE)
+    save_predictions(
+        ".",
+        coords  = {"x": x_r, "t": t_r},
+        outputs = {"u_pred": u_pred_r,
+                   "alpha_identified": np.array([alpha_final], dtype=np.float32)},
+        exact   = {"u_exact": u_ex_r},
+    )
 
 
 if __name__ == "__main__":

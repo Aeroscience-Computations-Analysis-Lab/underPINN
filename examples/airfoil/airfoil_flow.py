@@ -43,6 +43,7 @@ from underPINN.pde.navier_stokes import NavierStokesPDE
 from underPINN.geometry.airfoil import NACAAirfoil
 from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.callbacks.early_stopping import EarlyStopping
+from underPINN.utils.io import save_predictions
 
 
 # ---- Flow parameters ----
@@ -337,6 +338,18 @@ def main():
     fig4.savefig("airfoil_loss.png", dpi=150)
     plt.close(fig4)
     print("Saved: airfoil_loss.png")
+
+    # ---- Save predictions at collocation points ----
+    # No closed-form exact solution; save coords + PINN output only
+    pred_col = np.array(model.apply(params, xy_col_j))
+    save_predictions(
+        ".",
+        coords  = {"x": np.array(xy_col_j[:, 0]),
+                   "y": np.array(xy_col_j[:, 1])},
+        outputs = {"u_pred": pred_col[:, 0],
+                   "v_pred": pred_col[:, 1],
+                   "p_pred": pred_col[:, 2]},
+    )
 
 
 if __name__ == "__main__":

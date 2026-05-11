@@ -48,6 +48,7 @@ import matplotlib.pyplot as plt
 
 from underPINN.nn.mlp import MLP
 from underPINN.pde.pipe_flow_unsteady import UnsteadyPipeFlowPDE
+from underPINN.utils.io import save_predictions
 
 
 # ── Problem parameters ────────────────────────────────────────────────────────
@@ -277,6 +278,22 @@ def run_re_transfer():
         print(f"Rel-L² at t={t_check:.1f}: Transfer {err_tf:.3e}  |  "
               f"Scratch {err_sc:.3e}")
 
+    # ── Save predictions at collocation points ────────────────────────────────
+    yz_r, t_r, _, _, _ = data_tgt
+    for label, model_, params_ in [("transfer", model_tf, tf_params),
+                                   ("scratch",  model_sc, sc_params)]:
+        yzt = jnp.concatenate([yz_r, t_r[:, None]], axis=1)
+        u_pred = np.array(model_.apply(params_, yzt)[:, 0])
+        u_ex   = pde_tf.exact(np.array(yz_r), float(t_r.mean()))  # approx exact at mean t
+        save_predictions(
+            ".",
+            coords  = {"y": np.array(yz_r[:, 0]),
+                       "z": np.array(yz_r[:, 1]),
+                       "t": np.array(t_r)},
+            outputs = {"u_pred": u_pred},
+            filename=f"predictions_re_transfer_{label}.npz",
+        )
+
     # ── Loss convergence plot ─────────────────────────────────────────────────
     fig, axes = plt.subplots(1, 2, figsize=(13, 4))
 
@@ -405,6 +422,21 @@ def run_temporal_transfer():
     err_sc = rel_l2(model_sc, sc_params, pde_sc, yz_val, t_ext)
     print(f"\nRel-L² at t={t_ext:.2f} (extended): "
           f"Transfer {err_tf:.3e}  |  Scratch {err_sc:.3e}")
+
+    # ── Save predictions at collocation points ────────────────────────────────
+    yz_r, t_r, _, _, _ = data_p2
+    for label, model_, params_ in [("transfer", model_p2, p2_params),
+                                   ("scratch",  model_sc, sc_params)]:
+        yzt = jnp.concatenate([yz_r, t_r[:, None]], axis=1)
+        u_pred = np.array(model_.apply(params_, yzt)[:, 0])
+        save_predictions(
+            ".",
+            coords  = {"y": np.array(yz_r[:, 0]),
+                       "z": np.array(yz_r[:, 1]),
+                       "t": np.array(t_r)},
+            outputs = {"u_pred": u_pred},
+            filename=f"predictions_time_transfer_{label}.npz",
+        )
 
     # ── Loss convergence plot ─────────────────────────────────────────────────
     fig, ax = plt.subplots(figsize=(8, 4))

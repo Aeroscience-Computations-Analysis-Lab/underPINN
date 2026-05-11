@@ -30,6 +30,7 @@ from underPINN.nn.mlp import FourierMLP
 from underPINN.pde.wave import WavePDE
 from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.callbacks.early_stopping import EarlyStopping
+from underPINN.utils.io import save_predictions
 
 
 # ---- Hyper-parameters ----
@@ -195,6 +196,17 @@ def main():
     plt.close(fig2)
 
     print("Plots saved: wave_solution.png, wave_loss.png")
+
+    # ---- Save predictions at collocation points ----
+    pts_r     = jnp.stack([x_r, t_r], axis=1)
+    u_pred_r  = model.apply(params, pts_r)[:, 0]
+    u_exact_r = pde.exact(x_r, t_r)
+    save_predictions(
+        ".",
+        coords  = {"x": x_r, "t": t_r},
+        outputs = {"u_pred": u_pred_r},
+        exact   = {"u_exact": u_exact_r},
+    )
 
 
 if __name__ == "__main__":

@@ -49,6 +49,7 @@ from underPINN.nn.mlp import MLP
 from underPINN.pde.heat2d_unsteady import UnsteadyHeat2DPDE
 from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.callbacks.early_stopping import EarlyStopping
+from underPINN.utils.io import save_predictions
 
 
 # ── Architecture ─────────────────────────────────────────────────────────────
@@ -314,6 +315,23 @@ def run_parameter_transfer():
         print(f"Final Rel-L2 (t={VAL_T}) — Transfer: {tf_err[-1][1]:.3e}  "
               f"|  Scratch: {sc_err[-1][1]:.3e}")
 
+    # ── Save predictions at collocation points ────────────────────────────────
+    xy_r, t_r = data[0], data[1]
+    for label, model_, params_, alpha in [("transfer", model_tf, tf_params, 0.01),
+                                          ("scratch",  model_sc, sc_params, 0.01)]:
+        xyt = jnp.concatenate([xy_r, t_r[:, None]], axis=1)
+        u_pred_r  = pde_tf.u(params_, xy_r, t_r)
+        u_exact_r = pde_tf.exact(xy_r, t_r, alpha=alpha)
+        save_predictions(
+            ".",
+            coords  = {"x": np.array(xy_r[:, 0]),
+                       "y": np.array(xy_r[:, 1]),
+                       "t": np.array(t_r)},
+            outputs = {"u_pred": u_pred_r},
+            exact   = {"u_exact": u_exact_r},
+            filename=f"predictions_heat2d_param_{label}.npz",
+        )
+
 
 # ---------------------------------------------------------------------------
 # Strategy 2 — Temporal Transfer
@@ -405,6 +423,22 @@ def run_temporal_transfer():
     if tf_err and sc_err:
         print(f"Final Rel-L2 (t={VAL_T}) — Transfer: {tf_err[-1][1]:.3e}  "
               f"|  Scratch: {sc_err[-1][1]:.3e}")
+
+    # ── Save predictions at collocation points ────────────────────────────────
+    xy_r, t_r = data_p2[0], data_p2[1]
+    for label, model_, params_ in [("transfer", model_tf, tf_params),
+                                   ("scratch",  model_sc, sc_params)]:
+        u_pred_r  = pde_tf.u(params_, xy_r, t_r)
+        u_exact_r = pde_tf.exact(xy_r, t_r, alpha=ALPHA)
+        save_predictions(
+            ".",
+            coords  = {"x": np.array(xy_r[:, 0]),
+                       "y": np.array(xy_r[:, 1]),
+                       "t": np.array(t_r)},
+            outputs = {"u_pred": u_pred_r},
+            exact   = {"u_exact": u_exact_r},
+            filename=f"predictions_heat2d_temporal_{label}.npz",
+        )
 
 
 # ---------------------------------------------------------------------------

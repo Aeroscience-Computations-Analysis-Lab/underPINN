@@ -15,6 +15,7 @@ from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.callbacks.early_stopping import EarlyStopping
 
 from underPINN.benchmark_utils.benchmark_suite import BenchmarkTracker
+from underPINN.utils.io import save_predictions
 
 
 def generate_ldc_geometry(n_col=40000, n_per_edge=1000):
@@ -132,6 +133,17 @@ def main():
     tracker.save(case_name="LDC", framework="JAX")
 
     save_and_plot_results(model, solver.params, filename="pinn_ldc.npz")
+
+    # Save predictions at collocation (interior residual) points
+    pred_col = np.array(model.apply(solver.params, inputs.col))
+    save_predictions(
+        ".",
+        coords  = {"x": np.array(inputs.col[:, 0]),
+                   "y": np.array(inputs.col[:, 1])},
+        outputs = {"u_pred": pred_col[:, 0],
+                   "v_pred": pred_col[:, 1],
+                   "p_pred": pred_col[:, 2]},
+    )
 
     from flax import serialization
     with open("ldc_params.msgpack", "wb") as f:

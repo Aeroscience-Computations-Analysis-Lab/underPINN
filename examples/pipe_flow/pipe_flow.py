@@ -43,6 +43,7 @@ import matplotlib.pyplot as plt
 from underPINN.nn.mlp import MLP
 from underPINN.pde.navier_stokes_3d import SteadyNS3DPDE
 from underPINN.geometry.pipe import Pipe
+from underPINN.utils.io import save_predictions
 
 
 # ── Problem parameters ────────────────────────────────────────────────────────
@@ -364,6 +365,20 @@ def main():
     errs = eval_rel_l2(model, params, pde, pipe)
     for k, v in errs.items():
         print(f"  {k:>2s} : {v:.3e}")
+
+    # ── Save predictions at interior collocation points ───────────────────────
+    uvwp = np.array(model.apply(params, xyz_r))
+    u_ex, v_ex, w_ex, p_ex = pde.exact_poiseuille(xyz_r, R=R, U_max=U_MAX, L=L)
+    save_predictions(
+        ".",
+        coords  = {"x": np.array(xyz_r[:, 0]),
+                   "y": np.array(xyz_r[:, 1]),
+                   "z": np.array(xyz_r[:, 2])},
+        outputs = {"u_pred": uvwp[:, 0], "v_pred": uvwp[:, 1],
+                   "w_pred": uvwp[:, 2], "p_pred": uvwp[:, 3]},
+        exact   = {"u_exact": np.array(u_ex), "v_exact": np.array(v_ex),
+                   "w_exact": np.array(w_ex), "p_exact": np.array(p_ex)},
+    )
 
     print("\n── Plotting ──")
     plot_loss(hist)
