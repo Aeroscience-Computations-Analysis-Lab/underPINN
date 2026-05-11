@@ -49,6 +49,7 @@ import matplotlib.pyplot as plt
 from underPINN.config.loader import cfg_get, save_config
 from underPINN.nn.mlp import FourierMLP, MLP
 from underPINN.pde.wave import WavePDE
+from underPINN.utils.io import save_predictions
 
 
 def run_wave(cfg) -> dict:
@@ -165,6 +166,17 @@ def run_wave(cfg) -> dict:
     # ── Eval + save ────────────────────────────────────────────────────────────
     np.save(os.path.join(out_dir, "loss_hist.npy"), np.array(loss_hist))
     save_config(cfg, os.path.join(out_dir, "config.yaml"))
+
+    # Predictions at collocation (residual) points  [exact: sin(πx)cos(cπt)]
+    pts_r    = jnp.stack([x_r, t_r], axis=1)
+    u_pred_r = model.apply(params, pts_r)[:, 0]
+    u_exact_r = jnp.sin(jnp.pi * x_r) * jnp.cos(c * jnp.pi * t_r)
+    save_predictions(
+        out_dir,
+        coords  = {"x": np.array(x_r), "t": np.array(t_r)},
+        outputs = {"u_pred": np.array(u_pred_r)},
+        exact   = {"u_exact": np.array(u_exact_r)},
+    )
 
     # Solution plot
     Nx, Nt = 200, 100
