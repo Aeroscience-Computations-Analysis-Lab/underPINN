@@ -128,7 +128,7 @@ examples:
     print(f"  Output   : {out_dir}/")
     print("=" * 60)
 
-    results = runner.run()
+    results = runner.run(out_dir=out_dir)
 
     # Save raw data
     runner.save_json(os.path.join(out_dir, "results.json"))

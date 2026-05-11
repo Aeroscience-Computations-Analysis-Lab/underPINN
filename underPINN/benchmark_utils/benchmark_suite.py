@@ -120,11 +120,19 @@ class BenchmarkRunner:
     # Public API
     # ------------------------------------------------------------------
 
-    def run(self) -> List[BenchmarkResult]:
+    def run(self, out_dir: Optional[str] = None) -> List[BenchmarkResult]:
         """Run all (problem, epochs) combinations.
 
         Each evaluator is constructed fresh per problem so state does not
-        leak across epoch budgets for the same problem.
+        leak across epoch budgets for the same problem.  For the largest
+        epoch budget, a final PDE solution plot is saved to *out_dir* (when
+        provided) via ``ev.plot(out_dir)``.
+
+        Parameters
+        ----------
+        out_dir :
+            Directory where artefacts (plots, JSON, CSV) are written.
+            When ``None`` no plots are saved.
 
         Returns
         -------
@@ -133,6 +141,7 @@ class BenchmarkRunner:
         """
         n_total = len(self._problems) * len(self.epoch_budgets)
         counter = 0
+        max_epochs = max(self.epoch_budgets)
 
         for prob in self._problems:
             cls = self._registry[prob]
@@ -156,6 +165,20 @@ class BenchmarkRunner:
                     loss_final = ev.loss_hist[-1] if ev.loss_hist else float("nan")
                     pde_final  = ev.pde_hist[-1]  if ev.pde_hist  else float("nan")
                     self._loss_snapshots[prob][epochs] = list(ev.loss_hist)
+
+                    # --- solution plot for the largest epoch run only ----------
+                    if out_dir is not None and epochs == max_epochs:
+                        os.makedirs(out_dir, exist_ok=True)
+                        try:
+                            _plot_ctx = (contextlib.nullcontext()
+                                         if self.verbose
+                                         else contextlib.redirect_stdout(io.StringIO()))
+                            with _plot_ctx:
+                                ev.plot(out_dir)
+                        except Exception as plot_exc:  # noqa: BLE001
+                            if self.verbose:
+                                print(f"  plot failed: {plot_exc}")
+
                 except Exception as exc:  # noqa: BLE001
                     print(f"  ERROR: {exc}")
                     wall, metrics = 0.0, {}

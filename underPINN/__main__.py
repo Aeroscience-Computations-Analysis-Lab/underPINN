@@ -120,7 +120,7 @@ def _cmd_bench(args):
     print(f"  Output   : {out_dir}/")
     print("=" * 60)
 
-    results = runner.run()
+    results = runner.run(out_dir=out_dir)
     runner.save_json(os.path.join(out_dir, "results.json"))
     runner.save_loss_npz(os.path.join(out_dir, "loss_hists.npz"))
     generate_report(results, runner=runner, out_dir=out_dir)
