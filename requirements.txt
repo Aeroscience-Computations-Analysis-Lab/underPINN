@@ -1,7 +1,29 @@
-jax[cpu]
-flax
-optax
-pyyaml
-matplotlib
-scipy
-numpy
+# underPINN dependencies
+# ─────────────────────────────────────────────────────────────────
+# CPU install (development / testing):
+#   pip install -r requirements.txt
+#
+# GPU install (CUDA 12):
+#   pip install -U "jax[cuda12]" && pip install -r requirements-gpu.txt
+# ─────────────────────────────────────────────────────────────────
+
+# Core: autodiff + neural networks + optimisers
+jax[cpu]>=0.4.26
+flax>=0.8.0
+optax>=0.2.0
+
+# Config / CLI
+pyyaml>=6.0
+
+# Numerics + reference solutions
+numpy>=1.26
+scipy>=1.12
+
+# Plotting
+matplotlib>=3.8
+
+# Geometry (shapely_geom.py — optional, only needed for arbitrary polygon domains)
+shapely>=2.0
+
+# Benchmark reporting (pandas used in LDC / turbulence examples)
+pandas>=2.0

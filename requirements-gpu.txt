@@ -1,0 +1,14 @@
+# underPINN GPU dependencies (CUDA 12)
+# Install after jax[cuda12]:
+#   pip install -U "jax[cuda12]"
+#   pip install -r requirements-gpu.txt
+# ─────────────────────────────────────────────────────────────────
+
+flax>=0.8.0
+optax>=0.2.0
+pyyaml>=6.0
+numpy>=1.26
+scipy>=1.12
+matplotlib>=3.8
+shapely>=2.0
+pandas>=2.0
