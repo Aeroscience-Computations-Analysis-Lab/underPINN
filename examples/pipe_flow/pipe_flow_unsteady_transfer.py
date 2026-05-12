@@ -49,6 +49,7 @@ import matplotlib.pyplot as plt
 from underPINN.nn.mlp import MLP
 from underPINN.pde.pipe_flow_unsteady import UnsteadyPipeFlowPDE
 from underPINN.utils.io import save_predictions
+from underPINN.utils.sampling import safe_choice
 
 
 # ── Problem parameters ────────────────────────────────────────────────────────
@@ -167,9 +168,9 @@ def run_training(pde, data, epochs: int, lr: float,
     loss_hist = []
     for ep in range(epochs):
         key, k1, k2, k3 = jax.random.split(key, 4)
-        ir = jax.random.choice(k1, N_r,  (BATCH_R,),   replace=False)
-        ii = jax.random.choice(k2, N_ic, (BATCH_IC,),  replace=False)
-        ib = jax.random.choice(k3, N_bc, (BATCH_BC,),  replace=False)
+        ir = safe_choice(k1, N_r,  BATCH_R)
+        ii = safe_choice(k2, N_ic, BATCH_IC)
+        ib = safe_choice(k3, N_bc, BATCH_BC)
 
         params, opt_state, total, (pl, il, bl) = step_fn(
             params, opt_state,

@@ -5,17 +5,23 @@ To add a new problem runner:
   2. Import it below and add it to ``_REGISTRY``.
 """
 
-from underPINN.runner.burgers   import run_burgers
-from underPINN.runner.wave      import run_wave
-from underPINN.runner.pipe_flow import run_pipe_flow
+from underPINN.runner.burgers      import run_burgers
+from underPINN.runner.wave         import run_wave
+from underPINN.runner.pipe_flow    import run_pipe_flow
+from underPINN.runner.helmholtz    import run_helmholtz
+from underPINN.runner.heat_forward import run_heat_forward
+from underPINN.runner.ode          import run_ode
 
 # ── Registry ──────────────────────────────────────────────────────────────────
 # Maps the string value of ``problem:`` in a config YAML to a runner callable.
 
 _REGISTRY: dict = {
-    "burgers":   run_burgers,
-    "wave":      run_wave,
-    "pipe_flow": run_pipe_flow,
+    "burgers":      run_burgers,
+    "wave":         run_wave,
+    "pipe_flow":    run_pipe_flow,
+    "helmholtz":    run_helmholtz,
+    "heat_forward": run_heat_forward,
+    "ode":          run_ode,
 }
 
 
