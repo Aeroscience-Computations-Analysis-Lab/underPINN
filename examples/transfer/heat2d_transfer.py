@@ -50,6 +50,7 @@ from underPINN.pde.heat2d_unsteady import UnsteadyHeat2DPDE
 from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.callbacks.early_stopping import EarlyStopping
 from underPINN.utils.io import save_predictions
+from underPINN.utils.sampling import safe_choice
 
 
 # ── Architecture ─────────────────────────────────────────────────────────────
@@ -179,7 +180,7 @@ def run_training(model, pde, data, epochs, lr, alpha,
     try:
         for ep in range(epochs):
             key, k = jax.random.split(key)
-            idx     = jax.random.choice(k, n_r, (BATCH_R,), replace=False)
+            idx     = safe_choice(k, n_r, BATCH_R)
             params, opt_state, loss, _ = step_fn(
                 params, opt_state, xy_r[idx], t_r[idx]
             )

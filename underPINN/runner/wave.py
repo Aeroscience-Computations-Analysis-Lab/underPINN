@@ -50,6 +50,7 @@ from underPINN.config.loader import cfg_get, save_config
 from underPINN.nn.mlp import FourierMLP, MLP
 from underPINN.pde.wave import WavePDE
 from underPINN.utils.io import save_predictions
+from underPINN.utils.sampling import safe_choice
 
 
 def run_wave(cfg) -> dict:
@@ -147,9 +148,9 @@ def run_wave(cfg) -> dict:
 
     for ep in range(epochs):
         key, k1, k2, k3 = jax.random.split(key, 4)
-        ir = jax.random.choice(k1, N_R,  (bR,), replace=False)
-        ii = jax.random.choice(k2, N_IC, (bI,), replace=False)
-        ib = jax.random.choice(k3, N_BC, (bB,), replace=False)
+        ir = safe_choice(k1, N_R,  bR)
+        ii = safe_choice(k2, N_IC, bI)
+        ib = safe_choice(k3, N_BC, bB)
 
         params, opt_state, total, (pl, il, dl, bl) = step(
             params, opt_state,

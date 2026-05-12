@@ -52,6 +52,7 @@ from underPINN.nn.mlp import MLP
 from underPINN.pde.navier_stokes_3d import SteadyNS3DPDE
 from underPINN.geometry.pipe import Pipe
 from underPINN.utils.io import save_predictions
+from underPINN.utils.sampling import safe_choice
 
 
 def run_pipe_flow(cfg) -> dict:
@@ -140,10 +141,10 @@ def run_pipe_flow(cfg) -> dict:
 
     for ep in range(epochs):
         key, k1, k2, k3, k4 = jax.random.split(key, 5)
-        ir   = jax.random.choice(k1, N_r,   (batch_r,),              replace=False)
-        iw   = jax.random.choice(k2, N_w,   (batch_bc,),             replace=False)
-        iin  = jax.random.choice(k3, N_in,  (min(batch_bc, N_in),),  replace=False)
-        iout = jax.random.choice(k4, N_out, (min(batch_bc, N_out),), replace=False)
+        ir   = safe_choice(k1, N_r,   batch_r)
+        iw   = safe_choice(k2, N_w,   batch_bc)
+        iin  = safe_choice(k3, N_in,  min(batch_bc, N_in))
+        iout = safe_choice(k4, N_out, min(batch_bc, N_out))
 
         params, opt_state, total, (pl, wl, il, ol) = step(
             params, opt_state,

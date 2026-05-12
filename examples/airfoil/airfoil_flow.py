@@ -44,6 +44,7 @@ from underPINN.geometry.airfoil import NACAAirfoil
 from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.callbacks.early_stopping import EarlyStopping
 from underPINN.utils.io import save_predictions
+from underPINN.utils.sampling import safe_choice
 
 
 # ---- Flow parameters ----
@@ -203,8 +204,8 @@ def main():
         for ep in range(EPOCHS):
             key, k1, k2 = jax.random.split(key, 3)
 
-            idx_col = jax.random.choice(k1, n_col, (BATCH_COL,), replace=False)
-            idx_ff  = jax.random.choice(k2, n_ff,  (BATCH_FF,),  replace=False)
+            idx_col = safe_choice(k1, n_col, BATCH_COL)
+            idx_ff  = safe_choice(k2, n_ff,  BATCH_FF)
 
             params, opt_state, loss, (pde_l, l_af, l_ff) = step(
                 params, opt_state,

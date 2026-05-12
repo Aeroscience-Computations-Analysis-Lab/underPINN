@@ -5,6 +5,7 @@ import optax
 
 from underPINN.core.base import BaseSolver
 from underPINN.core.config import TrainingConfig
+from underPINN.utils.sampling import safe_choice
 
 
 class SteadySolver(BaseSolver):
@@ -83,8 +84,8 @@ class SteadySolver(BaseSolver):
             for ep in range(epochs):
                 key, k1, k2 = jax.random.split(key, 3)
 
-                idx_r = jax.random.choice(k1, xy_r.shape[0], (batch_r,), replace=False)
-                idx_b = jax.random.choice(k2, xy_b.shape[0], (batch_b,), replace=False)
+                idx_r = safe_choice(k1, xy_r.shape[0], batch_r)
+                idx_b = safe_choice(k2, xy_b.shape[0], batch_b)
 
                 self.params, self.state, loss, pde_l, bc_l = self._step(
                     self.params, self.state,

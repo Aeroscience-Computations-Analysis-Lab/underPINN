@@ -44,6 +44,7 @@ from underPINN.nn.mlp import MLP
 from underPINN.pde.navier_stokes_3d import SteadyNS3DPDE
 from underPINN.geometry.pipe import Pipe
 from underPINN.utils.io import save_predictions
+from underPINN.utils.sampling import safe_choice
 
 
 # ── Problem parameters ────────────────────────────────────────────────────────
@@ -155,10 +156,10 @@ def train(model, pde, xyz_r, xyz_w, xyz_in, xyz_out):
 
     for ep in range(EPOCHS):
         key, k1, k2, k3, k4 = jax.random.split(key, 5)
-        idx_r   = jax.random.choice(k1, N_r,   (BATCH_R,),              replace=False)
-        idx_w   = jax.random.choice(k2, N_w,   (BATCH_BC,),             replace=False)
-        idx_in  = jax.random.choice(k3, N_in,  (min(BATCH_BC, N_in),),  replace=False)
-        idx_out = jax.random.choice(k4, N_out, (min(BATCH_BC, N_out),), replace=False)
+        idx_r   = safe_choice(k1, N_r,   BATCH_R)
+        idx_w   = safe_choice(k2, N_w,   BATCH_BC)
+        idx_in  = safe_choice(k3, N_in,  min(BATCH_BC, N_in))
+        idx_out = safe_choice(k4, N_out, min(BATCH_BC, N_out))
 
         params, opt_state, total, (pde_l, wall_l, in_l, out_l) = step(
             params, opt_state,

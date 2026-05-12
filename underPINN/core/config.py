@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
@@ -69,3 +71,54 @@ class TrainingConfig:
     resample_candidates: int = 0   # candidate pool size; 0 → 5 × batch_r
     resample_k: float = 1.0        # |residual|^k weighting exponent
     candidate_sampler: Optional[Any] = None  # fn(n, key) → (x, t) or None
+
+    # ------------------------------------------------------------------ #
+    # Validation                                                            #
+    # ------------------------------------------------------------------ #
+
+    def __post_init__(self) -> None:
+        """Validate all fields eagerly so errors surface before JAX traces.
+
+        Raises
+        ------
+        ValueError
+            Descriptive message that names the offending field and its value.
+        """
+        _pos_int = {
+            "epochs":      self.epochs,
+            "batch_r":     self.batch_r,
+            "batch_i":     self.batch_i,
+            "batch_b":     self.batch_b,
+            "log_every":   self.log_every,
+            "n_scan_steps": self.n_scan_steps,
+        }
+        for name, val in _pos_int.items():
+            if not isinstance(val, int) or val < 1:
+                raise ValueError(
+                    f"TrainingConfig.{name} must be a positive integer, got {val!r}"
+                )
+
+        if not isinstance(self.lr, (int, float)) or self.lr <= 0:
+            raise ValueError(
+                f"TrainingConfig.lr must be a positive float, got {self.lr!r}"
+            )
+
+        if not isinstance(self.seed, int) or self.seed < 0:
+            raise ValueError(
+                f"TrainingConfig.seed must be a non-negative integer, got {self.seed!r}"
+            )
+
+        if not isinstance(self.resample_k, (int, float)) or self.resample_k <= 0:
+            raise ValueError(
+                f"TrainingConfig.resample_k must be a positive float, got {self.resample_k!r}"
+            )
+
+        if self.resample_period < 0:
+            raise ValueError(
+                f"TrainingConfig.resample_period must be >= 0, got {self.resample_period!r}"
+            )
+
+        if self.resample_candidates < 0:
+            raise ValueError(
+                f"TrainingConfig.resample_candidates must be >= 0, got {self.resample_candidates!r}"
+            )
