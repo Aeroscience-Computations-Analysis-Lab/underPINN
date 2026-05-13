@@ -5,16 +5,16 @@ Usage
 ::
 
     # Run a single experiment
-    python -m underPINN run configs/burgers.yaml
+    python -m underPINN run examples/burgers/config.yaml
 
     # Hyperparameter sweep (Cartesian product of sweep values)
-    python -m underPINN sweep configs/sweeps/burgers_nu_sweep.yaml
+    python -m underPINN sweep examples/burgers/burgers_nu_sweep.yaml
 
     # List registered problem runners
     python -m underPINN list
 
     # Print the resolved config without running
-    python -m underPINN show configs/burgers.yaml
+    python -m underPINN show examples/burgers/config.yaml
 
     # Accuracy-vs-epoch benchmark suite
     python -m underPINN bench
@@ -133,10 +133,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 examples:
-  python -m underPINN run    configs/burgers.yaml
-  python -m underPINN sweep  configs/sweeps/burgers_nu_sweep.yaml
+  python -m underPINN run    examples/burgers/config.yaml
+  python -m underPINN sweep  examples/burgers/burgers_nu_sweep.yaml
   python -m underPINN list
-  python -m underPINN show   configs/pipe_flow.yaml
+  python -m underPINN show   examples/pipe_flow/pipe_flow.yaml
 """,
     )
 

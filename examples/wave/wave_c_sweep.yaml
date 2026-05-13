@@ -2,7 +2,7 @@
 # Generates 3 × 2 = 6 experiments (sigma should track c·π).
 #
 # Usage:
-#   python -m underPINN sweep configs/sweeps/wave_c_sweep.yaml
+#   python -m underPINN sweep examples/wave/wave_c_sweep.yaml
 
 base:
   problem: wave

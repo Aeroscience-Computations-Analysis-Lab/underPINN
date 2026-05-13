@@ -9,7 +9,7 @@ physics:
 
 data:
   T            : 2.0
-  n_collocation: 6000
+  n_collocation: 20000
   n_ic         : 200
   n_bc         : 300
 
@@ -21,7 +21,7 @@ training:
   batch_i                : 256
   batch_b                : 256
   log_every              : 500
-  early_stopping_patience: 400
+  # early_stopping_patience: 400
   seed                   : 0
   # Performance knobs (GPU-friendly defaults shown; omit to use default=off)
   # n_scan_steps    : 100   # fuse 100 steps into one XLA kernel (reduces Python overhead)

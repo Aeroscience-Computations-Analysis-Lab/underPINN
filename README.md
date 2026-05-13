@@ -32,15 +32,15 @@ Run any experiment or hyperparameter sweep without touching Python code:
 
 ```bash
 # Single experiment
-python -m underPINN run  configs/burgers.yaml
-python -m underPINN run  configs/pipe_flow.yaml
+python -m underPINN run  examples/burgers/config.yaml
+python -m underPINN run  examples/pipe_flow/pipe_flow.yaml
 
 # Hyperparameter sweep (Cartesian product)
-python -m underPINN sweep configs/sweeps/burgers_nu_sweep.yaml
-python -m underPINN sweep configs/sweeps/pipe_flow_re_sweep.yaml
+python -m underPINN sweep examples/burgers/burgers_nu_sweep.yaml
+python -m underPINN sweep examples/pipe_flow/pipe_flow_re_sweep.yaml
 
 # Inspect a config (no training)
-python -m underPINN show configs/wave.yaml
+python -m underPINN show examples/wave/config.yaml
 
 # List registered runners
 python -m underPINN list
@@ -87,7 +87,7 @@ sweep:                          # dot-separated key → list of values
   training.epochs  : [3000, 5000]
 ```
 
-Each run gets its own sub-directory (`outputs/…/run_000`, `run_001`, …) with a saved `config.yaml` for full reproducibility. Pre-built sweep configs are in `configs/sweeps/`.
+Each run gets its own sub-directory (`outputs/…/run_000`, `run_001`, …) with a saved `config.yaml` for full reproducibility. Sweep configs live alongside their example scripts (e.g. `examples/burgers/burgers_nu_sweep.yaml`).
 
 ---
 
@@ -104,22 +104,30 @@ underPINN/
 │   └── pipe_flow.py       # runner: 3-D pipe flow
 ├── __main__.py            # CLI entry point (python -m underPINN)
 │
-configs/                   # ready-to-run YAML configs for every example
-├── burgers.yaml
-├── wave.yaml
-├── helmholtz.yaml
-├── heat_forward.yaml
-├── heat_inverse.yaml
-├── ldc.yaml
-├── airfoil.yaml
-├── pipe_flow.yaml
-├── pipe_flow_unsteady_transfer.yaml
-├── burgers_transfer.yaml
-├── ode.yaml
-└── sweeps/
-    ├── burgers_nu_sweep.yaml
-    ├── pipe_flow_re_sweep.yaml
-    └── wave_c_sweep.yaml
+examples/                  # YAML configs live alongside their example scripts
+├── burgers/
+│   ├── config.yaml
+│   └── burgers_nu_sweep.yaml
+├── wave/
+│   ├── config.yaml
+│   └── wave_c_sweep.yaml
+├── heat/
+│   ├── heat_forward.yaml
+│   └── heat_inverse.yaml
+├── helmholtz/
+│   └── config.yaml
+├── ode/
+│   └── config.yaml
+├── pipe_flow/
+│   ├── pipe_flow.yaml
+│   ├── pipe_flow_unsteady_transfer.yaml
+│   └── pipe_flow_re_sweep.yaml
+├── transfer/
+│   └── burgers_transfer.yaml
+├── airfoil/
+│   └── config.yaml
+└── LDC/
+    └── config.yaml
 
 underPINN/
 ├── core/
@@ -415,8 +423,8 @@ while the inner XLA kernel handles the fast gradient loop.
 ### Using the CLI (recommended)
 
 ```bash
-# edit configs/burgers.yaml, then:
-python -m underPINN run configs/burgers.yaml
+# edit examples/burgers/config.yaml, then:
+python -m underPINN run examples/burgers/config.yaml
 ```
 
 ### Programmatic usage
