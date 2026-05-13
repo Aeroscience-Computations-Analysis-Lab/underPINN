@@ -2,7 +2,7 @@
 # Generates 4 runs.
 #
 # Usage:
-#   python -m underPINN sweep configs/sweeps/pipe_flow_re_sweep.yaml
+#   python -m underPINN sweep examples/pipe_flow/pipe_flow_re_sweep.yaml
 
 base:
   problem: pipe_flow

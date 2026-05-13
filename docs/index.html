@@ -643,12 +643,12 @@
         <h3>🚀 Single Run</h3>
         <p>Point at a config file. That's it.</p>
         <div class="shell">
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run configs/burgers.yaml</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run configs/wave.yaml</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run configs/helmholtz.yaml</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run configs/heat_forward.yaml</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run configs/ode.yaml</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run configs/pipe_flow.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/burgers/config.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/wave/config.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/helmholtz/config.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/heat/heat_forward.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/ode/config.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/pipe_flow/pipe_flow.yaml</span></div>
         </div>
       </div>
       <div class="cli-card">
@@ -656,7 +656,7 @@
         <p>Cartesian product across any config keys.</p>
         <div class="shell">
           <div><span class="prompt">$ </span><span class="cmd">python -m underPINN sweep \</span></div>
-          <div><span class="cmd">&nbsp;&nbsp;configs/sweeps/burgers_nu_sweep.yaml</span></div>
+          <div><span class="cmd">&nbsp;&nbsp;examples/burgers/burgers_nu_sweep.yaml</span></div>
           <div class="cmt">&nbsp;</div>
           <div class="cmt"># sweep YAML anatomy:</div>
           <div class="cmt"># base: { problem: burgers, ... }</div>
@@ -669,7 +669,7 @@
         <h3>🔍 Inspect &amp; List</h3>
         <p>Print the resolved config or list all runners.</p>
         <div class="shell">
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN show configs/wave.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN show examples/wave/config.yaml</span></div>
           <div><span class="prompt">$ </span><span class="cmd">python -m underPINN list</span></div>
           <div class="cmt">&nbsp;</div>
           <div class="cmt">Registered problem runners:</div>
@@ -789,7 +789,7 @@ runner.<span class="fn">save_json</span>(<span class="st">"outputs/bench/results
     <div id="tab-yaml" class="tab-content active">
       <div class="code-header">
         <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
-        configs/burgers.yaml
+        examples/burgers/config.yaml
       </div>
 <pre><span class="nm">problem</span>: burgers
 
@@ -820,7 +820,7 @@ runner.<span class="fn">save_json</span>(<span class="st">"outputs/bench/results
   <span class="nm">dir</span>: outputs/burgers</pre>
       <div style="height:1rem"></div>
       <div class="shell">
-        <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run configs/burgers.yaml</span></div>
+        <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/burgers/config.yaml</span></div>
       </div>
     </div>
 
