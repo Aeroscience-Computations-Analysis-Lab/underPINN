@@ -122,7 +122,8 @@ def run_helmholtz(cfg) -> dict:
         log_every=log_every,
         callbacks=[
             ConsoleLogger(log_every=log_every),
-            EarlyStopping(patience=max(600, epochs // 15)),
+            EarlyStopping(patience=int(cfg_get(tr, "early_stopping_patience",
+                                               default=max(600, epochs // 15)))),
         ],
     )
 

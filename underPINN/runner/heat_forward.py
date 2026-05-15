@@ -129,7 +129,8 @@ def run_heat_forward(cfg) -> dict:
         log_every=log_every,
         callbacks=[
             ConsoleLogger(log_every=log_every),
-            EarlyStopping(patience=max(500, epochs // 10)),
+            EarlyStopping(patience=int(cfg_get(tr, "early_stopping_patience",
+                                               default=max(500, epochs // 10)))),
         ],
     )
 

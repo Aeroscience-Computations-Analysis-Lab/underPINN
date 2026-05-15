@@ -1,5 +1,5 @@
-problem: ldc   # run via:  python "examples/Lid Driven Cavity/run_ldc.py"
-               # (LDCSolver runner not yet registered; use example script directly)
+problem: ldc   # run via:  python -m underPINN run examples/LDC/config.yaml
+               #        or:  python examples/LDC/run_ldc.py
 
 network:
   type      : fbpinn
