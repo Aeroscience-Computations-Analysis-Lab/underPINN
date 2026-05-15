@@ -64,6 +64,7 @@ from underPINN.geometry.airfoil import NACAAirfoil
 from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.callbacks.early_stopping import EarlyStopping
 from underPINN.utils.io import save_predictions
+from underPINN.utils.checkpoint import save_checkpoint
 from underPINN.utils.sampling import safe_choice
 
 
@@ -329,6 +330,15 @@ def run_airfoil(cfg) -> dict:
     )
 
     np.save(os.path.join(out_dir, "loss_hist.npy"), np.array(loss_hist))
+
+    # ── Model checkpoint ──────────────────────────────────────────────────────
+    save_checkpoint(params, out_dir, metadata={
+        "problem": "airfoil",
+        "network": {"type": "mlp", "layers": list(cfg.network.layers)},
+        "physics": {"Re": Re, "aoa": aoa, "naca": naca, "chord": chord},
+        "results": {"CL": CL, "n_epochs": len(loss_hist)},
+    })
+
     save_config(cfg, os.path.join(out_dir, "config.yaml"))
     print(f"\nOutputs saved to: {out_dir}/")
 

@@ -75,6 +75,7 @@ class ODESolver(BaseSolver):
             epochs = config.epochs
             log_every = config.log_every
             callbacks = list(config.callbacks)
+            self._attach_checkpoint_callbacks(callbacks)
             n_scan = max(1, config.n_scan_steps)
             if config.lr_schedule is not None:
                 self.opt = self._make_opt(config.lr, config.lr_schedule)

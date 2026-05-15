@@ -123,6 +123,14 @@ def run_ode(cfg) -> dict:
         print(f"  Exponential Decay — Rel-L2: {rel_l2:.4e}")
         results["exp_decay_rel_l2"] = rel_l2
 
+        # Save checkpoint
+        solver.save_checkpoint(out_dir, stem="params_exp_decay", metadata={
+            "problem": "ode", "ode": "exponential_decay",
+            "network": {"type": "mlp", "layers": layers},
+            "physics": {"lambda": lam, "u0": u0, "T": T},
+            "rel_l2": rel_l2,
+        })
+
         # Save predictions
         save_predictions(
             out_dir,
@@ -182,6 +190,14 @@ def run_ode(cfg) -> dict:
         rel_l2  = float(jnp.linalg.norm(u_pred - u_exact) / (jnp.linalg.norm(u_exact) + 1e-10))
         print(f"  Harmonic Oscillator — Rel-L2: {rel_l2:.4e}")
         results["harmonic_rel_l2"] = rel_l2
+
+        # Save checkpoint
+        solver.save_checkpoint(out_dir, stem="params_harmonic", metadata={
+            "problem": "ode", "ode": "harmonic_oscillator",
+            "network": {"type": "mlp", "layers": layers},
+            "physics": {"omega": omega, "T": T},
+            "rel_l2": rel_l2,
+        })
 
         # Save predictions
         save_predictions(

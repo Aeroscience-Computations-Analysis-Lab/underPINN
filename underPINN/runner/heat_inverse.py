@@ -50,6 +50,7 @@ from underPINN.pde.diffusion import DiffusionPDE
 from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.callbacks.early_stopping import EarlyStopping
 from underPINN.utils.io import save_predictions
+from underPINN.utils.checkpoint import save_checkpoint
 from underPINN.utils.seed import set_seed
 
 
@@ -222,6 +223,23 @@ def run_heat_inverse(cfg) -> dict:
     fig.tight_layout()
     fig.savefig(os.path.join(out_dir, "training.png"), dpi=150, bbox_inches="tight")
     plt.close(fig)
+
+    # ── Model checkpoint ──────────────────────────────────────────────────────
+    # Save the full joint param dict (nn weights + identified log_alpha).
+    # The checkpoint stores both so they can be reloaded together.
+    net_cfg = cfg.network
+    save_checkpoint(all_params, out_dir, metadata={
+        "problem": "heat_inverse",
+        "network": {
+            "type":   "mlp",
+            "layers": list(cfg_get(net_cfg, "layers", default=[2, 64, 64, 64, 1])),
+        },
+        "physics": {
+            "alpha_true":       alpha_true,
+            "alpha_identified": alpha_final,
+            "rel_err_alpha":    rel_err_alpha,
+        },
+    })
 
     save_config(cfg, os.path.join(out_dir, "config.yaml"))
     print(f"\nOutputs saved to: {out_dir}/")

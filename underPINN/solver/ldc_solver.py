@@ -77,6 +77,7 @@ class LDCSolver(BaseSolver):
             batch_size = config.batch_r
             seed       = config.seed
             callbacks  = list(config.callbacks)
+            self._attach_checkpoint_callbacks(callbacks)
             if config.lr_schedule is not None:
                 if hasattr(config, 'lr'):
                     schedule = config.lr_schedule

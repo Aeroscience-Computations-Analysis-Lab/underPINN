@@ -81,6 +81,7 @@ from underPINN.solver.fbpinn import FBPINNSolver
 from underPINN.core.config import TrainingConfig
 from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.utils.io import save_predictions
+from underPINN.utils.checkpoint import save_checkpoint
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +247,20 @@ def run_burgers_transfer(cfg) -> dict:
                 filename=f"predictions_param_{lbl}.npz",
             )
 
+        # Save checkpoints for transfer and scratch models
+        _net_meta = {"type": "mlp", "layers": layers}
+        solver_tf.save_checkpoint(out_dir, stem="params_param_transfer", metadata={
+            "problem": "burgers_transfer", "strategy": "parameter_transfer",
+            "network": _net_meta,
+            "physics": {"source_nu": src_nu, "target_nu": tgt_nu},
+            "final_loss": solver_tf.loss_hist[-1],
+        })
+        solver_sc.save_checkpoint(out_dir, stem="params_param_scratch", metadata={
+            "problem": "burgers_transfer", "strategy": "parameter_scratch",
+            "network": _net_meta, "physics": {"nu": tgt_nu},
+            "final_loss": solver_sc.loss_hist[-1],
+        })
+
         results["param_transfer"] = {
             "transfer_final": solver_tf.loss_hist[-1],
             "scratch_final":  solver_sc.loss_hist[-1],
@@ -338,6 +353,20 @@ def run_burgers_transfer(cfg) -> dict:
                 outputs = {"u_pred": np.array(u_pred_r)},
                 filename=f"predictions_temporal_{lbl}.npz",
             )
+
+        # Save checkpoints
+        _net_meta = {"type": "mlp", "layers": layers}
+        solver_p2.save_checkpoint(out_dir, stem="params_temporal_transfer", metadata={
+            "problem": "burgers_transfer", "strategy": "temporal_transfer",
+            "network": _net_meta,
+            "physics": {"nu": nu, "T1": T1, "T2": T2},
+            "final_loss": solver_p2.loss_hist[-1],
+        })
+        solver_sc.save_checkpoint(out_dir, stem="params_temporal_scratch", metadata={
+            "problem": "burgers_transfer", "strategy": "temporal_scratch",
+            "network": _net_meta, "physics": {"nu": nu, "T": T2},
+            "final_loss": solver_sc.loss_hist[-1],
+        })
 
         results["temporal_transfer"] = {
             "transfer_final": solver_p2.loss_hist[-1],

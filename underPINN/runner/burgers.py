@@ -182,5 +182,18 @@ def run_burgers(cfg) -> dict:
     fig.savefig(os.path.join(out_dir, "loss.png"), dpi=150, bbox_inches="tight")
     plt.close(fig)
 
+    # ── Model checkpoint ──────────────────────────────────────────────────────
+    cfg_out = cfg_get(cfg, "output", default=None)
+    if cfg_get(cfg_out, "save_params", default=True) if cfg_out else True:
+        net_cfg = cfg.network
+        solver.save_checkpoint(out_dir, metadata={
+            "problem": "burgers",
+            "network": {
+                "type":   cfg_get(net_cfg, "type", default="mlp"),
+                "layers": list(net_cfg.layers),
+            },
+            "physics": {"nu": float(cfg.physics.nu)},
+        })
+
     print(f"\nOutputs saved to: {out_dir}/")
     return {"params": solver.params, "loss_hist": solver.loss_hist}

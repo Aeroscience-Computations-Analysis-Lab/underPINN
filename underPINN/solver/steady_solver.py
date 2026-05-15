@@ -70,6 +70,7 @@ class SteadySolver(BaseSolver):
             seed = config.seed
             log_every = config.log_every
             callbacks = list(config.callbacks)
+            self._attach_checkpoint_callbacks(callbacks)
             if config.lr_schedule is not None:
                 self.opt = self._make_opt(config.lr, config.lr_schedule)
                 self._step = self._build_step()

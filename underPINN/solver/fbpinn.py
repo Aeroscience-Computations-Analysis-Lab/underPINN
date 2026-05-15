@@ -117,6 +117,7 @@ class FBPINNSolver(BaseSolver):
             batch_b = config.batch_b
             seed = config.seed
             callbacks = list(config.callbacks)
+            self._attach_checkpoint_callbacks(callbacks)
             n_scan = max(1, config.n_scan_steps)
             resample_period = config.resample_period
             resample_candidates = config.resample_candidates
