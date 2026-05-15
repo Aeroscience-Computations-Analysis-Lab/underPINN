@@ -52,6 +52,7 @@ from underPINN.pde.wave import WavePDE
 from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.callbacks.early_stopping import EarlyStopping
 from underPINN.utils.io import save_predictions
+from underPINN.utils.checkpoint import save_checkpoint
 from underPINN.utils.sampling import safe_choice
 
 
@@ -210,6 +211,19 @@ def run_wave(cfg) -> dict:
     fig.tight_layout()
     fig.savefig(os.path.join(out_dir, "solution.png"), dpi=150, bbox_inches="tight")
     plt.close(fig)
+
+    # ── Model checkpoint ──────────────────────────────────────────────────────
+    net_cfg = cfg.network
+    save_checkpoint(params, out_dir, metadata={
+        "problem": "wave",
+        "network": {
+            "type":     "fourier_mlp",
+            "layers":   list(net_cfg.layers),
+            "n_fourier": cfg_get(net_cfg, "n_fourier", default=16),
+            "sigma":     cfg_get(net_cfg, "sigma",     default=2.0),
+        },
+        "physics": {"c": float(c)},
+    })
 
     print(f"\nOutputs saved to: {out_dir}/")
     return {"params": params, "loss_hist": loss_hist}

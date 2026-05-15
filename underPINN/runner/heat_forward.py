@@ -190,6 +190,13 @@ def run_heat_forward(cfg) -> dict:
     plt.close(fig2)
 
     np.save(os.path.join(out_dir, "loss_hist.npy"), np.array(solver.loss_hist))
+
+    # ── Model checkpoint ──────────────────────────────────────────────────────
+    solver.save_checkpoint(out_dir, metadata={
+        "problem": "heat_forward",
+        "network": {"type": net_type, "layers": list(net_cfg.layers)},
+    })
+
     print(f"\nOutputs saved to: {out_dir}/")
     return {"params": solver.params, "rel_l2": rel_l2, "max_ae": max_ae,
             "loss_hist": solver.loss_hist}

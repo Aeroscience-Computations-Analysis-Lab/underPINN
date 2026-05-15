@@ -79,6 +79,7 @@ from underPINN.config.loader import cfg_get, save_config
 from underPINN.nn.mlp import MLP
 from underPINN.pde.pipe_flow_unsteady import UnsteadyPipeFlowPDE
 from underPINN.utils.io import save_predictions
+from underPINN.utils.checkpoint import save_checkpoint
 from underPINN.utils.sampling import safe_choice
 
 
@@ -320,6 +321,19 @@ def run_pipe_flow_unsteady_transfer(cfg) -> dict:
                 filename=f"predictions_re_transfer_{lbl}.npz",
             )
 
+        # Save checkpoints
+        _net_meta = {"type": "mlp", "layers": layers}
+        save_checkpoint(tf_params, out_dir, stem="params_re_transfer", metadata={
+            "problem": "pipe_flow_unsteady_transfer", "strategy": "re_transfer",
+            "network": _net_meta, "physics": {"Re": tgt_Re, "R": R},
+            "final_loss": hist_tf[-1],
+        })
+        save_checkpoint(sc_params, out_dir, stem="params_re_scratch", metadata={
+            "problem": "pipe_flow_unsteady_transfer", "strategy": "re_scratch",
+            "network": _net_meta, "physics": {"Re": tgt_Re, "R": R},
+            "final_loss": hist_sc[-1],
+        })
+
         results["re_transfer"] = {
             "transfer_final": hist_tf[-1],
             "scratch_final":  hist_sc[-1],
@@ -417,6 +431,19 @@ def run_pipe_flow_unsteady_transfer(cfg) -> dict:
                 outputs = {"u_pred": u_pred},
                 filename=f"predictions_temporal_{lbl}.npz",
             )
+
+        # Save checkpoints
+        _net_meta = {"type": "mlp", "layers": layers}
+        save_checkpoint(p2_params, out_dir, stem="params_temporal_transfer", metadata={
+            "problem": "pipe_flow_unsteady_transfer", "strategy": "temporal_transfer",
+            "network": _net_meta, "physics": {"Re": Re, "T1": T1, "T2": T2, "R": R},
+            "final_loss": hist_p2[-1],
+        })
+        save_checkpoint(sc2_params, out_dir, stem="params_temporal_scratch", metadata={
+            "problem": "pipe_flow_unsteady_transfer", "strategy": "temporal_scratch",
+            "network": _net_meta, "physics": {"Re": Re, "T": T2, "R": R},
+            "final_loss": hist_sc2[-1],
+        })
 
         results["temporal_transfer"] = {
             "transfer_final": hist_p2[-1],

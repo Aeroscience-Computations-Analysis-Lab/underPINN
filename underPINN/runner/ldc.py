@@ -219,6 +219,13 @@ def run_ldc(cfg) -> dict:
     np.save(os.path.join(out_dir, "loss_hist.npy"), np.array(solver.loss_hist))
     np.savez(os.path.join(out_dir, "solution.npz"),
              u=u_g, v=v_g, p=p_g, x=np.array(XX), y=np.array(YY))
+    # ── Model checkpoint ──────────────────────────────────────────────────────
+    solver.save_checkpoint(out_dir, metadata={
+        "problem": "ldc",
+        "network": {"type": "fbpinn", "layers": layers},
+        "physics": {"Re": Re},
+    })
+
     save_config(cfg, os.path.join(out_dir, "config.yaml"))
     print(f"\nOutputs saved to: {out_dir}/")
 

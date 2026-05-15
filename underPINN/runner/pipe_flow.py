@@ -54,6 +54,7 @@ from underPINN.geometry.pipe import Pipe
 from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.callbacks.early_stopping import EarlyStopping
 from underPINN.utils.io import save_predictions
+from underPINN.utils.checkpoint import save_checkpoint
 from underPINN.utils.sampling import safe_choice
 
 
@@ -207,6 +208,13 @@ def run_pipe_flow(cfg) -> dict:
     fig.tight_layout()
     fig.savefig(os.path.join(out_dir, "loss.png"), dpi=150, bbox_inches="tight")
     plt.close(fig)
+
+    # ── Model checkpoint ──────────────────────────────────────────────────────
+    save_checkpoint(params, out_dir, metadata={
+        "problem": "pipe_flow",
+        "network": {"type": "mlp", "layers": list(cfg.network.layers)},
+        "physics": {"Re": float(Re), "R": float(R), "L": float(L)},
+    })
 
     print(f"\nOutputs saved to: {out_dir}/")
     return {"params": params, "loss_hist": loss_hist, "rel_l2": errs}
