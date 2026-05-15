@@ -1,197 +1,174 @@
+"""1-D Burgers PINN.
+
+Run directly or via the CLI:
+
+    python examples/burgers/burgers.py                   # uses config.yaml
+    python examples/burgers/burgers.py myconfig.yaml     # custom config
+    python -m underPINN run examples/burgers/config.yaml
+
+All parameters live in config.yaml — edit there, no code changes needed.
+"""
+from __future__ import annotations
+
+import os
 import numpy as np
 import jax
 import jax.numpy as jnp
 import optax
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
-from underPINN.nn.fbpinn import FBPINN
+from underPINN.config.loader import cfg_get, save_config
+from underPINN.nn.mlp import MLP, FourierMLP
 from underPINN.pde.burgers import BurgersPDE
-from underPINN.solver.fbpinn import FBPINNSolver
 from underPINN.losses.loss import PINNLoss
+from underPINN.solver.fbpinn import FBPINNSolver
 from underPINN.core.config import TrainingConfig
 from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.callbacks.early_stopping import EarlyStopping
-
-from underPINN.geometry.interval import Interval
-from underPINN.geometry.rectangle import Rectangle
-
-from underPINN.utils.plotting import (
-    make_prediction_grid,
-    plot_solution,
-    plot_losses,
-    plot_difference
-)
-
-from underPINN.utils.serialization import save_prediction_npz
 from underPINN.utils.io import save_predictions
 
 
-def make_data(domain, n_collocation=80000, n_ic=1000, seed=42):
+def _build_model(net_cfg):
+    layers = net_cfg.layers
+    if cfg_get(net_cfg, "type", default="mlp") == "fourier_mlp":
+        return FourierMLP(
+            layers=layers,
+            n_fourier=cfg_get(net_cfg, "n_fourier", default=16),
+            sigma=cfg_get(net_cfg, "sigma", default=2.0),
+        )
+    return MLP(layers=layers)
+
+
+def _make_data(data_cfg, seed: int):
+    T    = data_cfg.T
+    N_r  = cfg_get(data_cfg, "n_collocation", default=6000)
+    N_ic = cfg_get(data_cfg, "n_ic", default=200)
+    N_bc = cfg_get(data_cfg, "n_bc", default=300)
+
     rng = np.random.default_rng(seed)
+    x_r  = rng.uniform(-1.0, 1.0, N_r).astype(np.float32)
+    t_r  = rng.uniform(0.0,  T,   N_r).astype(np.float32)
 
-    pts_r = domain.sample(n_collocation, seed=rng.integers(1e9))
-    x_r = pts_r[:, 0]
-    t_r = pts_r[:, 1]
+    x_ic = np.linspace(-1.0, 1.0, N_ic, dtype=np.float32)
+    u_ic = (-np.sin(np.pi * x_ic)).astype(np.float32)
 
-    x_ic = np.linspace(domain.xmin, domain.xmax, n_ic)
+    t_bc = rng.uniform(0.0, T, N_bc).astype(np.float32)
+    x_bc = np.concatenate([np.full(N_bc, -1., np.float32),
+                            np.full(N_bc,  1., np.float32)])
+    t_bc = np.concatenate([t_bc, t_bc])
+    u_bc = np.zeros_like(x_bc)
 
-    u_ic = (
-        2.0 * np.exp(-(x_ic + 2.0) ** 2 / 0.5)
-        + 1.5 * np.exp(-(x_ic) ** 2 / 0.3)
-        + 1.0 * np.exp(-(x_ic - 2.0) ** 2 / 0.4)
-        + 0.3 * np.sin(2 * x_ic) * np.exp(-x_ic ** 2 / 8.0)
+    return (jnp.array(x_r),  jnp.array(t_r),
+            jnp.array(x_ic), jnp.array(u_ic),
+            jnp.array(x_bc), jnp.array(t_bc), jnp.array(u_bc))
+
+
+def run_burgers(cfg) -> dict:
+    """Train a PINN on 1-D Burgers and save outputs."""
+    tr   = cfg.training
+    seed = cfg_get(tr, "seed",     default=0)
+    out  = cfg_get(cfg, "output",  default=None)
+    out_dir = cfg_get(out, "dir",  default="outputs/burgers") if out else "outputs/burgers"
+    os.makedirs(out_dir, exist_ok=True)
+
+    model  = _build_model(cfg.network)
+    pde    = BurgersPDE(model, nu=cfg.physics.nu)
+    loss   = PINNLoss(
+        model, pde,
+        ic_weight=cfg_get(cfg.loss, "ic_weight", default=100.0),
+        bc_weight=cfg_get(cfg.loss, "bc_weight", default=10.0),
+        rba=bool(cfg_get(cfg.loss, "rba", default=False)),
     )
-
-    return (
-        jnp.array(x_r, dtype=jnp.float32),
-        jnp.array(t_r, dtype=jnp.float32),
-        jnp.array(x_ic, dtype=jnp.float32),
-        jnp.array(u_ic, dtype=jnp.float32),
-    )
-
-def make_boundary_data(domain, n_bc=1000, seed=0):
-    rng = np.random.default_rng(seed)
-
-    t = rng.uniform(domain.ymin, domain.ymax, size=n_bc)
-
-    x_left  = np.full_like(t, domain.xmin)
-    x_right = np.full_like(t, domain.xmax)
-
-    x_b = np.concatenate([x_left, x_right])
-    t_b = np.concatenate([t, t])
-    u_b = np.zeros_like(x_b)
-
-    return (
-        jnp.array(x_b, dtype=jnp.float32),
-        jnp.array(t_b, dtype=jnp.float32),
-        jnp.array(u_b, dtype=jnp.float32),
-    )
-
-def main():
-    print("JAX devices:", jax.devices())
-
-    EPOCHS = 5000
-    layers = [2, 64, 64, 64, 64, 64, 1]
-
-    space_time_domain = Rectangle(
-        xmin=-2 * np.pi,
-        xmax= 2 * np.pi,
-        ymin=0.0,
-        ymax=5.0,
-    )
-
-    shifts = jnp.array([
-        [-2.0, 0.0],
-        [ 0.0, 0.0],
-        [ 2.0, 0.0],
-    ])
-
-    xs_min = jnp.array([
-        [-2*np.pi, 0.0],
-        [-2*np.pi/3, 0.0],
-        [0.0, 0.0],
-    ])
-
-    xs_max = jnp.array([
-        [0.0, 5.0],
-        [2*np.pi/3, 5.0],
-        [2*np.pi, 5.0],
-    ])
-
-    smins = jnp.ones_like(xs_min) * 0.5
-    smaxs = jnp.ones_like(xs_max) * 0.5
-
-    model = FBPINN(layers, shifts, xs_min, xs_max, smins, smaxs)
-    pde   = BurgersPDE(model, nu=0.01)
-
-    loss = PINNLoss(
-        model=model,
-        pde=pde,
-        loss_type="l2",
-        ic_weight=100.0,
-        bc_weight=5.0,
-        reg_weight=0.0,
-        rba=True,
-    )
-
-    config = TrainingConfig(
-        epochs=EPOCHS,
-        lr=1e-3,
-        lr_schedule=optax.cosine_decay_schedule(1e-3, decay_steps=EPOCHS, alpha=1e-2),
-        batch_r=4096,
-        batch_i=512,
-        batch_b=512,
-        log_every=500,
-        callbacks=[
-            ConsoleLogger(log_every=500),
-            EarlyStopping(patience=500),
-        ],
-    )
-
     solver = FBPINNSolver(model, pde, loss=loss)
-    solver.init(jax.random.PRNGKey(0))
+    solver.init(jax.random.PRNGKey(seed))
 
-    x_r, t_r, x_i, u_i = make_data(
-        domain=space_time_domain,
-        n_collocation=80000,
-        n_ic=1000,
+    epochs    = tr.epochs
+    lr        = tr.lr
+    lr_alpha  = cfg_get(tr, "lr_alpha",  default=0.01)
+    log_every = cfg_get(tr, "log_every", default=500)
+    patience  = cfg_get(tr, "early_stopping_patience", default=None)
+
+    callbacks = [ConsoleLogger(log_every=log_every)]
+    if patience:
+        callbacks.append(EarlyStopping(patience=int(patience)))
+
+    tc = TrainingConfig(
+        epochs      = epochs,
+        lr          = lr,
+        lr_schedule = optax.cosine_decay_schedule(lr, epochs, alpha=lr_alpha),
+        batch_r     = cfg_get(tr, "batch_r", default=2048),
+        batch_i     = cfg_get(tr, "batch_i", default=256),
+        batch_b     = cfg_get(tr, "batch_b", default=256),
+        log_every   = log_every,
+        callbacks   = callbacks,
+        n_scan_steps        = cfg_get(tr, "n_scan_steps",        default=1),
+        resample_period     = cfg_get(tr, "resample_period",     default=0),
+        resample_candidates = cfg_get(tr, "resample_candidates", default=0),
+        resample_k          = cfg_get(tr, "resample_k",          default=1.0),
     )
 
-    x_b, t_b, u_b = make_boundary_data(
-        domain=space_time_domain,
-        n_bc=1000,
-    )
+    data = _make_data(cfg.data, seed)
+    solver.train(*data, config=tc)
 
-    solver.train(
-        x_r, t_r,
-        x_i, u_i,
-        x_b, t_b, u_b,
-        config=config,
-    )
+    np.save(os.path.join(out_dir, "loss_hist.npy"), np.array(solver.loss_hist))
+    save_config(cfg, os.path.join(out_dir, "config.yaml"))
 
-    # ---- Predictions at collocation points ----
-    pts_r    = jnp.stack([x_r, t_r], axis=1)
+    x_r, t_r = data[0], data[1]
+    pts_r = jnp.stack([x_r, t_r], axis=1)
     u_pred_r = model.apply(solver.params, pts_r)[:, 0]
     save_predictions(
-        ".",
-        coords  = {"x": x_r, "t": t_r},
-        outputs = {"u_pred": u_pred_r},
-        filename = "predictions_collocation.npz",
+        out_dir,
+        coords  = {"x": np.array(x_r), "t": np.array(t_r)},
+        outputs = {"u_pred": np.array(u_pred_r)},
     )
 
-    # ---- Predictions on uniform grid ----
-    x_pred, t_pred, x_grid, t_grid = make_prediction_grid()
+    # ── Solution plot on a fine (x, t) grid ──────────────────────────────────
+    T   = float(cfg.data.T)
+    Nx, Nt = 200, 100
+    x_plt = jnp.linspace(-1.0, 1.0, Nx)
+    t_plt = jnp.linspace(0.0, T, Nt)
+    XX, TT = jnp.meshgrid(x_plt, t_plt, indexing="ij")   # shape (Nx, Nt)
+    pts_g  = jnp.stack([XX.ravel(), TT.ravel()], axis=1)
+    u_grid = np.array(model.apply(solver.params, pts_g)[:, 0].reshape(Nx, Nt))
 
-    save_prediction_npz(
-        model=model,
-        params=solver.params,
-        x=x_pred,
-        t=t_pred,
-        filename="pinn_bfs2.npz",
-    )
+    fig_s, ax_s = plt.subplots(figsize=(8, 4))
+    cf = ax_s.contourf(np.array(x_plt), np.array(t_plt), u_grid.T,
+                       50, cmap="RdBu_r", vmin=-1, vmax=1)
+    plt.colorbar(cf, ax=ax_s, label="u")
+    ax_s.set_xlabel("x"); ax_s.set_ylabel("t")
+    ax_s.set_title(f"Burgers PINN  ν={cfg.physics.nu}")
+    fig_s.tight_layout()
+    fig_s.savefig(os.path.join(out_dir, "solution.png"), dpi=150, bbox_inches="tight")
+    plt.close(fig_s)
 
-    plot_solution(
-        model, solver.params,
-        x_pred, t_pred, x_grid, t_grid,
-        filename="burgers_solution.png",
-    )
+    # ── Loss history ──────────────────────────────────────────────────────────
+    fig, ax = plt.subplots(figsize=(7, 3))
+    ax.semilogy(solver.loss_hist, lw=1.2)
+    ax.set_xlabel("Epoch"); ax.set_ylabel("Loss")
+    ax.set_title(f"Burgers ν={cfg.physics.nu}")
+    fig.tight_layout()
+    fig.savefig(os.path.join(out_dir, "loss.png"), dpi=150, bbox_inches="tight")
+    plt.close(fig)
 
-    plot_losses(
-        solver.loss_hist,
-        solver.pde_hist,
-        solver.ic_hist,
-        bc_hist=solver.bc_hist,
-        reg_hist=solver.reg_hist,
-        filename="training_loss.png",
-    )
+    cfg_out = cfg_get(cfg, "output", default=None)
+    if cfg_get(cfg_out, "save_params", default=True) if cfg_out else True:
+        net_cfg = cfg.network
+        solver.save_checkpoint(out_dir, metadata={
+            "problem": "burgers",
+            "network": {"type": cfg_get(net_cfg, "type", default="mlp"),
+                        "layers": list(net_cfg.layers)},
+            "physics": {"nu": float(cfg.physics.nu)},
+        })
 
-    plot_difference(
-        npz_pred="pinn_bfs2.npz",
-        npz_ref="burgers_complex.npz",
-        nx=400,
-        ny=400,
-        filename="diff_jax.png",
-    )
+    print(f"\nOutputs saved to: {out_dir}/")
+    return {"params": solver.params, "loss_hist": solver.loss_hist}
 
 
 if __name__ == "__main__":
-    main()
+    import sys, pathlib
+    _HERE = pathlib.Path(__file__).parent
+    cfg_path = str(pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else _HERE / "config.yaml")
+    from underPINN.config.loader import load_config
+    run_burgers(load_config(cfg_path))

@@ -1,43 +1,30 @@
+"""Unsteady 3-D Pipe Flow with Transfer Learning PINN.
+
+Run directly or via the CLI:
+
+    python examples/pipe_flow/pipe_flow_unsteady_transfer.py
+    python examples/pipe_flow/pipe_flow_unsteady_transfer.py myconfig.yaml
+    python -m underPINN run examples/pipe_flow/pipe_flow_unsteady_transfer.yaml
+
+Two transfer learning strategies benchmarked against from-scratch:
+
+  Strategy 1 — Re Transfer
+    Source: Re_src, t ∈ [0, T]  →  n_source_epochs
+    Target: Re_tgt, t ∈ [0, T]
+      • Transfer: warm start → n_transfer_epochs
+      • Scratch : random init → n_scratch_epochs
+
+  Strategy 2 — Temporal Transfer
+    Phase 1: Re fixed, t ∈ [0, T1]  →  n_phase1_epochs
+    Phase 2: Re fixed, t ∈ [0, T2]  (extended)
+      • Transfer: warm start → n_transfer_epochs
+      • Scratch : random init → n_scratch_epochs
+
+Network: (y, z, t) → u  (axial velocity)
 """
-Unsteady 3-D Pipe Flow — Transfer Learning
-===========================================
+from __future__ import annotations
 
-Cross-section formulation: (y, z, t) → u
-
-PDE:   u_t = G + ν(u_yy + u_zz),   r < R,  t ∈ [0, T]
-       G   = 4 ν U_max / R²          (pressure-gradient forcing)
-IC :   u(y, z, 0) = 0               (fluid at rest)
-BC :   u = 0  at  r = R             (no-slip)
-
-Exact: Bessel series (Stokes starting flow)
-       u(r,t) = U_max(1−r²/R²) − 8U_max Σ J₀(αₙr/R)/(αₙ³J₁(αₙ)) exp(−αₙ²νt/R²)
-
-════════════════════════════════════════════════════════
-Strategy 1 — Re Transfer  (ν = 1/Re)
-════════════════════════════════════════════════════════
-Source : Re = 10, t ∈ [0, 3]  →  2 500 epochs  (fast transient, τ = R²Re = 2.5)
-Target : Re = 50, t ∈ [0, 3]                    (slow transient, τ = 12.5)
-  Transfer : warm start         →  2 000 fine-tune epochs (lr = 3e-4)
-  Scratch  : random init        →  4 500 epochs            (lr = 1e-3)
-
-════════════════════════════════════════════════════════
-Strategy 2 — Temporal Transfer  (extend time horizon)
-════════════════════════════════════════════════════════
-Re = 10 throughout.
-Phase 1 : t ∈ [0, T1=1.0]    →  2 500 epochs
-Phase 2 : t ∈ [0, T2=3.0]
-  Transfer : warm start         →  2 000 fine-tune epochs (lr = 3e-4)
-  Scratch  : random init        →  4 500 epochs            (lr = 1e-3)
-
-Outputs
--------
-pipe_unsteady_re_loss.png         — strategy 1 convergence
-pipe_unsteady_re_profiles.png     — strategy 1 radial profiles vs exact
-pipe_unsteady_re_spacetime.png    — strategy 1 space-time comparison
-pipe_unsteady_time_loss.png       — strategy 2 convergence
-pipe_unsteady_time_profiles.png   — strategy 2 snapshot profiles vs exact
-"""
-
+import os
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -46,37 +33,20 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from underPINN.config.loader import cfg_get, save_config
 from underPINN.nn.mlp import MLP
 from underPINN.pde.pipe_flow_unsteady import UnsteadyPipeFlowPDE
 from underPINN.utils.io import save_predictions
+from underPINN.utils.checkpoint import save_checkpoint
 from underPINN.utils.sampling import safe_choice
 
 
-# ── Problem parameters ────────────────────────────────────────────────────────
-R     = 0.5
-U_MAX = 1.0
+# ---------------------------------------------------------------------------
+# Shared sampling helpers
+# ---------------------------------------------------------------------------
 
-# ── Loss weights ──────────────────────────────────────────────────────────────
-W_PDE = 1.0
-W_IC  = 100.0
-W_BC  = 50.0
-
-# ── Training batch sizes ──────────────────────────────────────────────────────
-BATCH_R  = 512
-BATCH_IC = 200
-BATCH_BC = 200
-
-LOG_EVERY = 500
-
-LAYERS = [3, 64, 64, 64, 64, 1]
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Sampling helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _disk_yz(n: int, seed: int) -> np.ndarray:
-    """Uniform (y, z) inside disk of radius R (rejection from bounding square)."""
+def _disk_yz(n: int, R: float, seed: int) -> np.ndarray:
+    """Uniform (y, z) inside disk of radius R (rejection sampling)."""
     rng = np.random.default_rng(seed)
     out = []
     while sum(len(a) for a in out) < n:
@@ -87,66 +57,25 @@ def _disk_yz(n: int, seed: int) -> np.ndarray:
     return np.concatenate(out)[:n]
 
 
-def make_data(T: float, N_r: int = 6000, N_ic: int = 600,
-              N_bc: int = 800, seed: int = 0):
-    """Generate all training arrays for time horizon [0, T]."""
-    rng = np.random.default_rng(seed)
-
-    yz_r = _disk_yz(N_r, seed)
-    t_r  = rng.uniform(0, T, N_r).astype(np.float32)
-
-    yz_ic = _disk_yz(N_ic, seed + 1)
-
-    theta  = rng.uniform(0, 2 * np.pi, N_bc).astype(np.float32)
-    yz_bc  = np.column_stack([R * np.cos(theta), R * np.sin(theta)])
-    t_bc   = rng.uniform(0, T, N_bc).astype(np.float32)
-
+def _make_data(T: float, N_r: int, N_ic: int, N_bc: int, R: float, seed: int = 0):
+    rng   = np.random.default_rng(seed)
+    yz_r  = _disk_yz(N_r,  R, seed)
+    t_r   = rng.uniform(0.0, T, N_r).astype(np.float32)
+    yz_ic = _disk_yz(N_ic, R, seed + 1)
+    theta = rng.uniform(0.0, 2 * np.pi, N_bc).astype(np.float32)
+    yz_bc = np.column_stack([R * np.cos(theta), R * np.sin(theta)])
+    t_bc  = rng.uniform(0.0, T, N_bc).astype(np.float32)
     return (jnp.array(yz_r),  jnp.array(t_r),
             jnp.array(yz_ic),
             jnp.array(yz_bc), jnp.array(t_bc))
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Training infrastructure
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _make_step(pde, optimizer):
-    """Build a JIT-compiled gradient step (captures pde and optimizer)."""
-
-    @jax.jit
-    def step(params, opt_state, yz_r, t_r, yz_ic, yz_bc, t_bc):
-        def loss_fn(p):
-            pde_l = jnp.mean(pde.residual(p, yz_r, t_r) ** 2)
-
-            t_zero = jnp.zeros(yz_ic.shape[0])
-            ic_l   = jnp.mean(pde.u(p, yz_ic, t_zero) ** 2)
-
-            bc_l   = jnp.mean(pde.u(p, yz_bc, t_bc) ** 2)
-
-            total  = W_PDE * pde_l + W_IC * ic_l + W_BC * bc_l
-            return total, (pde_l, ic_l, bc_l)
-
-        (total, aux), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)
-        updates, opt_state  = optimizer.update(grads, opt_state)
-        params              = optax.apply_updates(params, updates)
-        return params, opt_state, total, aux
-
-    return step
-
-
-def run_training(pde, data, epochs: int, lr: float,
-                 init_params=None, seed: int = 0, label: str = ""):
-    """Train the model, optionally warm-starting from *init_params*.
-
-    Parameters
-    ----------
-    pde         : UnsteadyPipeFlowPDE instance (owns model + physics)
-    data        : tuple from make_data()
-    epochs      : number of gradient steps
-    lr          : peak learning rate
-    init_params : if given, skip random init (transfer learning warm start)
-    label       : short string for console progress lines
-    """
+def _run_training(pde, data, epochs: int, lr: float, R: float,
+                  batch_r: int, batch_ic: int, batch_bc: int,
+                  w_pde: float, w_ic: float, w_bc: float,
+                  init_params=None, seed: int = 0, label: str = "",
+                  log_every: int = 500):
+    """Train the unsteady pipe PDE; optionally warm-start from *init_params*."""
     yz_r, t_r, yz_ic, yz_bc, t_bc = data
 
     key    = jax.random.PRNGKey(seed)
@@ -160,342 +89,336 @@ def run_training(pde, data, epochs: int, lr: float,
         optax.scale(-1.0),
     )
     opt_state = optimizer.init(params)
-    step_fn   = _make_step(pde, optimizer)
+
+    @jax.jit
+    def step(params, state, yz_r_b, t_r_b, yz_ic_b, yz_bc_b, t_bc_b):
+        def loss_fn(p):
+            pde_l = jnp.mean(pde.residual(p, yz_r_b, t_r_b) ** 2)
+            t_z   = jnp.zeros(yz_ic_b.shape[0])
+            ic_l  = jnp.mean(pde.u(p, yz_ic_b, t_z) ** 2)
+            bc_l  = jnp.mean(pde.u(p, yz_bc_b, t_bc_b) ** 2)
+            total = w_pde * pde_l + w_ic * ic_l + w_bc * bc_l
+            return total, (pde_l, ic_l, bc_l)
+        (total, aux), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)
+        updates, state      = optimizer.update(grads, state)
+        params              = optax.apply_updates(params, updates)
+        return params, state, total, aux
 
     N_r, N_ic, N_bc = yz_r.shape[0], yz_ic.shape[0], yz_bc.shape[0]
-    key = jax.random.PRNGKey(seed + 99)
-
+    key       = jax.random.PRNGKey(seed + 99)
     loss_hist = []
+
     for ep in range(epochs):
         key, k1, k2, k3 = jax.random.split(key, 4)
-        ir = safe_choice(k1, N_r,  BATCH_R)
-        ii = safe_choice(k2, N_ic, BATCH_IC)
-        ib = safe_choice(k3, N_bc, BATCH_BC)
+        ir = safe_choice(k1, N_r,  batch_r)
+        ii = safe_choice(k2, N_ic, batch_ic)
+        ib = safe_choice(k3, N_bc, batch_bc)
 
-        params, opt_state, total, (pl, il, bl) = step_fn(
+        params, opt_state, total, (pl, il, bl) = step(
             params, opt_state,
-            yz_r[ir], t_r[ir],
-            yz_ic[ii],
-            yz_bc[ib], t_bc[ib],
+            yz_r[ir], t_r[ir], yz_ic[ii], yz_bc[ib], t_bc[ib],
         )
         loss_hist.append(float(total))
 
-        if ep % LOG_EVERY == 0 or ep == epochs - 1:
+        if ep % log_every == 0 or ep == epochs - 1:
             tag = f"[{label}] " if label else ""
-            print(f"{tag}Epoch {ep:5d} | total {total:.3e} | "
-                  f"pde {pl:.3e} | ic {il:.3e} | bc {bl:.3e}")
+            print(f"{tag}Epoch {ep:5d} | total {total:.3e} "
+                  f"| pde {pl:.3e} | ic {il:.3e} | bc {bl:.3e}")
 
     return params, loss_hist
 
 
-def rel_l2(model, params, pde, yz_val, t_val: float) -> float:
-    """Relative L² error vs exact Bessel solution at time t_val."""
-    u_ex   = pde.exact(yz_val, t_val)
-    yzt    = jnp.concatenate(
-        [yz_val, jnp.full((yz_val.shape[0], 1), t_val)], axis=1)
-    u_pred = np.array(model.apply(params, yzt)[:, 0])
-    return float(np.linalg.norm(u_pred - u_ex)
-                 / (np.linalg.norm(u_ex) + 1e-10))
+def _rel_l2(model, params, pde, yz_val, t_val: float) -> float:
+    u_ex  = pde.exact(np.array(yz_val), t_val)
+    yzt   = jnp.concatenate([yz_val, jnp.full((yz_val.shape[0], 1), t_val)], axis=1)
+    u_pr  = np.array(model.apply(params, yzt)[:, 0])
+    return float(np.linalg.norm(u_pr - u_ex) / (np.linalg.norm(u_ex) + 1e-10))
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Plotting utilities
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _eval_radial(model, params, r_arr, t_val: float):
-    """Evaluate u along the y-axis (z=0) at a fixed time."""
-    Nr  = len(r_arr)
-    yz  = jnp.column_stack([jnp.array(r_arr), jnp.zeros(Nr)])
-    yzt = jnp.concatenate([yz, jnp.full((Nr, 1), t_val)], axis=1)
+def _eval_radial(model, params, r_arr, t_val: float) -> np.ndarray:
+    yz  = jnp.column_stack([jnp.array(r_arr), jnp.zeros(len(r_arr))])
+    yzt = jnp.concatenate([yz, jnp.full((len(r_arr), 1), t_val)], axis=1)
     return np.array(model.apply(params, yzt)[:, 0])
 
 
-def _exact_radial(pde, r_arr, t_val: float):
-    """Exact u along the y-axis (z=0) at a fixed time."""
-    yz = np.column_stack([np.array(r_arr), np.zeros(len(r_arr))])
-    return pde.exact(yz, t_val)
+# ---------------------------------------------------------------------------
+# Main runner
+# ---------------------------------------------------------------------------
 
+def run_pipe_flow_unsteady_transfer(cfg) -> dict:
+    """Run Re Transfer and/or Temporal Transfer on unsteady 3-D pipe flow."""
+    # ── Unpack shared params ──────────────────────────────────────────────────
+    ph  = cfg.physics
+    d   = cfg.data
+    lw  = cfg.loss
+    out = cfg_get(cfg, "output", default=None)
+    out_dir = (cfg_get(out, "dir", default="outputs/pipe_flow_unsteady_transfer")
+               if out else "outputs/pipe_flow_unsteady_transfer")
+    os.makedirs(out_dir, exist_ok=True)
 
-def _exact_spacetime(pde, r_arr, t_arr):
-    """Exact u(r, t) on a 2D grid for space-time plots."""
-    yz = np.column_stack([np.array(r_arr), np.zeros(len(r_arr))])
-    return np.array([pde.exact(yz, float(t)) for t in t_arr])   # (Nt, Nr)
+    R      = float(cfg_get(ph, "R",     default=0.5))
+    U_max  = float(cfg_get(ph, "U_max", default=1.0))
+    layers = list(cfg.network.layers)
 
+    N_r  = int(cfg_get(d, "n_collocation", default=6000))
+    N_ic = int(cfg_get(d, "n_ic",          default=600))
+    N_bc = int(cfg_get(d, "n_bc",          default=800))
+    B_r  = int(cfg_get(d, "batch_r",       default=512))
+    B_ic = int(cfg_get(d, "batch_ic",      default=200))
+    B_bc = int(cfg_get(d, "batch_bc",      default=200))
 
-def _pred_spacetime(model, params, r_arr, t_arr):
-    """PINN u(r, t) on a 2D grid."""
-    Nr, Nt = len(r_arr), len(t_arr)
-    RR, TT = np.meshgrid(r_arr, t_arr, indexing="ij")          # (Nr, Nt)
-    yz  = np.column_stack([RR.ravel(), np.zeros(Nr * Nt, dtype=np.float32)])
-    yzt = jnp.concatenate([jnp.array(yz),
-                           jnp.array(TT.ravel()[:, None])], axis=1)
-    return np.array(model.apply(params, yzt)[:, 0]).reshape(Nr, Nt)
+    w_pde = float(cfg_get(lw, "w_pde", default=1.0))
+    w_ic  = float(cfg_get(lw, "w_ic",  default=100.0))
+    w_bc  = float(cfg_get(lw, "w_bc",  default=50.0))
 
+    results = {}
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Strategy 1 — Re Transfer
-# ─────────────────────────────────────────────────────────────────────────────
+    # ── Strategy 1 — Re Transfer ──────────────────────────────────────────────
+    rt = cfg_get(cfg, "re_transfer", default=None)
+    if rt is not None:
+        print("\n" + "=" * 60)
+        print("Strategy 1: Re Transfer")
+        print("=" * 60)
 
-def run_re_transfer():
-    print("\n" + "=" * 60)
-    print("Strategy 1: Re Transfer  Re=10 → Re=50")
-    print("=" * 60)
+        src_Re = float(cfg_get(rt, "source_Re",        default=10.0))
+        tgt_Re = float(cfg_get(rt, "target_Re",        default=50.0))
+        T      = float(cfg_get(rt, "T",                default=3.0))
+        N_src  = int(cfg_get(rt,   "n_source_epochs",   default=2500))
+        N_tf   = int(cfg_get(rt,   "n_transfer_epochs", default=2000))
+        N_sc   = int(cfg_get(rt,   "n_scratch_epochs",  default=4500))
+        src_lr = float(cfg_get(rt, "source_lr",         default=1e-3))
+        tf_lr  = float(cfg_get(rt, "transfer_lr",       default=3e-4))
+        sc_lr  = float(cfg_get(rt, "scratch_lr",        default=1e-3))
 
-    T     = 3.0
-    N_SRC = 2500
-    N_TF  = 2000
-    N_SC  = N_SRC + N_TF
+        data_src = _make_data(T, N_r, N_ic, N_bc, R, seed=0)
+        data_tgt = _make_data(T, N_r, N_ic, N_bc, R, seed=1)
 
-    data_src = make_data(T, seed=0)
-    data_tgt = make_data(T, seed=1)
+        print(f"\n[Source]   Re={src_Re}, {N_src} epochs")
+        model_src = MLP(layers=layers)
+        pde_src   = UnsteadyPipeFlowPDE(model_src, Re=src_Re, R=R, U_max=U_max)
+        src_params, _ = _run_training(
+            pde_src, data_src, N_src, src_lr, R, B_r, B_ic, B_bc,
+            w_pde, w_ic, w_bc, seed=0, label="Source")
 
-    # ── Source: Re = 10 ───────────────────────────────────────────────────────
-    print(f"\n[Source]   Re=10,  {N_SRC} epochs  (τ = {R**2*10:.1f})")
-    model_src = MLP(layers=LAYERS)
-    pde_src   = UnsteadyPipeFlowPDE(model_src, Re=10.0, R=R, U_max=U_MAX)
-    src_params, _ = run_training(pde_src, data_src, N_SRC, lr=1e-3,
-                                 seed=0, label="Source")
+        print(f"\n[Transfer] Re={tgt_Re}, {N_tf} fine-tune epochs")
+        model_tf = MLP(layers=layers)
+        pde_tf   = UnsteadyPipeFlowPDE(model_tf, Re=tgt_Re, R=R, U_max=U_max)
+        tf_params, hist_tf = _run_training(
+            pde_tf, data_tgt, N_tf, tf_lr, R, B_r, B_ic, B_bc,
+            w_pde, w_ic, w_bc, init_params=src_params, seed=1, label="Transfer")
 
-    # ── Transfer: Re = 50, warm start ─────────────────────────────────────────
-    print(f"\n[Transfer] Re=50, {N_TF} fine-tune epochs  (τ = {R**2*50:.1f})")
-    model_tf = MLP(layers=LAYERS)
-    pde_tf   = UnsteadyPipeFlowPDE(model_tf, Re=50.0, R=R, U_max=U_MAX)
-    tf_params, hist_tf = run_training(
-        pde_tf, data_tgt, N_TF, lr=3e-4,
-        init_params=src_params, seed=1, label="Transfer")
+        print(f"\n[Scratch]  Re={tgt_Re}, {N_sc} epochs from random init")
+        model_sc = MLP(layers=layers)
+        pde_sc   = UnsteadyPipeFlowPDE(model_sc, Re=tgt_Re, R=R, U_max=U_max)
+        sc_params, hist_sc = _run_training(
+            pde_sc, data_tgt, N_sc, sc_lr, R, B_r, B_ic, B_bc,
+            w_pde, w_ic, w_bc, seed=2, label="Scratch")
 
-    # ── Scratch: Re = 50 ──────────────────────────────────────────────────────
-    print(f"\n[Scratch]  Re=50, {N_SC} epochs from random init")
-    model_sc = MLP(layers=LAYERS)
-    pde_sc   = UnsteadyPipeFlowPDE(model_sc, Re=50.0, R=R, U_max=U_MAX)
-    sc_params, hist_sc = run_training(
-        pde_sc, data_tgt, N_SC, lr=1e-3, seed=2, label="Scratch")
+        # Validation
+        yz_val = jnp.array(_disk_yz(2000, R, seed=99))
+        for t_check in [1.0, T]:
+            e_tf = _rel_l2(model_tf, tf_params, pde_tf, yz_val, t_check)
+            e_sc = _rel_l2(model_sc, sc_params, pde_sc, yz_val, t_check)
+            print(f"Rel-L² at t={t_check:.1f}: Transfer {e_tf:.3e} | Scratch {e_sc:.3e}")
 
-    # ── Validation ────────────────────────────────────────────────────────────
-    yz_val = jnp.array(_disk_yz(2000, seed=99))
-    for t_check in [1.0, T]:
-        err_tf = rel_l2(model_tf, tf_params, pde_tf, yz_val, t_check)
-        err_sc = rel_l2(model_sc, sc_params, pde_sc, yz_val, t_check)
-        print(f"Rel-L² at t={t_check:.1f}: Transfer {err_tf:.3e}  |  "
-              f"Scratch {err_sc:.3e}")
+        # Loss convergence plot
+        fig, axes = plt.subplots(1, 2, figsize=(13, 4))
+        ax = axes[0]
+        ax.semilogy(hist_tf, "b-",  lw=1.5, label=f"Transfer (warm, {N_tf} ep)")
+        ax.semilogy(hist_sc[N_src:], "r--", lw=1.5,
+                    label=f"Scratch Re={tgt_Re} (same range)")
+        ax.axhline(hist_sc[N_src - 1], color="gray", ls=":", lw=1)
+        ax.set_xlabel("Fine-tune epoch"); ax.set_ylabel("Total loss")
+        ax.set_title(f"Re Transfer  {src_Re} → {tgt_Re}"); ax.legend(fontsize=8)
+        ax = axes[1]
+        ax.semilogy(hist_sc[:N_src], "r-",  lw=1.2, label=f"Scratch (first {N_src} ep)")
+        ax.axhline(hist_tf[0], color="b", ls="--", lw=1.2,
+                   label=f"Transfer start = {hist_tf[0]:.2e}")
+        ax.set_xlabel("Epoch"); ax.legend(fontsize=8)
+        fig.suptitle("Unsteady Pipe Flow — Re Transfer")
+        fig.tight_layout()
+        fig.savefig(os.path.join(out_dir, "re_transfer_loss.png"),
+                    dpi=150, bbox_inches="tight")
+        plt.close(fig)
 
-    # ── Save predictions at collocation points ────────────────────────────────
-    yz_r, t_r, _, _, _ = data_tgt
-    for label, model_, params_ in [("transfer", model_tf, tf_params),
-                                   ("scratch",  model_sc, sc_params)]:
-        yzt = jnp.concatenate([yz_r, t_r[:, None]], axis=1)
-        u_pred = np.array(model_.apply(params_, yzt)[:, 0])
-        u_ex   = pde_tf.exact(np.array(yz_r), float(t_r.mean()))  # approx exact at mean t
-        save_predictions(
-            ".",
-            coords  = {"y": np.array(yz_r[:, 0]),
-                       "z": np.array(yz_r[:, 1]),
-                       "t": np.array(t_r)},
-            outputs = {"u_pred": u_pred},
-            filename=f"predictions_re_transfer_{label}.npz",
-        )
+        # Radial profiles
+        Nr    = 80
+        r_arr = np.linspace(0.0, R, Nr, dtype=np.float32)
+        t_snaps = [0.5 * T, T]
+        fig, axes = plt.subplots(1, len(t_snaps), figsize=(12, 4))
+        for ax, ts in zip(np.atleast_1d(axes), t_snaps):
+            u_ex  = np.array(pde_tf.exact(
+                np.column_stack([r_arr, np.zeros(Nr)]), ts))
+            u_tf_ = _eval_radial(model_tf, tf_params, r_arr, ts)
+            u_sc_ = _eval_radial(model_sc, sc_params, r_arr, ts)
+            ax.plot(r_arr, u_ex,  "k-",  lw=2.0, label="Exact")
+            ax.plot(r_arr, u_tf_, "b--", lw=1.8, label="Transfer")
+            ax.plot(r_arr, u_sc_, "r:",  lw=1.8, label="Scratch")
+            ax.set_title(f"t = {ts:.1f}"); ax.set_xlabel("r"); ax.set_ylabel("u")
+            ax.grid(ls="--", alpha=0.4)
+            if ts == t_snaps[0]:
+                ax.legend(fontsize=8)
+        fig.suptitle(f"Unsteady Pipe Flow Re={tgt_Re}: Re Transfer profiles")
+        fig.tight_layout()
+        fig.savefig(os.path.join(out_dir, "re_transfer_profiles.png"),
+                    dpi=150, bbox_inches="tight")
+        plt.close(fig)
 
-    # ── Loss convergence plot ─────────────────────────────────────────────────
-    fig, axes = plt.subplots(1, 2, figsize=(13, 4))
+        # Save predictions
+        yz_r, t_r, _, _, _ = data_tgt
+        for lbl, mdl, prm in [("transfer", model_tf, tf_params),
+                               ("scratch",  model_sc, sc_params)]:
+            yzt    = jnp.concatenate([yz_r, t_r[:, None]], axis=1)
+            u_pred = np.array(mdl.apply(prm, yzt)[:, 0])
+            save_predictions(
+                out_dir,
+                coords  = {"y": np.array(yz_r[:, 0]),
+                           "z": np.array(yz_r[:, 1]),
+                           "t": np.array(t_r)},
+                outputs = {"u_pred": u_pred},
+                filename=f"predictions_re_transfer_{lbl}.npz",
+            )
 
-    ax = axes[0]
-    ax.semilogy(hist_tf, "b-",  lw=1.5, label=f"Transfer (warm, {N_TF} ep)")
-    ax.semilogy(hist_sc[N_SRC:], "r--", lw=1.5,
-                label=f"Scratch Re=50 (same ep range)")
-    ax.axhline(hist_sc[N_SRC - 1], color="gray", ls=":", lw=1,
-               label=f"Scratch after {N_SRC} ep")
-    ax.set_xlabel("Fine-tuning epoch")
-    ax.set_ylabel("Total loss")
-    ax.set_title("Re Transfer  Re=10 → 50\nFine-tuning phase")
-    ax.legend(fontsize=8)
+        # Save checkpoints
+        _net_meta = {"type": "mlp", "layers": layers}
+        save_checkpoint(tf_params, out_dir, stem="params_re_transfer", metadata={
+            "problem": "pipe_flow_unsteady_transfer", "strategy": "re_transfer",
+            "network": _net_meta, "physics": {"Re": tgt_Re, "R": R},
+            "final_loss": hist_tf[-1],
+        })
+        save_checkpoint(sc_params, out_dir, stem="params_re_scratch", metadata={
+            "problem": "pipe_flow_unsteady_transfer", "strategy": "re_scratch",
+            "network": _net_meta, "physics": {"Re": tgt_Re, "R": R},
+            "final_loss": hist_sc[-1],
+        })
 
-    ax = axes[1]
-    ax.semilogy(hist_sc[:N_SRC], "r-",  lw=1.2, label=f"Scratch (first {N_SRC} ep)")
-    ax.axhline(hist_tf[0], color="b", ls="--", lw=1.2,
-               label=f"Transfer start loss = {hist_tf[0]:.2e}")
-    ax.set_xlabel("Epoch")
-    ax.set_ylabel("Total loss")
-    ax.set_title("Scratch vs Transfer starting loss")
-    ax.legend(fontsize=8)
+        results["re_transfer"] = {
+            "transfer_final": hist_tf[-1],
+            "scratch_final":  hist_sc[-1],
+        }
 
-    fig.suptitle("Unsteady Pipe Flow — Re Transfer")
-    fig.tight_layout()
-    fig.savefig("pipe_unsteady_re_loss.png", dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print("Saved: pipe_unsteady_re_loss.png")
+    # ── Strategy 2 — Temporal Transfer ────────────────────────────────────────
+    tt = cfg_get(cfg, "temporal_transfer", default=None)
+    if tt is not None:
+        print("\n" + "=" * 60)
+        print("Strategy 2: Temporal Transfer")
+        print("=" * 60)
 
-    # ── Radial profiles at multiple times ─────────────────────────────────────
-    Nr    = 80
-    r_arr = np.linspace(0, R, Nr, dtype=np.float32)
-    t_snaps = [0.5, 1.5, T]
+        Re    = float(cfg_get(tt, "Re",               default=10.0))
+        T1    = float(cfg_get(tt, "T1",               default=1.0))
+        T2    = float(cfg_get(tt, "T2",               default=3.0))
+        N_p1  = int(cfg_get(tt,   "n_phase1_epochs",   default=2500))
+        N_tf  = int(cfg_get(tt,   "n_transfer_epochs", default=2000))
+        N_sc  = int(cfg_get(tt,   "n_scratch_epochs",  default=4500))
+        p1_lr = float(cfg_get(tt, "phase1_lr",         default=1e-3))
+        tf_lr = float(cfg_get(tt, "transfer_lr",       default=3e-4))
+        sc_lr = float(cfg_get(tt, "scratch_lr",        default=1e-3))
 
-    fig, axes = plt.subplots(1, len(t_snaps), figsize=(14, 4))
-    for ax, ts in zip(axes, t_snaps):
-        u_ex = _exact_radial(pde_tf, r_arr, ts)
-        u_tf = _eval_radial(model_tf, tf_params, r_arr, ts)
-        u_sc = _eval_radial(model_sc, sc_params, r_arr, ts)
+        data_p1 = _make_data(T1, N_r, N_ic, N_bc, R, seed=0)
+        data_p2 = _make_data(T2, N_r, N_ic, N_bc, R, seed=0)
 
-        ax.plot(r_arr, u_ex, "k-",  lw=2.0, label="Exact")
-        ax.plot(r_arr, u_tf, "b--", lw=1.8, label="Transfer")
-        ax.plot(r_arr, u_sc, "r:",  lw=1.8, label="Scratch")
-        ax.set_title(f"t = {ts:.1f}")
-        ax.set_xlabel("r"); ax.set_ylabel("u")
-        ax.grid(ls="--", alpha=0.4)
-        if ts == t_snaps[0]:
-            ax.legend(fontsize=8)
+        print(f"\n[Phase 1]  Re={Re}, t∈[0,{T1}], {N_p1} epochs")
+        model_p1 = MLP(layers=layers)
+        pde_p1   = UnsteadyPipeFlowPDE(model_p1, Re=Re, R=R, U_max=U_max)
+        p1_params, _ = _run_training(
+            pde_p1, data_p1, N_p1, p1_lr, R, B_r, B_ic, B_bc,
+            w_pde, w_ic, w_bc, seed=0, label="Phase1")
 
-    fig.suptitle(f"Unsteady Pipe Flow Re=50: Radial profiles (Re Transfer)")
-    fig.tight_layout()
-    fig.savefig("pipe_unsteady_re_profiles.png", dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print("Saved: pipe_unsteady_re_profiles.png")
+        print(f"\n[Transfer] Re={Re}, t∈[0,{T2}], {N_tf} fine-tune epochs")
+        model_p2 = MLP(layers=layers)
+        pde_p2   = UnsteadyPipeFlowPDE(model_p2, Re=Re, R=R, U_max=U_max)
+        p2_params, hist_p2 = _run_training(
+            pde_p2, data_p2, N_tf, tf_lr, R, B_r, B_ic, B_bc,
+            w_pde, w_ic, w_bc, init_params=p1_params, seed=1, label="Transfer")
 
-    # ── Space-time contours ───────────────────────────────────────────────────
-    Nr, Nt = 60, 80
-    r_grid = np.linspace(0, R, Nr, dtype=np.float32)
-    t_grid = np.linspace(0, T, Nt, dtype=np.float32)
+        print(f"\n[Scratch]  Re={Re}, t∈[0,{T2}], {N_sc} epochs from random init")
+        model_sc2 = MLP(layers=layers)
+        pde_sc2   = UnsteadyPipeFlowPDE(model_sc2, Re=Re, R=R, U_max=U_max)
+        sc2_params, hist_sc2 = _run_training(
+            pde_sc2, data_p2, N_sc, sc_lr, R, B_r, B_ic, B_bc,
+            w_pde, w_ic, w_bc, seed=2, label="Scratch")
 
-    u_ex   = _exact_spacetime(pde_tf, r_grid, t_grid).T     # (Nr, Nt)
-    u_tf_g = _pred_spacetime(model_tf, tf_params, r_grid, t_grid)
-    u_sc_g = _pred_spacetime(model_sc, sc_params, r_grid, t_grid)
+        # Loss plot
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.semilogy(hist_p2, "b-",  lw=1.5,
+                    label=f"Temporal transfer (warm, {N_tf} ep on [0,{T2}])")
+        ax.semilogy(hist_sc2[N_p1:], "r--", lw=1.5,
+                    label=f"Scratch on [0,{T2}] (same epoch range)")
+        ax.set_xlabel("Fine-tune epoch"); ax.set_ylabel("Total loss")
+        ax.set_title(f"Temporal Transfer — Unsteady Pipe Re={Re}\n"
+                     f"Phase-1 [0,{T1}] → Phase-2 [0,{T2}]")
+        ax.legend(); fig.tight_layout()
+        fig.savefig(os.path.join(out_dir, "temporal_transfer_loss.png"),
+                    dpi=150, bbox_inches="tight")
+        plt.close(fig)
 
-    vmin, vmax = 0.0, U_MAX
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
-    titles = ["Exact", f"Transfer Re=50", f"Scratch Re=50"]
-    for ax, u, title in zip(axes, [u_ex, u_tf_g, u_sc_g], titles):
-        cf = ax.contourf(t_grid, r_grid, u, 40, cmap="viridis",
-                         vmin=vmin, vmax=vmax)
-        plt.colorbar(cf, ax=ax, label="u")
-        ax.set_xlabel("t"); ax.set_ylabel("r")
-        ax.set_title(title)
+        # Radial profiles at multiple times
+        Nr    = 80
+        r_arr = np.linspace(0.0, R, Nr, dtype=np.float32)
+        t_snaps = [t for t in [0.5, 1.0, 1.5, T2] if t <= T2]
+        fig, axes = plt.subplots(1, len(t_snaps), figsize=(14, 4))
+        for ax, ts in zip(np.atleast_1d(axes), t_snaps):
+            u_ex  = np.array(pde_p2.exact(
+                np.column_stack([r_arr, np.zeros(Nr)]), ts))
+            u_p2_ = _eval_radial(model_p2,  p2_params,  r_arr, ts)
+            u_sc_ = _eval_radial(model_sc2, sc2_params, r_arr, ts)
+            ax.plot(r_arr, u_ex,  "k-",  lw=2.0, label="Exact")
+            ax.plot(r_arr, u_p2_, "b--", lw=1.8, label="Transfer")
+            ax.plot(r_arr, u_sc_, "r:",  lw=1.8, label="Scratch")
+            ax.set_title(f"t = {ts:.1f}"); ax.set_xlabel("r"); ax.set_ylabel("u")
+            ax.grid(ls="--", alpha=0.4)
+            if ts == t_snaps[0]:
+                ax.legend(fontsize=8)
+        fig.suptitle(f"Temporal Transfer — Unsteady Pipe Re={Re}")
+        fig.tight_layout()
+        fig.savefig(os.path.join(out_dir, "temporal_transfer_profiles.png"),
+                    dpi=150, bbox_inches="tight")
+        plt.close(fig)
 
-    fig.suptitle("Unsteady Pipe Flow: space-time  u(r, t)  — Re Transfer")
-    fig.tight_layout()
-    fig.savefig("pipe_unsteady_re_spacetime.png", dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print("Saved: pipe_unsteady_re_spacetime.png")
+        # Save predictions
+        yz_r, t_r, _, _, _ = data_p2
+        for lbl, mdl, prm in [("transfer", model_p2,  p2_params),
+                               ("scratch",  model_sc2, sc2_params)]:
+            yzt    = jnp.concatenate([yz_r, t_r[:, None]], axis=1)
+            u_pred = np.array(mdl.apply(prm, yzt)[:, 0])
+            save_predictions(
+                out_dir,
+                coords  = {"y": np.array(yz_r[:, 0]),
+                           "z": np.array(yz_r[:, 1]),
+                           "t": np.array(t_r)},
+                outputs = {"u_pred": u_pred},
+                filename=f"predictions_temporal_{lbl}.npz",
+            )
 
+        # Save checkpoints
+        _net_meta = {"type": "mlp", "layers": layers}
+        save_checkpoint(p2_params, out_dir, stem="params_temporal_transfer", metadata={
+            "problem": "pipe_flow_unsteady_transfer", "strategy": "temporal_transfer",
+            "network": _net_meta, "physics": {"Re": Re, "T1": T1, "T2": T2, "R": R},
+            "final_loss": hist_p2[-1],
+        })
+        save_checkpoint(sc2_params, out_dir, stem="params_temporal_scratch", metadata={
+            "problem": "pipe_flow_unsteady_transfer", "strategy": "temporal_scratch",
+            "network": _net_meta, "physics": {"Re": Re, "T": T2, "R": R},
+            "final_loss": hist_sc2[-1],
+        })
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Strategy 2 — Temporal Transfer
-# ─────────────────────────────────────────────────────────────────────────────
+        results["temporal_transfer"] = {
+            "transfer_final": hist_p2[-1],
+            "scratch_final":  hist_sc2[-1],
+        }
 
-def run_temporal_transfer():
-    print("\n" + "=" * 60)
-    print("Strategy 2: Temporal Transfer  t∈[0, 1] → t∈[0, 3]")
-    print("=" * 60)
-
-    RE    = 10.0
-    T1, T2 = 1.0, 3.0
-    N_P1  = 2500
-    N_P2  = 2000
-    N_SC  = N_P1 + N_P2
-
-    data_p1 = make_data(T1, seed=0)
-    data_p2 = make_data(T2, seed=0)
-
-    # ── Phase 1: short horizon ────────────────────────────────────────────────
-    print(f"\n[Phase 1]  Re={RE}, t∈[0,{T1}], {N_P1} epochs")
-    model_p1 = MLP(layers=LAYERS)
-    pde_p1   = UnsteadyPipeFlowPDE(model_p1, Re=RE, R=R, U_max=U_MAX)
-    p1_params, _ = run_training(pde_p1, data_p1, N_P1, lr=1e-3,
-                                 seed=0, label="Phase1")
-
-    # ── Transfer: extend to [0, T2] ───────────────────────────────────────────
-    print(f"\n[Transfer] Re={RE}, t∈[0,{T2}], {N_P2} fine-tune epochs (warm start)")
-    model_p2 = MLP(layers=LAYERS)
-    pde_p2   = UnsteadyPipeFlowPDE(model_p2, Re=RE, R=R, U_max=U_MAX)
-    p2_params, hist_p2 = run_training(
-        pde_p2, data_p2, N_P2, lr=3e-4,
-        init_params=p1_params, seed=1, label="Transfer")
-
-    # ── Scratch: full horizon ─────────────────────────────────────────────────
-    print(f"\n[Scratch]  Re={RE}, t∈[0,{T2}], {N_SC} epochs from random init")
-    model_sc = MLP(layers=LAYERS)
-    pde_sc   = UnsteadyPipeFlowPDE(model_sc, Re=RE, R=R, U_max=U_MAX)
-    sc_params, hist_sc = run_training(
-        pde_sc, data_p2, N_SC, lr=1e-3, seed=2, label="Scratch")
-
-    # ── Validation at extended time (not in phase-1 training) ─────────────────
-    yz_val = jnp.array(_disk_yz(2000, seed=99))
-    t_ext  = T1 + 0.5 * (T2 - T1)          # midpoint of extended region
-    err_tf = rel_l2(model_p2, p2_params, pde_p2, yz_val, t_ext)
-    err_sc = rel_l2(model_sc, sc_params, pde_sc, yz_val, t_ext)
-    print(f"\nRel-L² at t={t_ext:.2f} (extended): "
-          f"Transfer {err_tf:.3e}  |  Scratch {err_sc:.3e}")
-
-    # ── Save predictions at collocation points ────────────────────────────────
-    yz_r, t_r, _, _, _ = data_p2
-    for label, model_, params_ in [("transfer", model_p2, p2_params),
-                                   ("scratch",  model_sc, sc_params)]:
-        yzt = jnp.concatenate([yz_r, t_r[:, None]], axis=1)
-        u_pred = np.array(model_.apply(params_, yzt)[:, 0])
-        save_predictions(
-            ".",
-            coords  = {"y": np.array(yz_r[:, 0]),
-                       "z": np.array(yz_r[:, 1]),
-                       "t": np.array(t_r)},
-            outputs = {"u_pred": u_pred},
-            filename=f"predictions_time_transfer_{label}.npz",
-        )
-
-    # ── Loss convergence plot ─────────────────────────────────────────────────
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.semilogy(hist_p2, "b-",  lw=1.5,
-                label=f"Temporal transfer (warm, {N_P2} ep on [0,{T2}])")
-    ax.semilogy(hist_sc[N_P1:], "r--", lw=1.5,
-                label=f"Scratch [0,{T2}] (same ep range)")
-    ax.set_xlabel("Fine-tuning epoch on extended domain")
-    ax.set_ylabel("Total loss")
-    ax.set_title(f"Temporal Transfer — Unsteady Pipe Flow  Re={RE}\n"
-                 f"Phase-1 on [0,{T1}], Phase-2 extended to [0,{T2}]")
-    ax.legend(fontsize=8)
-    fig.tight_layout()
-    fig.savefig("pipe_unsteady_time_loss.png", dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print("Saved: pipe_unsteady_time_loss.png")
-
-    # ── Snapshot profiles ─────────────────────────────────────────────────────
-    Nr    = 80
-    r_arr = np.linspace(0, R, Nr, dtype=np.float32)
-    t_snaps = [0.5, T1, 2.0, T2]
-
-    fig, axes = plt.subplots(1, len(t_snaps), figsize=(14, 4))
-    for ax, ts in zip(axes, t_snaps):
-        u_ex = _exact_radial(pde_p2, r_arr, ts)
-        u_tf = _eval_radial(model_p2, p2_params, r_arr, ts)
-        u_sc = _eval_radial(model_sc, sc_params, r_arr, ts)
-        u_p1 = _eval_radial(model_p1, p1_params, r_arr, ts)
-
-        ax.plot(r_arr, u_ex, "k-",  lw=2.0, label="Exact")
-        ax.plot(r_arr, u_tf, "b--", lw=1.8, label="Transfer")
-        ax.plot(r_arr, u_sc, "r:",  lw=1.8, label="Scratch")
-        if ts <= T1:
-            ax.plot(r_arr, u_p1, "g-.", lw=1.2, label="Phase-1 (src)")
-        ax.axvline(0, color="k", lw=0.5, ls="--")
-        ax.set_title(f"t = {ts:.1f}" + ("  [ext]" if ts > T1 else ""))
-        ax.set_xlabel("r"); ax.set_ylabel("u")
-        ax.grid(ls="--", alpha=0.4)
-        if ts == t_snaps[0]:
-            ax.legend(fontsize=7)
-
-    fig.suptitle(f"Unsteady Pipe Flow Re={RE}: Temporal Transfer snapshot profiles")
-    fig.tight_layout()
-    fig.savefig("pipe_unsteady_time_profiles.png", dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print("Saved: pipe_unsteady_time_profiles.png")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Entry point
-# ─────────────────────────────────────────────────────────────────────────────
-
-def main():
-    print("JAX devices:", jax.devices())
-    run_re_transfer()
-    run_temporal_transfer()
-    print("\nAll unsteady pipe flow transfer learning experiments complete.")
+    save_config(cfg, os.path.join(out_dir, "config.yaml"))
+    print(f"\nAll outputs saved to: {out_dir}/")
+    return results
 
 
 if __name__ == "__main__":
-    main()
+    import sys, pathlib
+    _HERE = pathlib.Path(__file__).parent
+    cfg_path = str(
+        pathlib.Path(sys.argv[1]) if len(sys.argv) > 1
+        else _HERE / "pipe_flow_unsteady_transfer.yaml"
+    )
+    from underPINN.config.loader import load_config
+    run_pipe_flow_unsteady_transfer(load_config(cfg_path))

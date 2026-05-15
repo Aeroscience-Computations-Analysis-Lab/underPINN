@@ -10,12 +10,12 @@ physics:
 
 data:
   T            : 2.0
-  n_collocation: 6000
+  n_collocation: 10000
   n_ic         : 300
   n_bc         : 300
 
 training:
-  epochs   : 8000
+  epochs   : 5000
   lr       : 1.0e-3
   lr_alpha : 0.01
   batch_r  : 2048

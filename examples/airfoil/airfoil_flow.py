@@ -1,35 +1,24 @@
+"""Steady flow over a NACA airfoil — incompressible NS PINN.
+
+Run directly or via the CLI:
+
+    python examples/airfoil/airfoil_flow.py              # uses config.yaml
+    python examples/airfoil/airfoil_flow.py myconfig.yaml
+    python -m underPINN run examples/airfoil/config.yaml
+
+PDE: ∇·u = 0,  (u·∇)u + ∇p − (1/Re)∇²u = 0
+
+BCs:
+  • Farfield : u = U∞ cos α,  v = U∞ sin α
+  • Airfoil  : u = v = 0  (no-slip)
+  • Pressure : p = 0 at one upstream point (gauge)
+
+Outputs: field plots (u, v, p), Cp curve, estimated CL, loss history,
+         params checkpoint.
 """
-Steady Flow over NACA 0012 Airfoil — underPINN Example
-=======================================================
+from __future__ import annotations
 
-Solves the steady incompressible Navier-Stokes equations around a NACA 0012
-airfoil at a prescribed angle of attack (AoA) and Reynolds number:
-
-    ∇·u = 0
-    (u·∇)u + ∇p − (1/Re)∇²u = 0
-
-Domain   : rectangular [-5, 15] × [-8, 8]  (chord c = 1, x ∈ [0, 1])
-Model    : MLP([2, 128, 128, 128, 128, 3]) → (u, v, p)
-BCs      :
-    • Far-field  — u = U∞ cos α,  v = U∞ sin α   (freestream)
-    • Airfoil    — u = v = 0                       (no-slip)
-    • Pressure   — p = 0 at one upstream point     (gauge)
-
-Outputs  :
-    airfoil_fields.png      — u, v, p contour maps over the full domain
-    airfoil_streamlines.png — speed + streamlines in the near-body region
-    airfoil_Cp.png          — pressure coefficient Cp(x/c) upper & lower surface
-    airfoil_loss.png        — training loss history
-
-Key features demonstrated
---------------------------
-• NACA 4-digit profile generation (NACAAirfoil geometry class)
-• Near-surface collocation refinement for boundary-layer resolution
-• Reuse of existing NavierStokesPDE — no new PDE class needed
-• Pressure coefficient and lift coefficient estimation from PINN output
-• ConsoleLogger + EarlyStopping callbacks
-"""
-
+import os
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -38,216 +27,211 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from underPINN.config.loader import cfg_get, save_config
 from underPINN.nn.mlp import MLP
 from underPINN.pde.navier_stokes import NavierStokesPDE
 from underPINN.geometry.airfoil import NACAAirfoil
 from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.callbacks.early_stopping import EarlyStopping
 from underPINN.utils.io import save_predictions
+from underPINN.utils.checkpoint import save_checkpoint
 from underPINN.utils.sampling import safe_choice
 
 
-# ---- Flow parameters ----
-RE    = 200.0     # Reynolds number (laminar; NACA 0012 separates ~Re 500–1000)
-AOA   = 5.0       # angle of attack [degrees]
-U_INF = 1.0       # freestream speed magnitude
+# ---------------------------------------------------------------------------
+# Aerodynamic post-processing helpers
+# ---------------------------------------------------------------------------
 
-# ---- Rectangular computational domain ----
-XMIN, XMAX = -5.0, 15.0   # ~5c upstream, 14c downstream
-YMIN, YMAX = -8.0,  8.0   # ±8c lateral
+def _compute_Cp(model, params, af, U_inf=1.0):
+    """Surface pressure coefficient  Cp = (p − p∞) / (0.5 U∞²)."""
+    xy_s  = jnp.array(af.surface_points(n=600))
+    p_s   = model.apply(params, xy_s)[:, 2]
+    p_ref = float(model.apply(params, jnp.array([[-4.9, 0.0]]))[0, 2])
+    q_inf = 0.5 * U_inf ** 2
+    Cp    = np.array((p_s - p_ref) / (q_inf + 1e-14))
+    return np.array(xy_s), Cp
 
-# ---- Training hyper-parameters ----
-EPOCHS    = 10000
-BATCH_COL = 2048    # collocation mini-batch size
-BATCH_FF  =  512    # far-field BC mini-batch
-W_BODY    =  50.0   # no-slip BC weight (high: enforce strongly)
-W_FF      =  10.0   # far-field BC weight
-W_PREF    =  10.0   # pressure gauge weight
+
+def _estimate_CL(xy_s, Cp):
+    """Approximate lift coefficient via trapezoidal integration of Cp(x)."""
+    x_s, y_s = xy_s[:, 0], xy_s[:, 1]
+    top  = y_s >= 0
+    bot  = y_s <  0
+    CL_top = -np.trapz(Cp[top],  x_s[top])  if top.any()  else 0.0
+    CL_bot =  np.trapz(Cp[bot],  x_s[bot])  if bot.any()  else 0.0
+    return float(CL_top + CL_bot)
 
 
 # ---------------------------------------------------------------------------
-# Data generation
+# Main runner
 # ---------------------------------------------------------------------------
 
-def make_training_data():
-    alpha_rad = np.radians(AOA)
-    af = NACAAirfoil(naca="0012", chord=1.0)
+def run_airfoil(cfg) -> dict:
+    """Train a PINN on steady incompressible NS around a NACA airfoil."""
+    # ── Unpack config ─────────────────────────────────────────────────────────
+    ph      = cfg.physics
+    tr      = cfg.training
+    lw      = cfg.loss
+    dom     = cfg_get(cfg, "domain", default=None)
+    out     = cfg_get(cfg, "output", default=None)
+    out_dir = cfg_get(out, "dir", default="outputs/airfoil") if out else "outputs/airfoil"
+    os.makedirs(out_dir, exist_ok=True)
+
+    Re     = float(ph.Re)
+    aoa    = float(cfg_get(ph, "aoa",   default=5.0))
+    naca   = str(cfg_get(ph,  "naca",   default="0012"))
+    chord  = float(cfg_get(ph, "chord", default=1.0))
+
+    xmin = float(cfg_get(dom, "xmin", default=-5.0))  if dom else -5.0
+    xmax = float(cfg_get(dom, "xmax", default=15.0))  if dom else 15.0
+    ymin = float(cfg_get(dom, "ymin", default=-8.0))  if dom else -8.0
+    ymax = float(cfg_get(dom, "ymax", default= 8.0))  if dom else  8.0
+
+    n_ext  = int(cfg_get(cfg.data, "n_exterior",     default=40000))
+    n_near = int(cfg_get(cfg.data, "n_near_surface",  default=10000))
+    n_body = int(cfg_get(cfg.data, "n_body_bc",       default=2000))
+    n_ff   = int(cfg_get(cfg.data, "n_farfield_bc",   default=1600))
+
+    epochs    = int(tr.epochs)
+    lr        = float(tr.lr)
+    lr_alpha  = float(cfg_get(tr, "lr_alpha",   default=0.01))
+    batch_r   = int(cfg_get(tr, "batch_r",      default=2048))
+    batch_bc  = int(cfg_get(tr, "batch_bc",     default=512))
+    log_every = int(cfg_get(tr, "log_every",    default=1000))
+    patience  = int(cfg_get(tr, "early_stopping_patience", default=1000))
+    seed      = int(cfg_get(tr, "seed",         default=0))
+
+    W_BODY = float(cfg_get(lw, "w_body",  default=50.0))
+    W_FF   = float(cfg_get(lw, "w_ff",    default=10.0))
+    W_PREF = float(cfg_get(lw, "w_pref",  default=10.0))
+
+    U_INF     = 1.0
+    alpha_rad = np.radians(aoa)
+    u_ff_val  = U_INF * np.cos(alpha_rad)
+    v_ff_val  = U_INF * np.sin(alpha_rad)
+
+    print(f"Airfoil:  NACA {naca},  Re={Re},  AoA={aoa}°,  epochs={epochs}")
+
+    # ── Geometry ──────────────────────────────────────────────────────────────
+    af = NACAAirfoil(naca=naca, chord=chord)
 
     print("  Sampling exterior collocation points …")
-    xy_far  = af.sample_exterior(40_000, XMIN, XMAX, YMIN, YMAX, seed=0)
-    xy_near = af.sample_near_surface(10_000, seed=1)          # denser near body
+    xy_far  = af.sample_exterior(n_ext,  xmin, xmax, ymin, ymax, seed=seed)
+    xy_near = af.sample_near_surface(n_near, seed=seed + 1)
     xy_col  = np.concatenate([xy_far, xy_near], axis=0)
 
-    print("  Sampling airfoil surface (no-slip BC) …")
-    xy_af = af.surface_points(n=1000)
+    print("  Sampling airfoil surface (no-slip) …")
+    xy_body = af.surface_points(n=n_body)
 
-    print("  Sampling far-field boundary …")
-    xy_ff = af.farfield_boundary(n_per_edge=350,
-                                 xmin=XMIN, xmax=XMAX,
-                                 ymin=YMIN, ymax=YMAX)
-    u_ff  = np.full(len(xy_ff), U_INF * np.cos(alpha_rad), dtype=np.float32)
-    v_ff  = np.full(len(xy_ff), U_INF * np.sin(alpha_rad), dtype=np.float32)
+    print("  Sampling farfield boundary …")
+    n_per_edge = max(1, n_ff // 4)
+    xy_ff      = af.farfield_boundary(n_per_edge=n_per_edge,
+                                      xmin=xmin, xmax=xmax,
+                                      ymin=ymin, ymax=ymax)
+    u_ff = np.full(len(xy_ff), u_ff_val, dtype=np.float32)
+    v_ff = np.full(len(xy_ff), v_ff_val, dtype=np.float32)
 
-    # Pressure reference: a single point far upstream on the centreline
+    # Pressure gauge: a single upstream reference point
     xy_pref = np.array([[-4.9, 0.0]], dtype=np.float32)
 
-    return af, xy_col, xy_af, xy_ff, u_ff, v_ff, xy_pref
-
-
-# ---------------------------------------------------------------------------
-# Post-processing helpers
-# ---------------------------------------------------------------------------
-
-def compute_Cp(model, params, af):
-    """Pressure coefficient along the airfoil surface."""
-    xy_s   = af.surface_points(n=600)
-    pred_s = model.apply(params, jnp.array(xy_s))
-    p_s    = np.array(pred_s[:, 2])
-    # Cp = (p - p_inf) / (0.5 rho U_inf^2), with p_inf=0, rho=1, U_inf=1
-    Cp     = 2.0 * p_s
-    return xy_s, Cp
-
-
-def estimate_CL(xy_s, Cp):
-    """Rough lift coefficient from Cp integration (pressure-only, no viscous)."""
-    x   = xy_s[:, 0]
-    y   = xy_s[:, 1]
-    top = y >= 0
-    bot = y <  0
-
-    idx_t = np.argsort(x[top]);  xu = x[top][idx_t];  Cu = Cp[top][idx_t]
-    idx_b = np.argsort(x[bot]);  xl = x[bot][idx_b];  Cl = Cp[bot][idx_b]
-
-    # CL ≈ (∫_lower Cp dx − ∫_upper Cp dx) / chord
-    from numpy import trapz
-    CL = (trapz(Cl, xl) - trapz(Cu, xu))
-    return float(CL)
-
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
-def main():
-    print("JAX devices:", jax.devices())
-    alpha_rad = np.radians(AOA)
-    u_inf     = float(U_INF * np.cos(alpha_rad))
-    v_inf     = float(U_INF * np.sin(alpha_rad))
-    print(f"NACA 0012 | Re={RE} | AoA={AOA}° | u∞=({u_inf:.4f}, {v_inf:.4f})\n")
-
-    # ---- Geometry + data ----
-    print("Generating geometry …")
-    af, xy_col, xy_af, xy_ff, u_ff, v_ff, xy_pref = make_training_data()
-    print(f"  Collocation : {len(xy_col):,} pts")
-    print(f"  Airfoil BC  : {len(xy_af):,} pts")
-    print(f"  Far-field BC: {len(xy_ff):,} pts\n")
-
-    # Convert to JAX arrays (kept in host memory; sliced each step)
-    xy_col_j  = jnp.array(xy_col)
-    xy_af_j   = jnp.array(xy_af)
-    xy_ff_j   = jnp.array(xy_ff)
+    # Convert to JAX arrays
+    xy_col_j  = jnp.array(xy_col,   dtype=jnp.float32)
+    xy_body_j = jnp.array(xy_body,  dtype=jnp.float32)
+    xy_ff_j   = jnp.array(xy_ff,    dtype=jnp.float32)
     u_ff_j    = jnp.array(u_ff)
     v_ff_j    = jnp.array(v_ff)
     xy_pref_j = jnp.array(xy_pref)
 
-    # ---- Model ----
-    model  = MLP(layers=[2, 128, 128, 128, 128, 3])
-    pde    = NavierStokesPDE(model, Re=RE)
-    params = model.init(jax.random.PRNGKey(42), jnp.ones((1, 2)))
+    # ── Model + PDE ───────────────────────────────────────────────────────────
+    model = MLP(layers=list(cfg.network.layers))
+    pde   = NavierStokesPDE(model, Re=Re)
 
-    schedule  = optax.cosine_decay_schedule(1e-3, decay_steps=EPOCHS, alpha=1e-2)
+    key    = jax.random.PRNGKey(seed)
+    params = model.init(key, jnp.ones((1, 2)))
+
+    lr_sched  = optax.cosine_decay_schedule(lr, decay_steps=epochs, alpha=lr_alpha)
     optimizer = optax.chain(
         optax.scale_by_adam(),
-        optax.scale_by_schedule(schedule),
+        optax.scale_by_schedule(lr_sched),
         optax.scale(-1.0),
     )
     opt_state = optimizer.init(params)
 
-    # ---- JIT-compiled step ----
+    # ── JIT step ──────────────────────────────────────────────────────────────
     @jax.jit
-    def step(params, opt_state, col_b, ff_b, uff_b, vff_b):
+    def step(params, state, col_b, ff_b, uff_b, vff_b):
         def loss_fn(p):
-            # NS residuals: continuity + x-momentum + y-momentum
-            res      = pde.residual(p, col_b)        # (N, 3)
-            pde_loss = jnp.mean(res ** 2)            # scalar mean over all 3
+            res      = pde.residual(p, col_b)
+            pde_loss = jnp.mean(res ** 2)
 
-            # No-slip on airfoil (all surface points each step — small set)
-            out_af = model.apply(p, xy_af_j)
-            l_af   = jnp.mean(out_af[:, 0] ** 2) + jnp.mean(out_af[:, 1] ** 2)
+            out_body = model.apply(p, xy_body_j)
+            l_body   = (jnp.mean(out_body[:, 0] ** 2)
+                        + jnp.mean(out_body[:, 1] ** 2))
 
-            # Freestream at far-field (mini-batched)
             out_ff = model.apply(p, ff_b)
             l_ff   = (jnp.mean((out_ff[:, 0] - uff_b) ** 2)
                       + jnp.mean((out_ff[:, 1] - vff_b) ** 2))
 
-            # Pressure gauge: p = 0 far upstream
             l_pref = model.apply(p, xy_pref_j)[0, 2] ** 2
 
-            total = pde_loss + W_BODY * l_af + W_FF * l_ff + W_PREF * l_pref
-            return total, (pde_loss, l_af, l_ff)
+            total = pde_loss + W_BODY * l_body + W_FF * l_ff + W_PREF * l_pref
+            return total, (pde_loss, l_body, l_ff)
 
         (loss, aux), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)
-        updates, opt_state = optimizer.update(grads, opt_state)
+        updates, state = optimizer.update(grads, state)
         params = optax.apply_updates(params, updates)
-        return params, opt_state, loss, aux
+        return params, state, loss, aux
 
-    # ---- Training loop ----
-    key      = jax.random.PRNGKey(0)
-    logger   = ConsoleLogger(log_every=500)
-    stopper  = EarlyStopping(patience=1000)
+    # ── Training loop ─────────────────────────────────────────────────────────
+    key       = jax.random.PRNGKey(seed + 99)
+    logger    = ConsoleLogger(log_every=log_every)
+    stopper   = EarlyStopping(patience=patience)
+    n_col_pts = xy_col_j.shape[0]
+    n_ff_pts  = xy_ff_j.shape[0]
     loss_hist, pde_hist, bc_hist = [], [], []
 
-    n_col = xy_col_j.shape[0]
-    n_ff  = xy_ff_j.shape[0]
-
     try:
-        for ep in range(EPOCHS):
+        for ep in range(epochs):
             key, k1, k2 = jax.random.split(key, 3)
+            idx_col = safe_choice(k1, n_col_pts, batch_r)
+            idx_ff  = safe_choice(k2, n_ff_pts,  batch_bc)
 
-            idx_col = safe_choice(k1, n_col, BATCH_COL)
-            idx_ff  = safe_choice(k2, n_ff,  BATCH_FF)
-
-            params, opt_state, loss, (pde_l, l_af, l_ff) = step(
+            params, opt_state, loss, (pde_l, l_body, l_ff) = step(
                 params, opt_state,
                 xy_col_j[idx_col],
                 xy_ff_j[idx_ff], u_ff_j[idx_ff], v_ff_j[idx_ff],
             )
-
-            loss_val = float(loss)
-            loss_hist.append(loss_val)
+            loss_hist.append(float(loss))
             pde_hist.append(float(pde_l))
-            bc_hist.append(float(l_af + l_ff))
+            bc_hist.append(float(l_body + l_ff))
 
-            logs = {"loss": loss_val, "pde": float(pde_l), "bc": float(l_af + l_ff)}
+            logs = {"loss": float(loss), "pde": float(pde_l),
+                    "bc": float(l_body + l_ff)}
             logger.on_epoch_end(ep, logs)
             stopper.on_epoch_end(ep, logs)
-
     except StopIteration:
         pass
 
-    logger.on_train_end({"loss": loss_hist[-1]})
+    logger.on_train_end({"loss": loss_hist[-1] if loss_hist else float("nan")})
 
-    # ---- Post-processing ----
+    # ── Post-processing ───────────────────────────────────────────────────────
     print("\nEvaluating on prediction grid …")
-
-    Nx, Ny  = 350, 180
-    xg = np.linspace(XMIN, XMAX, Nx, dtype=np.float32)
-    yg = np.linspace(YMIN, YMAX, Ny, dtype=np.float32)
-    XX, YY  = np.meshgrid(xg, yg)
+    Nx, Ny = 350, 180
+    xg = np.linspace(xmin, xmax, Nx, dtype=np.float32)
+    yg = np.linspace(ymin, ymax, Ny, dtype=np.float32)
+    XX, YY = np.meshgrid(xg, yg)
     grid_j  = jnp.stack([jnp.array(XX.ravel()), jnp.array(YY.ravel())], axis=1)
+    pred_g  = np.array(model.apply(params, grid_j))
+    u_grid  = pred_g[:, 0].reshape(Ny, Nx)
+    v_grid  = pred_g[:, 1].reshape(Ny, Nx)
+    p_grid  = pred_g[:, 2].reshape(Ny, Nx)
 
-    pred    = np.array(model.apply(params, grid_j))
-    u_grid  = pred[:, 0].reshape(Ny, Nx)
-    v_grid  = pred[:, 1].reshape(Ny, Nx)
-    p_grid  = pred[:, 2].reshape(Ny, Nx)
-
-    # Mask airfoil interior for cleaner plots
     inside  = af.is_inside(np.stack([XX.ravel(), YY.ravel()], axis=1)).reshape(Ny, Nx)
     u_plot  = np.where(inside, np.nan, u_grid)
     v_plot  = np.where(inside, np.nan, v_grid)
     p_plot  = np.where(inside, np.nan, p_grid)
 
-    # ---- Figure 1: u, v, p fields ----
+    # Fields plot
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
     for ax, field, cmap, title in zip(
         axes,
@@ -256,95 +240,50 @@ def main():
         ["Streamwise velocity  u", "Normal velocity  v", "Pressure  p"],
     ):
         lim = np.nanmax(np.abs(field)) or 1.0
-        cf  = ax.contourf(xg, yg, field, 60, cmap=cmap,
-                          vmin=-lim, vmax=lim)
+        cf  = ax.contourf(xg, yg, field, 60, cmap=cmap, vmin=-lim, vmax=lim)
         plt.colorbar(cf, ax=ax, shrink=0.75)
         ax.fill(af.profile[:, 0], af.profile[:, 1], "k", zorder=5)
-        ax.set_xlim(XMIN, XMAX); ax.set_ylim(YMIN, YMAX)
+        ax.set_xlim(xmin, xmax); ax.set_ylim(ymin, ymax)
         ax.set_aspect("equal"); ax.set_title(title)
         ax.set_xlabel("x / c"); ax.set_ylabel("y / c")
-    fig.suptitle(f"NACA 0012 | Re={RE} | AoA={AOA}°", fontsize=13)
+    fig.suptitle(f"NACA {naca} | Re={Re} | AoA={aoa}°", fontsize=13)
     fig.tight_layout()
-    fig.savefig("airfoil_fields.png", dpi=150, bbox_inches="tight")
+    fig.savefig(os.path.join(out_dir, "airfoil_fields.png"), dpi=150, bbox_inches="tight")
     plt.close(fig)
-    print("Saved: airfoil_fields.png")
 
-    # ---- Figure 2: near-body streamlines ----
-    # Restrict to near-body window to reduce NaN issues in streamplot
-    xi = np.linspace(-1.5, 4.0, 250, dtype=np.float32)
-    yi = np.linspace(-1.5, 1.5, 150, dtype=np.float32)
-    XXi, YYi = np.meshgrid(xi, yi)
-    grid_i  = jnp.stack([jnp.array(XXi.ravel()), jnp.array(YYi.ravel())], axis=1)
-    pred_i  = np.array(model.apply(params, grid_i))
-    ui = pred_i[:, 0].reshape(150, 250)
-    vi = pred_i[:, 1].reshape(150, 250)
-    inside_i = af.is_inside(
-        np.stack([XXi.ravel(), YYi.ravel()], axis=1)
-    ).reshape(150, 250)
-    speed_i = np.where(inside_i, np.nan, np.sqrt(ui**2 + vi**2))
-    ui      = np.where(inside_i, 0.0, ui)
-    vi      = np.where(inside_i, 0.0, vi)
-
-    fig2, ax2 = plt.subplots(figsize=(12, 5))
-    cf2 = ax2.contourf(xi, yi, speed_i, 60, cmap="viridis")
-    plt.colorbar(cf2, ax=ax2, label="|U| / U∞")
-    ax2.streamplot(xi, yi, ui, vi, color="white", linewidth=0.6,
-                   density=2.0, arrowsize=0.9)
-    ax2.fill(af.profile[:, 0], af.profile[:, 1], "k", zorder=5)
-    ax2.set_xlim(-1.5, 4.0); ax2.set_ylim(-1.5, 1.5)
-    ax2.set_aspect("equal")
-    ax2.set_title(f"Near-body flow: NACA 0012 | Re={RE} | AoA={AOA}°")
-    ax2.set_xlabel("x / c"); ax2.set_ylabel("y / c")
-    fig2.tight_layout()
-    fig2.savefig("airfoil_streamlines.png", dpi=150, bbox_inches="tight")
-    plt.close(fig2)
-    print("Saved: airfoil_streamlines.png")
-
-    # ---- Figure 3: Pressure coefficient Cp ----
-    xy_s, Cp = compute_Cp(model, params, af)
-    x_s = xy_s[:, 0]
-    y_s = xy_s[:, 1]
-    top_mask = y_s >= 0
-    bot_mask = y_s <  0
-
-    CL = estimate_CL(xy_s, Cp)
-    print(f"\nEstimated CL ≈ {CL:.4f}  (pressure-only; viscous contribution omitted)")
-
+    # Pressure coefficient + CL
+    xy_s, Cp = _compute_Cp(model, params, af, U_INF)
+    CL       = _estimate_CL(xy_s, Cp)
+    print(f"\nEstimated CL ≈ {CL:.4f}  (pressure-only)")
+    x_s, y_s = xy_s[:, 0], xy_s[:, 1]
+    top_mask, bot_mask = y_s >= 0, y_s < 0
     fig3, ax3 = plt.subplots(figsize=(9, 5))
     ax3.plot(x_s[top_mask], Cp[top_mask], "b-o", ms=2.5, lw=1.2, label="Upper surface")
     ax3.plot(x_s[bot_mask], Cp[bot_mask], "r-o", ms=2.5, lw=1.2, label="Lower surface")
     ax3.axhline(0, color="k", lw=0.6, ls="--")
-    ax3.invert_yaxis()     # aerodynamics convention: suction (−Cp) plotted upward
-    ax3.set_xlabel("x / c")
-    ax3.set_ylabel("Cp")
-    ax3.set_title(
-        f"Pressure coefficient — NACA 0012 | Re={RE} | AoA={AOA}°"
-        f"\nEstimated CL ≈ {CL:.3f}"
-    )
-    ax3.legend()
-    fig3.tight_layout()
-    fig3.savefig("airfoil_Cp.png", dpi=150, bbox_inches="tight")
+    ax3.invert_yaxis()
+    ax3.set_xlabel("x / c"); ax3.set_ylabel("Cp")
+    ax3.set_title(f"Pressure coefficient — NACA {naca} | Re={Re} | AoA={aoa}°"
+                  f"\nEst. CL ≈ {CL:.3f}")
+    ax3.legend(); fig3.tight_layout()
+    fig3.savefig(os.path.join(out_dir, "airfoil_Cp.png"), dpi=150, bbox_inches="tight")
     plt.close(fig3)
-    print("Saved: airfoil_Cp.png")
 
-    # ---- Figure 4: Training loss ----
+    # Loss history
     fig4, ax4 = plt.subplots(figsize=(8, 4))
-    ax4.semilogy(loss_hist, label="Total",   alpha=0.9)
-    ax4.semilogy(pde_hist,  label="PDE",     alpha=0.75)
-    ax4.semilogy(bc_hist,   label="BC",      alpha=0.75)
+    ax4.semilogy(loss_hist, label="Total",  alpha=0.9)
+    ax4.semilogy(pde_hist,  label="PDE",    alpha=0.75)
+    ax4.semilogy(bc_hist,   label="BC",     alpha=0.75)
     ax4.set_xlabel("Epoch"); ax4.set_ylabel("Loss")
-    ax4.set_title("Airfoil PINN — training history")
-    ax4.legend()
-    fig4.tight_layout()
-    fig4.savefig("airfoil_loss.png", dpi=150)
+    ax4.set_title(f"Airfoil PINN — Re={Re},  NACA {naca}")
+    ax4.legend(); fig4.tight_layout()
+    fig4.savefig(os.path.join(out_dir, "loss.png"), dpi=150, bbox_inches="tight")
     plt.close(fig4)
-    print("Saved: airfoil_loss.png")
 
-    # ---- Save predictions at collocation points ----
-    # No closed-form exact solution; save coords + PINN output only
+    # ── Save predictions ──────────────────────────────────────────────────────
     pred_col = np.array(model.apply(params, xy_col_j))
     save_predictions(
-        ".",
+        out_dir,
         coords  = {"x": np.array(xy_col_j[:, 0]),
                    "y": np.array(xy_col_j[:, 1])},
         outputs = {"u_pred": pred_col[:, 0],
@@ -352,6 +291,26 @@ def main():
                    "p_pred": pred_col[:, 2]},
     )
 
+    np.save(os.path.join(out_dir, "loss_hist.npy"), np.array(loss_hist))
+
+    # ── Model checkpoint ──────────────────────────────────────────────────────
+    save_checkpoint(params, out_dir, metadata={
+        "problem": "airfoil",
+        "network": {"type": "mlp", "layers": list(cfg.network.layers)},
+        "physics": {"Re": Re, "aoa": aoa, "naca": naca, "chord": chord},
+        "results": {"CL": CL, "n_epochs": len(loss_hist)},
+    })
+
+    save_config(cfg, os.path.join(out_dir, "config.yaml"))
+    print(f"\nOutputs saved to: {out_dir}/")
+
+    return {"params": params, "loss_hist": loss_hist,
+            "CL": CL, "n_epochs": len(loss_hist)}
+
 
 if __name__ == "__main__":
-    main()
+    import sys, pathlib
+    _HERE = pathlib.Path(__file__).parent
+    cfg_path = str(pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else _HERE / "config.yaml")
+    from underPINN.config.loader import load_config
+    run_airfoil(load_config(cfg_path))

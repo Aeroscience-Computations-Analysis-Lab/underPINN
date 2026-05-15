@@ -371,7 +371,7 @@
 <div class="stats-bar">
   <div class="stat"><div class="stat-number">14</div><div class="stat-label">Physics Examples</div></div>
   <div class="stat"><div class="stat-number">7</div><div class="stat-label">PDE Solvers</div></div>
-  <div class="stat"><div class="stat-number">6</div><div class="stat-label">CLI Runners</div></div>
+  <div class="stat"><div class="stat-number">12</div><div class="stat-label">CLI Runners</div></div>
   <div class="stat"><div class="stat-number">500×</div><div class="stat-label">Less GPU Dispatch</div></div>
   <div class="stat"><div class="stat-number">3D</div><div class="stat-label">Navier-Stokes</div></div>
 </div>
@@ -422,7 +422,7 @@
       <div class="feature-card">
         <div class="feature-icon" style="background:rgba(210,168,255,.12)">📋</div>
         <h3>Callbacks + TrainingConfig</h3>
-        <p>ConsoleLogger (via Python logging), EarlyStopping, and a unified TrainingConfig dataclass with runtime validation — no more silent bad inputs.</p>
+        <p>ConsoleLogger, EarlyStopping, ModelCheckpoint — and a unified TrainingConfig dataclass with runtime validation. Callbacks fire every N epochs even inside lax.scan loops.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon" style="background:rgba(255,166,87,.12)">🌐</div>
@@ -441,6 +441,11 @@
       </div>
       <div class="feature-card">
         <div class="feature-icon" style="background:rgba(63,185,80,.12)">💾</div>
+        <h3>Checkpoint &amp; Inference</h3>
+        <p>Save Flax params as <code>params.msgpack</code> with a JSON sidecar. Reload in one line with <code>ModelPredictor.from_meta(path)</code> — no need to re-specify the architecture.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(247,129,102,.12)">📦</div>
         <h3>Prediction Persistence</h3>
         <p>Automatic compressed .npz saving at collocation points after every training run. Includes coordinates, PINN outputs, and exact solutions where available.</p>
       </div>
@@ -465,11 +470,11 @@
           <li class="layer-item"><span class="layer-dot dot-green"></span><strong>pde/</strong> — Burgers, Wave, Helmholtz, Heat, N-S 2D/3D, k-ε, ODE</li>
           <li class="layer-item"><span class="layer-dot dot-orange"></span><strong>solver/</strong> — FBPINNSolver, SteadySolver, ODESolver, RANSSolver</li>
           <li class="layer-item"><span class="layer-dot dot-red"></span><strong>losses/</strong> — PINNLoss (RBA), ODELoss, SteadyLoss</li>
-          <li class="layer-item"><span class="layer-dot dot-blue"></span><strong>callbacks/</strong> — ConsoleLogger, EarlyStopping</li>
+          <li class="layer-item"><span class="layer-dot dot-blue"></span><strong>callbacks/</strong> — ConsoleLogger, EarlyStopping, ModelCheckpoint</li>
           <li class="layer-item"><span class="layer-dot dot-green"></span><strong>geometry/</strong> — Pipe, Airfoil, Rectangle, Shapely polygon</li>
           <li class="layer-item"><span class="layer-dot dot-purple"></span><strong>training/</strong> — RAR-D adaptive resampling</li>
-          <li class="layer-item"><span class="layer-dot dot-orange"></span><strong>runner/</strong> — Dispatch registry, 6 YAML runners</li>
-          <li class="layer-item"><span class="layer-dot dot-red"></span><strong>utils/</strong> — save_predictions, safe_choice, set_seed, metrics</li>
+          <li class="layer-item"><span class="layer-dot dot-orange"></span><strong>runner/</strong> — <code>dispatch.py</code>: path-registry + importlib loader (runner logic lives in <code>examples/</code>)</li>
+          <li class="layer-item"><span class="layer-dot dot-red"></span><strong>utils/</strong> — save_predictions, checkpoint, ModelPredictor, metrics</li>
           <li class="layer-item"><span class="layer-dot dot-blue"></span><strong>benchmark_utils/</strong> — BenchmarkRunner, evaluators, report</li>
         </ul>
       </div>
@@ -527,8 +532,8 @@
 <section id="examples" class="examples-section">
   <div class="container">
     <div class="section-tag">Physics Examples</div>
-    <h2 class="section-title">14 worked examples across 5 physics domains</h2>
-    <p class="section-sub">Every example saves predictions as <code>.npz</code>, generates loss + solution plots, and demonstrates a distinct framework capability.</p>
+    <h2 class="section-title">14 worked examples across 6 physics domains</h2>
+    <p class="section-sub">Each example folder is self-contained: one script + one YAML config. Run directly (<code>python examples/burgers/burgers.py</code>) or via the CLI. Saves predictions, plots, and a <code>params.msgpack</code> checkpoint automatically.</p>
 
     <div class="table-wrap">
       <table>
@@ -636,19 +641,25 @@
   <div class="container">
     <div class="section-tag">Command-Line Interface</div>
     <h2 class="section-title">YAML-driven experiments, zero code changes</h2>
-    <p class="section-sub">Run, sweep, inspect, and benchmark any problem from the terminal. Each run saves all artefacts to its own output directory.</p>
+    <p class="section-sub">Run scripts directly or via the CLI — both point at the same YAML. Adding a new problem = one script + one YAML + one line in <code>dispatch.py</code>.</p>
 
     <div class="cli-grid">
       <div class="cli-card">
         <h3>🚀 Single Run</h3>
-        <p>Point at a config file. That's it.</p>
+        <p>Point at a YAML — or run the script directly. Both work.</p>
         <div class="shell">
           <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/burgers/config.yaml</span></div>
           <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/wave/config.yaml</span></div>
           <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/helmholtz/config.yaml</span></div>
           <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/heat/heat_forward.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/heat/heat_inverse.yaml</span></div>
           <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/ode/config.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/LDC/config.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/airfoil/config.yaml</span></div>
           <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/pipe_flow/pipe_flow.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/transfer/burgers_transfer.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/pipe_flow/pipe_flow_unsteady_transfer.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/inverse/config.yaml</span></div>
         </div>
       </div>
       <div class="cli-card">
@@ -674,11 +685,17 @@
           <div class="cmt">&nbsp;</div>
           <div class="cmt">Registered problem runners:</div>
           <div class="cmt">&nbsp;&nbsp;burgers</div>
-          <div class="cmt">&nbsp;&nbsp;heat_forward</div>
-          <div class="cmt">&nbsp;&nbsp;helmholtz</div>
-          <div class="cmt">&nbsp;&nbsp;ode</div>
-          <div class="cmt">&nbsp;&nbsp;pipe_flow</div>
           <div class="cmt">&nbsp;&nbsp;wave</div>
+          <div class="cmt">&nbsp;&nbsp;helmholtz</div>
+          <div class="cmt">&nbsp;&nbsp;heat_forward</div>
+          <div class="cmt">&nbsp;&nbsp;pipe_flow</div>
+          <div class="cmt">&nbsp;&nbsp;ode</div>
+          <div class="cmt">&nbsp;&nbsp;ldc</div>
+          <div class="cmt">&nbsp;&nbsp;airfoil</div>
+          <div class="cmt">&nbsp;&nbsp;heat_inverse</div>
+          <div class="cmt">&nbsp;&nbsp;inverse_diffusion</div>
+          <div class="cmt">&nbsp;&nbsp;burgers_transfer</div>
+          <div class="cmt">&nbsp;&nbsp;pipe_flow_unsteady_transfer</div>
         </div>
       </div>
       <div class="cli-card">
@@ -777,11 +794,12 @@ runner.<span class="fn">save_json</span>(<span class="st">"outputs/bench/results
   <div class="container">
     <div class="section-tag">Quick Start</div>
     <h2 class="section-title">Up and running in 5 minutes</h2>
-    <p class="section-sub">Three patterns — pick the one that fits your use case.</p>
+    <p class="section-sub">Five patterns — pick the one that fits your use case.</p>
 
     <div class="qs-tabs">
       <button class="tab-btn active" onclick="showTab('yaml')">YAML Config</button>
       <button class="tab-btn" onclick="showTab('api')">Python API</button>
+      <button class="tab-btn" onclick="showTab('checkpoint')">Checkpoint &amp; Inference</button>
       <button class="tab-btn" onclick="showTab('transfer')">Transfer Learning</button>
       <button class="tab-btn" onclick="showTab('scan')">GPU Acceleration</button>
     </div>
@@ -817,7 +835,8 @@ runner.<span class="fn">save_json</span>(<span class="st">"outputs/bench/results
   <span class="nm">rba</span>      : <span class="nm">true</span>
 
 <span class="nm">output</span>:
-  <span class="nm">dir</span>: outputs/burgers</pre>
+  <span class="nm">dir</span>        : outputs/burgers
+  <span class="nm">save_params</span>: <span class="nm">true</span>   <span class="cm"># writes params.msgpack + params_meta.json</span></pre>
       <div style="height:1rem"></div>
       <div class="shell">
         <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/burgers/config.yaml</span></div>
@@ -856,6 +875,69 @@ config = <span class="cls">TrainingConfig</span>(
     callbacks   = [<span class="cls">ConsoleLogger</span>(log_every=<span class="nu">500</span>), <span class="cls">EarlyStopping</span>(patience=<span class="nu">400</span>)],
 )
 solver.<span class="fn">train</span>(*data, config=config)
+</pre>
+    </div>
+
+    <div id="tab-checkpoint" class="tab-content">
+      <div class="code-header">
+        <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
+        Model Checkpoint — save during training
+      </div>
+<pre><span class="kw">from</span> <span class="nm">underPINN.callbacks.checkpoint</span> <span class="kw">import</span> <span class="cls">ModelCheckpoint</span>
+<span class="kw">from</span> <span class="nm">underPINN.callbacks.logging</span>    <span class="kw">import</span> <span class="cls">ConsoleLogger</span>
+<span class="kw">from</span> <span class="nm">underPINN.callbacks.early_stopping</span> <span class="kw">import</span> <span class="cls">EarlyStopping</span>
+<span class="kw">from</span> <span class="nm">underPINN.core.config</span>          <span class="kw">import</span> <span class="cls">TrainingConfig</span>
+
+<span class="cm"># Save best model automatically during training</span>
+config = <span class="cls">TrainingConfig</span>(
+    epochs=<span class="nu">5000</span>,
+    lr=<span class="nu">1e-3</span>,
+    callbacks=[
+        <span class="cls">ConsoleLogger</span>(log_every=<span class="nu">500</span>),
+        <span class="cls">EarlyStopping</span>(patience=<span class="nu">400</span>),
+        <span class="cls">ModelCheckpoint</span>(
+            out_dir=<span class="st">"outputs/burgers/"</span>,
+            monitor=<span class="st">"loss"</span>,       <span class="cm"># metric to watch</span>
+            mode=<span class="st">"min"</span>,           <span class="cm"># save when loss decreases</span>
+            save_best_only=<span class="nm">True</span>,  <span class="cm"># skip non-improving epochs</span>
+            metadata={
+                <span class="st">"problem"</span>: <span class="st">"burgers"</span>,
+                <span class="st">"network"</span>: {<span class="st">"type"</span>: <span class="st">"mlp"</span>, <span class="st">"layers"</span>: [<span class="nu">2</span>, <span class="nu">64</span>, <span class="nu">64</span>, <span class="nu">64</span>, <span class="nu">1</span>]},
+            },
+        ),
+    ],
+)
+solver.<span class="fn">train</span>(*data, config=config)
+<span class="cm"># writes: outputs/burgers/params.msgpack  (best)</span>
+<span class="cm">#         outputs/burgers/params_meta.json</span>
+<span class="cm">#         outputs/burgers/params_final.msgpack  (end of training)</span>
+</pre>
+      <div style="height:.75rem"></div>
+      <div class="code-header">
+        <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
+        Model Inference — load and predict
+      </div>
+<pre><span class="kw">from</span> <span class="nm">underPINN.utils.checkpoint</span> <span class="kw">import</span> <span class="cls">ModelPredictor</span>
+<span class="kw">import</span> jax.numpy <span class="kw">as</span> jnp, numpy <span class="kw">as</span> np
+
+<span class="cm"># ── Option A: auto-rebuild model from saved metadata ─────</span>
+predictor = <span class="cls">ModelPredictor</span>.<span class="fn">from_meta</span>(<span class="st">"outputs/burgers/"</span>)
+
+<span class="cm"># ── Option B: supply model explicitly ─────────────────────</span>
+<span class="kw">from</span> <span class="nm">underPINN.nn.mlp</span> <span class="kw">import</span> <span class="cls">MLP</span>
+predictor = <span class="cls">ModelPredictor</span>.<span class="fn">from_checkpoint</span>(
+    <span class="cls">MLP</span>(layers=[<span class="nu">2</span>, <span class="nu">64</span>, <span class="nu">64</span>, <span class="nu">64</span>, <span class="nu">1</span>]),
+    <span class="st">"outputs/burgers/"</span>,
+)
+
+<span class="cm"># ── Inference ─────────────────────────────────────────────</span>
+x_test = jnp.<span class="fn">linspace</span>(-<span class="nu">1</span>, <span class="nu">1</span>, <span class="nu">256</span>)
+t_test = jnp.<span class="fn">full_like</span>(x_test, <span class="nu">0.5</span>)
+inputs = jnp.<span class="fn">stack</span>([x_test, t_test], axis=<span class="nu">1</span>)
+
+u = predictor.<span class="fn">predict</span>(inputs)            <span class="cm"># JAX array</span>
+u_np = predictor.<span class="fn">predict_numpy</span>(inputs)   <span class="cm"># NumPy array</span>
+u_np = <span class="fn">np.array</span>(predictor(inputs))       <span class="cm"># callable syntax</span>
 </pre>
     </div>
 
