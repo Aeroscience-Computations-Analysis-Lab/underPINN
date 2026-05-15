@@ -12,12 +12,12 @@ exponential_decay:
 # ── Harmonic oscillator  u'' + ω²u = 0 ───────────────────────────────────────
 harmonic_oscillator:
   omega: 2.0
-  T    : 10.0
+  T    : 5.0
   u0   : 1.0
   v0   : 0.0   # initial velocity
 
 data:
-  n_collocation: 3000
+  n_collocation: 10000
   n_ic         : 1
 
 training:

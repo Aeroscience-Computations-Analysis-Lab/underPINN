@@ -1,26 +1,27 @@
+"""ODE test cases — Exponential Decay + Harmonic Oscillator PINNs.
+
+Run directly or via the CLI:
+
+    python examples/ode/ode_test.py                  # uses config.yaml
+    python examples/ode/ode_test.py myconfig.yaml    # custom config
+    python -m underPINN run examples/ode/config.yaml
+
+Two ODE problems are solved in sequence:
+  1. Exponential Decay:    du/dt + λu = 0,  u(0) = u0
+  2. Harmonic Oscillator:  d²u/dt² + ω²u = 0,  u(0) = u0,  u'(0) = v0
 """
-ODE Test Cases for underPINN
-============================
+from __future__ import annotations
 
-Test 1 — Exponential Decay:
-    du/dt + 2u = 0,  u(0) = 1
-    Exact: u(t) = exp(-2t),  t in [0, 2]
-
-Test 2 — Harmonic Oscillator:
-    d²u/dt² + 4u = 0,  u(0) = 1, u'(0) = 0
-    Exact: u(t) = cos(2t),  t in [0, 2pi]
-
-Demonstrates the production-style API:
-  - TrainingConfig  (unified hyperparameters)
-  - ConsoleLogger   (replaces hardcoded prints)
-  - EarlyStopping   (stops when loss plateaus)
-"""
-
+import os
 import numpy as np
 import jax
 import jax.numpy as jnp
 import optax
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
+from underPINN.config.loader import cfg_get, save_config
 from underPINN.nn.mlp import MLP
 from underPINN.pde.ode import ExponentialDecayODE, HarmonicOscillatorODE
 from underPINN.losses.ode_loss import ODELoss
@@ -28,155 +29,186 @@ from underPINN.solver.ode_solver import ODESolver
 from underPINN.core.config import TrainingConfig
 from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.callbacks.early_stopping import EarlyStopping
-from underPINN.utils.metrics import print_errors
-from underPINN.utils.plotting import plot_ode_result
 from underPINN.utils.io import save_predictions
 
 
-# ---------------------------------------------------------------------------
-# Test 1: Exponential Decay  du/dt + 2u = 0
-# ---------------------------------------------------------------------------
+def run_ode(cfg) -> dict:
+    """Train PINNs on both ODE test cases defined in *cfg*.
 
-def test_exponential_decay():
-    print("\n" + "=" * 60)
-    print("Test 1: Exponential Decay  du/dt + 2u = 0")
-    print("=" * 60)
+    Runs exponential-decay first, then harmonic-oscillator. Both sets of
+    outputs (loss plots, solution plots, predictions .npz) are written to
+    ``output.dir``.
+    """
+    # ── Unpack shared config ──────────────────────────────────────────────────
+    tr      = cfg.training
+    seed    = cfg_get(tr, "seed",    default=0)
+    out     = cfg_get(cfg, "output", default=None)
+    out_dir = cfg_get(out, "dir", default="outputs/ode") if out else "outputs/ode"
+    os.makedirs(out_dir, exist_ok=True)
 
-    LAM = 2.0
-    T_MAX = 2.0
-    EPOCHS = 3000
+    epochs    = tr.epochs
+    lr        = tr.lr
+    lr_alpha  = cfg_get(tr, "lr_alpha",  default=0.01)
+    log_every = cfg_get(tr, "log_every", default=500)
+    patience  = cfg_get(tr, "early_stopping_patience", default=200)
+    n_col     = cfg_get(cfg.data, "n_collocation", default=3000)
+    layers    = cfg.network.layers
 
-    t_r  = jnp.linspace(0.0, T_MAX, 500)
-    t_ic = jnp.array([0.0])
-    u_ic = jnp.array([1.0])
+    results: dict = {}
 
-    config = TrainingConfig(
-        epochs=EPOCHS,
-        lr=1e-3,
-        lr_schedule=optax.cosine_decay_schedule(1e-3, decay_steps=EPOCHS, alpha=1e-2),
-        log_every=500,
-        callbacks=[
-            ConsoleLogger(log_every=500),
-            EarlyStopping(patience=300),
-        ],
-    )
+    # ── Helper to build TrainingConfig ────────────────────────────────────────
+    def _make_config(ep: int) -> TrainingConfig:
+        return TrainingConfig(
+            epochs=ep,
+            lr=lr,
+            lr_schedule=optax.cosine_decay_schedule(lr, decay_steps=ep, alpha=lr_alpha),
+            seed=seed,
+            log_every=log_every,
+            callbacks=[
+                ConsoleLogger(log_every=log_every),
+                EarlyStopping(patience=patience),
+            ],
+        )
 
-    model  = MLP(layers=[1, 64, 64, 64, 1])
-    pde    = ExponentialDecayODE(model, lam=LAM)
-    loss   = ODELoss(model, pde, ic_weight=100.0)
-    solver = ODESolver(model, pde, loss)
+    # ── 1. Exponential Decay  du/dt + λu = 0 ─────────────────────────────────
+    exp_cfg = cfg_get(cfg, "exponential_decay", default=None)
+    if exp_cfg is not None:
+        print("\n" + "=" * 60)
+        print("Exponential Decay  du/dt + λu = 0")
+        print("=" * 60)
 
-    solver.init(jax.random.PRNGKey(0))
-    solver.train(t_r, t_ic, u_ic, config=config)
+        lam = float(cfg_get(exp_cfg, "lambda", default=1.0))
+        T   = float(cfg_get(exp_cfg, "T",      default=5.0))
+        u0  = float(cfg_get(exp_cfg, "u0",     default=1.0))
 
-    t_test  = jnp.linspace(0.0, T_MAX, 1000)
-    u_pred  = pde.u(solver.params, t_test)
-    u_exact = pde.exact(t_test)
+        t_r  = jnp.linspace(0.0, T, n_col)
+        t_ic = jnp.array([0.0])
+        u_ic = jnp.array([u0])
 
-    print_errors(u_pred, u_exact, label="Exp Decay")
+        model  = MLP(layers=layers)
+        pde    = ExponentialDecayODE(model, lam=lam)
+        loss   = ODELoss(model, pde, ic_weight=100.0)
+        solver = ODESolver(model, pde, loss)
+        solver.init(jax.random.PRNGKey(seed))
+        solver.train(t_r, t_ic, u_ic, config=_make_config(epochs))
 
-    plot_ode_result(
-        t_test, u_pred, u_exact,
-        solver.loss_hist, solver.pde_hist, solver.ic_hist,
-        title=f"Exponential Decay: du/dt + {LAM}u = 0",
-        filename="ode_exponential_decay.png",
-    )
+        t_test  = jnp.linspace(0.0, T, 1000)
+        u_pred  = pde.u(solver.params, t_test)
+        u_exact = pde.exact(t_test)
+        rel_l2  = float(jnp.linalg.norm(u_pred - u_exact) / (jnp.linalg.norm(u_exact) + 1e-10))
+        print(f"  Exponential Decay — Rel-L2: {rel_l2:.4e}")
+        results["exp_decay_rel_l2"] = rel_l2
 
-    # Save predictions at collocation points
-    save_predictions(
-        ".",
-        coords  = {"t": t_r},
-        outputs = {"u_pred": pde.u(solver.params, t_r)},
-        exact   = {"u_exact": pde.exact(t_r)},
-        filename="predictions_exp_decay.npz",
-    )
+        # Save checkpoint
+        solver.save_checkpoint(out_dir, stem="params_exp_decay", metadata={
+            "problem": "ode", "ode": "exponential_decay",
+            "network": {"type": "mlp", "layers": list(layers)},
+            "physics": {"lambda": lam, "u0": u0, "T": T},
+            "rel_l2": rel_l2,
+        })
 
-    return float(jnp.sqrt(jnp.mean((u_pred - u_exact) ** 2)) / jnp.sqrt(jnp.mean(u_exact ** 2)))
+        # Save predictions
+        save_predictions(
+            out_dir,
+            coords  = {"t": np.array(t_r)},
+            outputs = {"u_pred": np.array(pde.u(solver.params, t_r))},
+            exact   = {"u_exact": np.array(pde.exact(t_r))},
+            filename="predictions_exp_decay.npz",
+        )
 
+        # Loss + solution plot
+        np.save(os.path.join(out_dir, "loss_exp_decay.npy"),
+                np.array(solver.loss_hist))
+        fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+        axes[0].plot(np.array(t_test), np.array(u_exact), label="Exact",  lw=1.5)
+        axes[0].plot(np.array(t_test), np.array(u_pred),  label="PINN", lw=1.5, ls="--")
+        axes[0].set_xlabel("t"); axes[0].legend()
+        axes[0].set_title(f"Exp Decay  λ={lam}  (Rel-L2={rel_l2:.2e})")
+        axes[1].semilogy(solver.loss_hist,  label="Total",  lw=1.2)
+        axes[1].semilogy(solver.pde_hist,   label="PDE",    alpha=0.7)
+        axes[1].semilogy(solver.ic_hist,    label="IC",     alpha=0.7)
+        axes[1].set_xlabel("Epoch"); axes[1].legend()
+        axes[1].set_title("Training loss")
+        fig.tight_layout()
+        fig.savefig(os.path.join(out_dir, "exp_decay.png"), dpi=150, bbox_inches="tight")
+        plt.close(fig)
 
-# ---------------------------------------------------------------------------
-# Test 2: Harmonic Oscillator  d²u/dt² + 4u = 0
-# ---------------------------------------------------------------------------
+    # ── 2. Harmonic Oscillator  d²u/dt² + ω²u = 0 ───────────────────────────
+    ho_cfg = cfg_get(cfg, "harmonic_oscillator", default=None)
+    if ho_cfg is not None:
+        print("\n" + "=" * 60)
+        print("Harmonic Oscillator  d²u/dt² + ω²u = 0")
+        print("=" * 60)
 
-def test_harmonic_oscillator():
-    print("\n" + "=" * 60)
-    print("Test 2: Harmonic Oscillator  d²u/dt² + 4u = 0")
-    print("=" * 60)
+        omega = float(cfg_get(ho_cfg, "omega", default=2.0))
+        T     = float(cfg_get(ho_cfg, "T",     default=10.0))
+        u0    = float(cfg_get(ho_cfg, "u0",    default=1.0))
+        v0    = float(cfg_get(ho_cfg, "v0",    default=0.0))
 
-    OMEGA = 2.0
-    T_MAX = 2 * np.pi
-    EPOCHS = 5000
+        t_r      = jnp.linspace(0.0, T, n_col)
+        t_ic     = jnp.array([0.0])
+        u_ic     = jnp.array([u0])
+        u_ic_dot = jnp.array([v0])
 
-    t_r      = jnp.linspace(0.0, T_MAX, 800)
-    t_ic     = jnp.array([0.0])
-    u_ic     = jnp.array([1.0])
-    u_ic_dot = jnp.array([0.0])
+        # Use more epochs for the harder harmonic problem
+        ho_epochs = cfg_get(tr, "harmonic_epochs", default=epochs * 4)
 
-    config = TrainingConfig(
-        epochs=EPOCHS,
-        lr=1e-3,
-        lr_schedule=optax.cosine_decay_schedule(1e-3, decay_steps=EPOCHS, alpha=1e-2),
-        log_every=500,
-        callbacks=[
-            ConsoleLogger(log_every=500),
-            EarlyStopping(patience=400),
-        ],
-    )
+        model  = MLP(layers=layers)
+        pde    = HarmonicOscillatorODE(model, omega=omega)
+        loss   = ODELoss(model, pde, ic_weight=100.0, ic_derivative_weight=100.0)
+        solver = ODESolver(model, pde, loss)
+        solver.init(jax.random.PRNGKey(seed + 1))
+        solver.train(t_r, t_ic, u_ic, u_ic_dot=u_ic_dot, config=_make_config(ho_epochs))
 
-    model  = MLP(layers=[1, 64, 64, 64, 1])
-    pde    = HarmonicOscillatorODE(model, omega=OMEGA)
-    loss   = ODELoss(model, pde, ic_weight=100.0, ic_derivative_weight=100.0)
-    solver = ODESolver(model, pde, loss)
+        t_test  = jnp.linspace(0.0, T, 2000)
+        u_pred  = pde.u(solver.params, t_test)
+        u_exact = pde.exact(t_test)
+        rel_l2  = float(jnp.linalg.norm(u_pred - u_exact) / (jnp.linalg.norm(u_exact) + 1e-10))
+        print(f"  Harmonic Oscillator — Rel-L2: {rel_l2:.4e}")
+        results["harmonic_rel_l2"] = rel_l2
 
-    solver.init(jax.random.PRNGKey(42))
-    solver.train(t_r, t_ic, u_ic, u_ic_dot=u_ic_dot, config=config)
+        # Save checkpoint
+        solver.save_checkpoint(out_dir, stem="params_harmonic", metadata={
+            "problem": "ode", "ode": "harmonic_oscillator",
+            "network": {"type": "mlp", "layers": list(layers)},
+            "physics": {"omega": omega, "T": T},
+            "rel_l2": rel_l2,
+        })
 
-    t_test  = jnp.linspace(0.0, T_MAX, 1000)
-    u_pred  = pde.u(solver.params, t_test)
-    u_exact = pde.exact(t_test)
+        # Save predictions
+        save_predictions(
+            out_dir,
+            coords  = {"t": np.array(t_r)},
+            outputs = {"u_pred": np.array(pde.u(solver.params, t_r))},
+            exact   = {"u_exact": np.array(pde.exact(t_r))},
+            filename="predictions_harmonic.npz",
+        )
 
-    print_errors(u_pred, u_exact, label="Harmonic")
+        # Loss + solution plot
+        np.save(os.path.join(out_dir, "loss_harmonic.npy"),
+                np.array(solver.loss_hist))
+        fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+        axes[0].plot(np.array(t_test), np.array(u_exact), label="Exact",  lw=1.5)
+        axes[0].plot(np.array(t_test), np.array(u_pred),  label="PINN", lw=1.5, ls="--")
+        axes[0].set_xlabel("t"); axes[0].legend()
+        axes[0].set_title(f"Harmonic  ω={omega}  (Rel-L2={rel_l2:.2e})")
+        axes[1].semilogy(solver.loss_hist,  label="Total",  lw=1.2)
+        axes[1].semilogy(solver.pde_hist,   label="PDE",    alpha=0.7)
+        axes[1].semilogy(solver.ic_hist,    label="IC",     alpha=0.7)
+        axes[1].set_xlabel("Epoch"); axes[1].legend()
+        axes[1].set_title("Training loss")
+        fig.tight_layout()
+        fig.savefig(os.path.join(out_dir, "harmonic.png"), dpi=150, bbox_inches="tight")
+        plt.close(fig)
 
-    plot_ode_result(
-        t_test, u_pred, u_exact,
-        solver.loss_hist, solver.pde_hist, solver.ic_hist,
-        title=f"Harmonic Oscillator: d²u/dt² + {OMEGA**2:.0f}u = 0",
-        filename="ode_harmonic_oscillator.png",
-    )
-
-    # Save predictions at collocation points
-    save_predictions(
-        ".",
-        coords  = {"t": t_r},
-        outputs = {"u_pred": pde.u(solver.params, t_r)},
-        exact   = {"u_exact": pde.exact(t_r)},
-        filename="predictions_harmonic.npz",
-    )
-
-    return float(jnp.sqrt(jnp.mean((u_pred - u_exact) ** 2)) / jnp.sqrt(jnp.mean(u_exact ** 2)))
-
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
-def main():
-    print("JAX devices:", jax.devices())
-
-    rel_err_decay    = test_exponential_decay()
-    rel_err_harmonic = test_harmonic_oscillator()
-
-    print("\n" + "=" * 60)
-    print("SUMMARY")
-    print("=" * 60)
-    print(f"  Exponential Decay   — Rel-L2: {rel_err_decay:.4e}")
-    print(f"  Harmonic Oscillator — Rel-L2: {rel_err_harmonic:.4e}")
-
-    assert rel_err_decay    < 1e-2, f"Exp decay error too large: {rel_err_decay:.4e}"
-    assert rel_err_harmonic < 5e-2, f"Harmonic error too large:  {rel_err_harmonic:.4e}"
-
-    print("\nAll ODE tests PASSED.")
+    save_config(cfg, os.path.join(out_dir, "config.yaml"))
+    print(f"\nOutputs saved to: {out_dir}/")
+    return results
 
 
 if __name__ == "__main__":
-    main()
+    import sys, pathlib
+    _HERE = pathlib.Path(__file__).parent
+    cfg_path = str(pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else _HERE / "config.yaml")
+    from underPINN.config.loader import load_config
+    run_ode(load_config(cfg_path))

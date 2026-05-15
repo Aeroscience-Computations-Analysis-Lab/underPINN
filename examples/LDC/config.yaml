@@ -10,11 +10,11 @@ physics:
   Re: 100.0
 
 data:
-  n_collocation: 8000
+  n_collocation: 2000
   n_bc         : 800    # total boundary points (all four walls)
 
 training:
-  epochs   : 5000
+  epochs   : 50
   lr       : 1.0e-3
   lr_alpha : 0.01
   batch_r  : 2048
@@ -29,3 +29,4 @@ loss:
 
 output:
   dir: outputs/ldc
+  save_params: true

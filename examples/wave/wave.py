@@ -1,213 +1,179 @@
+"""1-D Wave Equation PINN.
+
+Run directly or via the CLI:
+
+    python examples/wave/wave.py                   # uses config.yaml
+    python examples/wave/wave.py myconfig.yaml     # custom config
+    python -m underPINN run examples/wave/config.yaml
+
+IC: u(x,0) = sin(πx),  u_t(x,0) = 0    BC: u(±1,t) = 0
+Exact: sin(πx) cos(cπt)
 """
-Wave Equation — underPINN Example
-==================================
+from __future__ import annotations
 
-Solves the 1-D wave equation using a Physics-Informed Neural Network:
-
-    u_tt - c² u_xx = 0,    x ∈ [0, 1],  t ∈ [0, 1]
-
-    IC  : u(x, 0)  = sin(πx)          (displacement)
-          u_t(x, 0) = 0                (velocity)
-    BC  : u(0, t)  = u(1, t) = 0      (fixed ends)
-
-    Exact solution: u(x, t) = sin(πx) cos(c π t)
-
-Key features demonstrated
---------------------------
-- Hyperbolic (wave) PDE — two ICs (displacement AND velocity)
-- FourierMLP for oscillatory space-time solutions
-- Custom training loop with separate IC / IC-derivative / BC terms
-- ConsoleLogger + EarlyStopping callbacks
-"""
-
+import os
 import numpy as np
 import jax
 import jax.numpy as jnp
 import optax
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from underPINN.nn.mlp import FourierMLP
+from underPINN.config.loader import cfg_get, save_config
+from underPINN.nn.mlp import FourierMLP, MLP
 from underPINN.pde.wave import WavePDE
 from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.callbacks.early_stopping import EarlyStopping
 from underPINN.utils.io import save_predictions
+from underPINN.utils.checkpoint import save_checkpoint
+from underPINN.utils.sampling import safe_choice
 
 
-# ---- Hyper-parameters ----
-C      = 1.0    # wave speed
-T_MAX  = 1.0    # time horizon
-EPOCHS = 6000
+def run_wave(cfg) -> dict:
+    """Train a PINN on the 1-D wave equation  u_tt = c² u_xx."""
+    tr      = cfg.training
+    seed    = cfg_get(tr, "seed",    default=0)
+    out     = cfg_get(cfg, "output", default=None)
+    out_dir = cfg_get(out, "dir",   default="outputs/wave") if out else "outputs/wave"
+    os.makedirs(out_dir, exist_ok=True)
 
-IC_W     = 100.0   # weight for u(x,0) = sin(πx)
-IC_DOT_W = 100.0   # weight for u_t(x,0) = 0
-BC_W     =  10.0   # weight for wall BCs
+    c         = cfg.physics.c
+    T         = cfg.data.T
+    epochs    = tr.epochs
+    lr        = tr.lr
+    lr_alpha  = cfg_get(tr, "lr_alpha",  default=0.01)
+    log_every = cfg_get(tr, "log_every", default=500)
+    patience  = int(cfg_get(tr, "early_stopping_patience", default=600))
 
+    N_r  = cfg_get(cfg.data, "n_collocation", default=6000)
+    N_ic = cfg_get(cfg.data, "n_ic",          default=300)
+    N_bc = cfg_get(cfg.data, "n_bc",          default=300)
 
-# ---------------------------------------------------------------------------
-# Data generation
-# ---------------------------------------------------------------------------
+    IC_W     = cfg_get(cfg.loss, "ic_weight",     default=100.0)
+    IC_DOT_W = cfg_get(cfg.loss, "ic_dot_weight", default=100.0)
+    BC_W     = cfg_get(cfg.loss, "bc_weight",     default=10.0)
 
-def make_data(N_r=8000, N_ic=300, N_bc=300, seed=42):
+    net_cfg   = cfg.network
+    n_fourier = cfg_get(net_cfg, "n_fourier", default=16)
+    sigma     = cfg_get(net_cfg, "sigma",     default=max(2.0, float(c) * np.pi))
+    model = FourierMLP(layers=net_cfg.layers, n_fourier=n_fourier, sigma=sigma)
+    pde   = WavePDE(model, c=c)
+
     rng = np.random.default_rng(seed)
+    x_r = jnp.array(rng.uniform(-1, 1, N_r).astype(np.float32))
+    t_r = jnp.array(rng.uniform(0, T, N_r).astype(np.float32))
 
-    # Interior collocation
-    x_r = rng.uniform(0.0, 1.0, N_r).astype(np.float32)
-    t_r = rng.uniform(0.0, T_MAX, N_r).astype(np.float32)
+    x_ic = jnp.array(np.linspace(-1, 1, N_ic, dtype=np.float32))
+    u_ic = jnp.array(np.sin(np.pi * np.linspace(-1, 1, N_ic)).astype(np.float32))
 
-    # Initial condition slice (t = 0)
-    x_ic = np.linspace(0.0, 1.0, N_ic, dtype=np.float32)
+    t_bc = rng.uniform(0, T, N_bc).astype(np.float32)
+    x_bc = jnp.array(np.concatenate([np.full(N_bc, -1., np.float32),
+                                      np.full(N_bc,  1., np.float32)]))
+    t_bc = jnp.array(np.concatenate([t_bc, t_bc]))
 
-    # Boundary: left wall (x=0) and right wall (x=1) at random times
-    t_bc = rng.uniform(0.0, T_MAX, N_bc).astype(np.float32)
-    x_bc = np.concatenate([np.zeros(N_bc, np.float32),
-                            np.ones(N_bc,  np.float32)])
-    t_bc = np.concatenate([t_bc, t_bc])
-
-    return (
-        jnp.array(x_r),  jnp.array(t_r),
-        jnp.array(x_ic),
-        jnp.array(x_bc), jnp.array(t_bc),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
-def main():
-    print("JAX devices:", jax.devices())
-    print(f"Wave equation: c={C}, T={T_MAX}, epochs={EPOCHS}")
-
-    # FourierMLP — encodes inputs as [sin(Bx), cos(Bx)] before MLP
-    # sigma=2 gives frequencies tuned to the sin(πx)cos(πt) solution
-    model = FourierMLP(layers=[2, 64, 64, 64, 1], n_fourier=16, sigma=2.0)
-    pde   = WavePDE(model, c=C)
-
-    key    = jax.random.PRNGKey(0)
+    key    = jax.random.PRNGKey(seed)
     params = model.init(key, jnp.ones((1, 2)))
 
-    schedule  = optax.cosine_decay_schedule(1e-3, decay_steps=EPOCHS, alpha=1e-2)
-    optimizer = optax.chain(
-        optax.scale_by_adam(),
-        optax.scale_by_schedule(schedule),
-        optax.scale(-1.0),
-    )
+    lr_sched  = optax.cosine_decay_schedule(lr, decay_steps=epochs, alpha=lr_alpha)
+    optimizer = optax.chain(optax.scale_by_adam(),
+                            optax.scale_by_schedule(lr_sched),
+                            optax.scale(-1.0))
     opt_state = optimizer.init(params)
 
-    x_r, t_r, x_ic, x_bc, t_bc = make_data()
-
-    u_ic     = jnp.sin(jnp.pi * x_ic)    # u(x, 0) = sin(πx)
-    u_ic_dot = jnp.zeros_like(x_ic)       # u_t(x, 0) = 0
-    u_bc     = jnp.zeros_like(x_bc)       # u = 0 at walls
-
     @jax.jit
-    def step(params, opt_state):
+    def step(params, state, x_r, t_r, x_ic, u_ic, x_bc, t_bc):
         def loss_fn(p):
-            # PDE residual: u_tt - c²u_xx
-            res     = pde.residual(p, x_r, t_r)
-            pde_l   = jnp.mean(res ** 2)
-
-            # IC displacement: u(x,0) = sin(πx)
-            u_pred  = pde.u(p, x_ic, jnp.zeros_like(x_ic))
-            ic_l    = jnp.mean((u_pred - u_ic) ** 2)
-
-            # IC velocity: u_t(x,0) = 0  (requires a Jacobian)
-            ut_pred  = pde.u_t(p, x_ic, jnp.zeros_like(x_ic))
-            ic_dot_l = jnp.mean((ut_pred - u_ic_dot) ** 2)
-
-            # BC: fixed ends
-            u_bc_pred = pde.u(p, x_bc, t_bc)
-            bc_l      = jnp.mean((u_bc_pred - u_bc) ** 2)
-
-            total = pde_l + IC_W * ic_l + IC_DOT_W * ic_dot_l + BC_W * bc_l
-            return total, (pde_l, ic_l, ic_dot_l, bc_l)
-
-        (loss, aux), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)
-        updates, opt_state = optimizer.update(grads, opt_state)
+            res   = pde.residual(p, x_r, t_r)
+            pde_l = jnp.mean(res ** 2)
+            ic_l  = jnp.mean((pde.u(p, x_ic, jnp.zeros_like(x_ic)) - u_ic) ** 2)
+            ut    = pde.u_t(p, x_ic, jnp.zeros_like(x_ic))
+            dot_l = jnp.mean(ut ** 2)
+            bc_l  = jnp.mean(pde.u(p, x_bc, t_bc) ** 2)
+            total = pde_l + IC_W * ic_l + IC_DOT_W * dot_l + BC_W * bc_l
+            return total, (pde_l, ic_l, dot_l, bc_l)
+        (total, aux), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)
+        updates, state = optimizer.update(grads, state)
         params = optax.apply_updates(params, updates)
-        return params, opt_state, loss, aux
+        return params, state, total, aux
 
-    logger  = ConsoleLogger(log_every=500)
-    stopper = EarlyStopping(patience=500)
+    N_R, N_IC, N_BC = x_r.shape[0], x_ic.shape[0], x_bc.shape[0]
+    bR = cfg_get(tr, "batch_r", default=2048)
+    bI = cfg_get(tr, "batch_i", default=256)
+    bB = cfg_get(tr, "batch_b", default=256)
+
+    logger  = ConsoleLogger(log_every=log_every)
+    stopper = EarlyStopping(patience=patience)
     loss_hist = []
+    key = jax.random.PRNGKey(seed + 99)
 
     try:
-        for ep in range(EPOCHS):
-            params, opt_state, loss, (pde_l, ic_l, ic_dot_l, bc_l) = step(params, opt_state)
-            loss_hist.append(float(loss))
-            logs = {
-                "loss": float(loss),
-                "pde":  float(pde_l),
-                "ic":   float(ic_l),
-                "bc":   float(bc_l),
-            }
+        for ep in range(epochs):
+            key, k1, k2, k3 = jax.random.split(key, 4)
+            ir = safe_choice(k1, N_R,  bR)
+            ii = safe_choice(k2, N_IC, bI)
+            ib = safe_choice(k3, N_BC, bB)
+            params, opt_state, total, (pl, il, dl, bl) = step(
+                params, opt_state,
+                x_r[ir], t_r[ir], x_ic[ii], u_ic[ii], x_bc[ib], t_bc[ib])
+            loss_hist.append(float(total))
+            logs = {"loss": float(total), "pde": float(pl),
+                    "ic": float(il), "bc": float(bl)}
             logger.on_epoch_end(ep, logs)
             stopper.on_epoch_end(ep, logs)
     except StopIteration:
         pass
 
-    logger.on_train_end({"loss": loss_hist[-1]})
+    logger.on_train_end({"loss": loss_hist[-1] if loss_hist else float("nan")})
 
-    # ---- Evaluate on grid ----
-    Nx, Nt = 200, 200
-    x_test = jnp.linspace(0.0, 1.0, Nx)
-    t_test = jnp.linspace(0.0, T_MAX, Nt)
-    XX, TT = jnp.meshgrid(x_test, t_test, indexing="ij")
-    pts    = jnp.stack([XX.ravel(), TT.ravel()], axis=1)
+    np.save(os.path.join(out_dir, "loss_hist.npy"), np.array(loss_hist))
+    save_config(cfg, os.path.join(out_dir, "config.yaml"))
 
-    u_pred  = model.apply(params, pts)[:, 0].reshape(Nx, Nt)
-    u_exact = pde.exact(XX.ravel(), TT.ravel()).reshape(Nx, Nt)
-
-    rel_l2 = float(
-        jnp.sqrt(jnp.mean((u_pred - u_exact) ** 2))
-        / jnp.sqrt(jnp.mean(u_exact ** 2))
+    pts_r    = jnp.stack([x_r, t_r], axis=1)
+    u_pred_r = model.apply(params, pts_r)[:, 0]
+    u_exact_r = jnp.sin(jnp.pi * x_r) * jnp.cos(c * jnp.pi * t_r)
+    save_predictions(
+        out_dir,
+        coords  = {"x": np.array(x_r), "t": np.array(t_r)},
+        outputs = {"u_pred": np.array(u_pred_r)},
+        exact   = {"u_exact": np.array(u_exact_r)},
     )
-    max_err = float(jnp.max(jnp.abs(u_pred - u_exact)))
-    print(f"\nRelative L2 error : {rel_l2:.4e}")
-    print(f"Max absolute error: {max_err:.4e}")
 
-    # ---- Plots ----
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+    Nx, Nt = 200, 100
+    x_plt = jnp.linspace(-1, 1, Nx)
+    t_plt = jnp.linspace(0, T, Nt)
+    XX, TT = jnp.meshgrid(x_plt, t_plt, indexing="ij")
+    pts = jnp.stack([XX.ravel(), TT.ravel()], axis=1)
+    u_pred  = model.apply(params, pts)[:, 0].reshape(Nx, Nt)
+    u_exact = jnp.sin(jnp.pi * XX) * jnp.cos(c * jnp.pi * TT)
 
-    for ax, field, title in zip(
-        axes,
-        [u_exact, u_pred, jnp.abs(u_pred - u_exact)],
-        ["Exact  u(x,t)", "PINN  u(x,t)", f"|Error|  (Rel-L2={rel_l2:.2e})"],
-    ):
-        cf = ax.contourf(np.array(x_test), np.array(t_test),
-                         np.array(field).T, 50, cmap="jet")
+    fig, axes = plt.subplots(1, 3, figsize=(11, 3))
+    for ax, u, title in zip(axes, [np.array(u_exact), np.array(u_pred), np.array(u_exact - u_pred)],
+                             ["Exact", "PINN", "Error"]):
+        cf = ax.contourf(np.array(x_plt), np.array(t_plt), u.T, 40,
+                         cmap="RdBu_r", vmin=-1, vmax=1)
         plt.colorbar(cf, ax=ax)
-        ax.set_title(title)
-        ax.set_xlabel("x")
-        ax.set_ylabel("t")
-
-    fig.suptitle(f"Wave equation  u_tt = c² u_xx  (c={C})")
+        ax.set_title(title); ax.set_xlabel("x"); ax.set_ylabel("t")
+    fig.suptitle(f"Wave equation  c = {c}")
     fig.tight_layout()
-    fig.savefig("wave_solution.png", dpi=150)
+    fig.savefig(os.path.join(out_dir, "solution.png"), dpi=150, bbox_inches="tight")
     plt.close(fig)
 
-    fig2, ax2 = plt.subplots(figsize=(8, 4))
-    ax2.semilogy(loss_hist)
-    ax2.set_xlabel("Epoch")
-    ax2.set_ylabel("Loss")
-    ax2.set_title("Wave equation — training loss")
-    fig2.tight_layout()
-    fig2.savefig("wave_loss.png", dpi=150)
-    plt.close(fig2)
+    save_checkpoint(params, out_dir, metadata={
+        "problem": "wave",
+        "network": {"type": "fourier_mlp", "layers": list(net_cfg.layers),
+                    "n_fourier": cfg_get(net_cfg, "n_fourier", default=16),
+                    "sigma":     cfg_get(net_cfg, "sigma",     default=2.0)},
+        "physics": {"c": float(c)},
+    })
 
-    print("Plots saved: wave_solution.png, wave_loss.png")
-
-    # ---- Save predictions at collocation points ----
-    pts_r     = jnp.stack([x_r, t_r], axis=1)
-    u_pred_r  = model.apply(params, pts_r)[:, 0]
-    u_exact_r = pde.exact(x_r, t_r)
-    save_predictions(
-        ".",
-        coords  = {"x": x_r, "t": t_r},
-        outputs = {"u_pred": u_pred_r},
-        exact   = {"u_exact": u_exact_r},
-    )
+    print(f"\nOutputs saved to: {out_dir}/")
+    return {"params": params, "loss_hist": loss_hist}
 
 
 if __name__ == "__main__":
-    main()
+    import sys, pathlib
+    _HERE = pathlib.Path(__file__).parent
+    cfg_path = str(pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else _HERE / "config.yaml")
+    from underPINN.config.loader import load_config
+    run_wave(load_config(cfg_path))

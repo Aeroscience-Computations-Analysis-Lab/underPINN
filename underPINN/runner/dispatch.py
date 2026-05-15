@@ -1,60 +1,83 @@
 """Central runner registry for underPINN CLI.
 
-To add a new problem runner:
-  1. Write  underPINN/runner/<name>.py  with a ``run_<name>(cfg)`` function.
-  2. Import it below and add it to ``_REGISTRY``.
+Runner logic lives in the example scripts themselves — each example folder is
+self-contained (script + YAML).  This file maps problem names to those scripts
+via dynamic import so no runner code is duplicated inside underPINN.
+
+To add a new problem:
+  1. Create  examples/<name>/  with your script and a YAML config.
+  2. Add one line to ``_REGISTRY`` below — that's it.
 """
 
-from underPINN.runner.burgers      import run_burgers
-from underPINN.runner.wave         import run_wave
-from underPINN.runner.pipe_flow    import run_pipe_flow
-from underPINN.runner.helmholtz    import run_helmholtz
-from underPINN.runner.heat_forward import run_heat_forward
-from underPINN.runner.ode          import run_ode
-from underPINN.runner.ldc          import run_ldc
-from underPINN.runner.airfoil      import run_airfoil
-from underPINN.runner.heat_inverse import run_heat_inverse, run_inverse_diffusion
-from underPINN.runner.burgers_transfer import run_burgers_transfer
-from underPINN.runner.pipe_flow_unsteady_transfer import run_pipe_flow_unsteady_transfer
+from __future__ import annotations
 
-# ── Registry ──────────────────────────────────────────────────────────────────
-# Maps the string value of ``problem:`` in a config YAML to a runner callable.
+import importlib.util
+import pathlib
 
-_REGISTRY: dict = {
+# ── Path registry ─────────────────────────────────────────────────────────────
+# Maps  problem_name  →  (relative_path_to_script, function_name)
+# Paths are relative to the repository root (parent of underPINN/).
+
+_REPO_ROOT = pathlib.Path(__file__).parent.parent.parent   # → repo root
+
+_REGISTRY: dict[str, tuple[str, str]] = {
     # Core physics benchmarks
-    "burgers":      run_burgers,
-    "wave":         run_wave,
-    "pipe_flow":    run_pipe_flow,
-    "helmholtz":    run_helmholtz,
-    "heat_forward": run_heat_forward,
-    "ode":          run_ode,
+    "burgers":      ("examples/burgers/burgers.py",         "run_burgers"),
+    "wave":         ("examples/wave/wave.py",                "run_wave"),
+    "helmholtz":    ("examples/helmholtz/helmholtz.py",      "run_helmholtz"),
+    "heat_forward": ("examples/heat/forward.py",             "run_heat_forward"),
+    "ode":          ("examples/ode/ode_test.py",             "run_ode"),
 
     # Fluid dynamics
-    "ldc":          run_ldc,
-    "airfoil":      run_airfoil,
+    "ldc":          ("examples/LDC/run_ldc.py",             "run_ldc"),
+    "airfoil":      ("examples/airfoil/airfoil_flow.py",    "run_airfoil"),
+    "pipe_flow":    ("examples/pipe_flow/pipe_flow.py",     "run_pipe_flow"),
 
     # Inverse problems
-    "heat_inverse":      run_heat_inverse,
-    "inverse_diffusion": run_inverse_diffusion,   # alias used by examples/inverse/
+    "heat_inverse":      ("examples/heat/inverse.py",        "run_heat_inverse"),
+    "inverse_diffusion": ("examples/heat/inverse.py",        "run_heat_inverse"),
 
     # Transfer learning
-    "burgers_transfer":                 run_burgers_transfer,
-    "pipe_flow_unsteady_transfer":      run_pipe_flow_unsteady_transfer,
+    "burgers_transfer": (
+        "examples/transfer/burgers_transfer.py",
+        "run_burgers_transfer",
+    ),
+    "pipe_flow_unsteady_transfer": (
+        "examples/pipe_flow/pipe_flow_unsteady_transfer.py",
+        "run_pipe_flow_unsteady_transfer",
+    ),
 }
 
 
+# ── Dynamic loader ────────────────────────────────────────────────────────────
+
+def _load_runner(rel_path: str, fn_name: str):
+    """Dynamically import *fn_name* from the script at *rel_path*."""
+    abs_path = _REPO_ROOT / rel_path
+    if not abs_path.exists():
+        raise FileNotFoundError(
+            f"Runner script not found: {abs_path}\n"
+            f"Expected at '{rel_path}' relative to the repo root."
+        )
+    spec = importlib.util.spec_from_file_location("_runner_mod", abs_path)
+    mod  = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return getattr(mod, fn_name)
+
+
 def get_runner(problem: str):
-    """Return the runner function for *problem*, raising a helpful error if unknown."""
+    """Return the runner callable for *problem*, raising a helpful error if unknown."""
     if problem not in _REGISTRY:
         known = ", ".join(sorted(_REGISTRY))
         raise ValueError(
-            f"Unknown problem '{problem}'. "
+            f"Unknown problem '{problem}'.\n"
             f"Available runners: {known}\n"
-            f"To add a new runner, see underPINN/runner/dispatch.py."
+            f"To add a new runner, add one entry to underPINN/runner/dispatch.py."
         )
-    return _REGISTRY[problem]
+    rel_path, fn_name = _REGISTRY[problem]
+    return _load_runner(rel_path, fn_name)
 
 
-def list_problems() -> list:
+def list_problems() -> list[str]:
     """Return sorted list of registered problem names."""
     return sorted(_REGISTRY)
