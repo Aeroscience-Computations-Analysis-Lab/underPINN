@@ -51,6 +51,8 @@ from underPINN.config.loader import cfg_get, save_config
 from underPINN.nn.mlp import MLP
 from underPINN.pde.navier_stokes_3d import SteadyNS3DPDE
 from underPINN.geometry.pipe import Pipe
+from underPINN.callbacks.logging import ConsoleLogger
+from underPINN.callbacks.early_stopping import EarlyStopping
 from underPINN.utils.io import save_predictions
 from underPINN.utils.sampling import safe_choice
 
@@ -76,6 +78,7 @@ def run_pipe_flow(cfg) -> dict:
     lr        = tr.lr
     lr_alpha  = cfg_get(tr, "lr_alpha",  default=0.01)
     log_every = cfg_get(tr, "log_every", default=500)
+    patience  = int(cfg_get(tr, "early_stopping_patience", default=600))
     batch_r   = cfg_get(tr, "batch_r",   default=256)
     batch_bc  = cfg_get(tr, "batch_bc",  default=128)
 
@@ -136,24 +139,33 @@ def run_pipe_flow(cfg) -> dict:
     # ── Training loop ──────────────────────────────────────────────────────────
     N_r = xyz_r.shape[0]; N_w = xyz_w.shape[0]
     N_in = xyz_in.shape[0]; N_out = xyz_out.shape[0]
+
+    logger  = ConsoleLogger(log_every=log_every)
+    stopper = EarlyStopping(patience=patience)
     loss_hist = []
     key = jax.random.PRNGKey(seed + 99)
 
-    for ep in range(epochs):
-        key, k1, k2, k3, k4 = jax.random.split(key, 5)
-        ir   = safe_choice(k1, N_r,   batch_r)
-        iw   = safe_choice(k2, N_w,   batch_bc)
-        iin  = safe_choice(k3, N_in,  min(batch_bc, N_in))
-        iout = safe_choice(k4, N_out, min(batch_bc, N_out))
+    try:
+        for ep in range(epochs):
+            key, k1, k2, k3, k4 = jax.random.split(key, 5)
+            ir   = safe_choice(k1, N_r,   batch_r)
+            iw   = safe_choice(k2, N_w,   batch_bc)
+            iin  = safe_choice(k3, N_in,  min(batch_bc, N_in))
+            iout = safe_choice(k4, N_out, min(batch_bc, N_out))
 
-        params, opt_state, total, (pl, wl, il, ol) = step(
-            params, opt_state,
-            xyz_r[ir], xyz_w[iw], xyz_in[iin], xyz_out[iout])
-        loss_hist.append(float(total))
+            params, opt_state, total, (pl, wl, il, ol) = step(
+                params, opt_state,
+                xyz_r[ir], xyz_w[iw], xyz_in[iin], xyz_out[iout])
+            loss_hist.append(float(total))
 
-        if ep % log_every == 0 or ep == epochs - 1:
-            print(f"Epoch {ep:5d} | total {total:.3e} | pde {pl:.3e} "
-                  f"| wall {wl:.3e} | inlet {il:.3e} | outlet {ol:.3e}")
+            logs = {"loss": float(total), "pde": float(pl),
+                    "wall": float(wl), "inlet": float(il)}
+            logger.on_epoch_end(ep, logs)
+            stopper.on_epoch_end(ep, logs)
+    except StopIteration:
+        pass
+
+    logger.on_train_end({"loss": loss_hist[-1] if loss_hist else float("nan")})
 
     # ── Save ──────────────────────────────────────────────────────────────────
     np.save(os.path.join(out_dir, "loss_hist.npy"), np.array(loss_hist))

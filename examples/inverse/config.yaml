@@ -1,0 +1,36 @@
+problem: inverse_diffusion   # run via:  python -m underPINN run examples/inverse/config.yaml
+                             #        or:  python examples/inverse/inverse_diffusion.py
+
+network:
+  layers: [2, 64, 64, 64, 1]   # (x,t) → u
+
+physics:
+  alpha_true  : 0.01    # true (hidden) diffusivity
+  alpha_init  : 0.10    # initial guess for α (10× too large)
+  noise_level : 0.01    # relative Gaussian noise on observations
+
+data:
+  T              : 1.0
+  n_collocation  : 6000
+  n_ic           : 300
+  n_bc           : 300
+  n_observations : 200   # sparse noisy measurement points
+
+training:
+  epochs                 : 8000
+  lr                     : 1.0e-3
+  lr_alpha               : 0.01   # cosine-decay final lr factor
+  batch_r                : 2048
+  batch_i                : 256
+  batch_b                : 256
+  log_every              : 500
+  early_stopping_patience: 600
+  seed                   : 0
+
+loss:
+  ic_weight  : 100.0
+  bc_weight  : 10.0
+  data_weight: 100.0   # heavy weight on sparse observations
+
+output:
+  dir: outputs/inverse_diffusion

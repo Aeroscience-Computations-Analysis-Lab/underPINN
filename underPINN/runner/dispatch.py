@@ -11,17 +11,35 @@ from underPINN.runner.pipe_flow    import run_pipe_flow
 from underPINN.runner.helmholtz    import run_helmholtz
 from underPINN.runner.heat_forward import run_heat_forward
 from underPINN.runner.ode          import run_ode
+from underPINN.runner.ldc          import run_ldc
+from underPINN.runner.airfoil      import run_airfoil
+from underPINN.runner.heat_inverse import run_heat_inverse, run_inverse_diffusion
+from underPINN.runner.burgers_transfer import run_burgers_transfer
+from underPINN.runner.pipe_flow_unsteady_transfer import run_pipe_flow_unsteady_transfer
 
 # ── Registry ──────────────────────────────────────────────────────────────────
 # Maps the string value of ``problem:`` in a config YAML to a runner callable.
 
 _REGISTRY: dict = {
+    # Core physics benchmarks
     "burgers":      run_burgers,
     "wave":         run_wave,
     "pipe_flow":    run_pipe_flow,
     "helmholtz":    run_helmholtz,
     "heat_forward": run_heat_forward,
     "ode":          run_ode,
+
+    # Fluid dynamics
+    "ldc":          run_ldc,
+    "airfoil":      run_airfoil,
+
+    # Inverse problems
+    "heat_inverse":      run_heat_inverse,
+    "inverse_diffusion": run_inverse_diffusion,   # alias used by examples/inverse/
+
+    # Transfer learning
+    "burgers_transfer":                 run_burgers_transfer,
+    "pipe_flow_unsteady_transfer":      run_pipe_flow_unsteady_transfer,
 }
 
 

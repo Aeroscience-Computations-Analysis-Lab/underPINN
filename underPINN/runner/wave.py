@@ -49,6 +49,8 @@ import matplotlib.pyplot as plt
 from underPINN.config.loader import cfg_get, save_config
 from underPINN.nn.mlp import FourierMLP, MLP
 from underPINN.pde.wave import WavePDE
+from underPINN.callbacks.logging import ConsoleLogger
+from underPINN.callbacks.early_stopping import EarlyStopping
 from underPINN.utils.io import save_predictions
 from underPINN.utils.sampling import safe_choice
 
@@ -73,6 +75,7 @@ def run_wave(cfg) -> dict:
     lr     = tr.lr
     lr_alpha = cfg_get(tr, "lr_alpha",  default=0.01)
     log_every = cfg_get(tr, "log_every", default=500)
+    patience  = int(cfg_get(tr, "early_stopping_patience", default=600))
 
     N_r  = cfg_get(cfg.data, "n_collocation", default=6000)
     N_ic = cfg_get(cfg.data, "n_ic",          default=300)
@@ -143,26 +146,34 @@ def run_wave(cfg) -> dict:
     bI  = cfg_get(tr, "batch_i", default=256)
     bB  = cfg_get(tr, "batch_b", default=256)
 
+    logger  = ConsoleLogger(log_every=log_every)
+    stopper = EarlyStopping(patience=patience)
     loss_hist = []
     key = jax.random.PRNGKey(seed + 99)
 
-    for ep in range(epochs):
-        key, k1, k2, k3 = jax.random.split(key, 4)
-        ir = safe_choice(k1, N_R,  bR)
-        ii = safe_choice(k2, N_IC, bI)
-        ib = safe_choice(k3, N_BC, bB)
+    try:
+        for ep in range(epochs):
+            key, k1, k2, k3 = jax.random.split(key, 4)
+            ir = safe_choice(k1, N_R,  bR)
+            ii = safe_choice(k2, N_IC, bI)
+            ib = safe_choice(k3, N_BC, bB)
 
-        params, opt_state, total, (pl, il, dl, bl) = step(
-            params, opt_state,
-            x_r[ir], t_r[ir],
-            x_ic[ii], u_ic[ii],
-            x_bc[ib], t_bc[ib],
-        )
-        loss_hist.append(float(total))
+            params, opt_state, total, (pl, il, dl, bl) = step(
+                params, opt_state,
+                x_r[ir], t_r[ir],
+                x_ic[ii], u_ic[ii],
+                x_bc[ib], t_bc[ib],
+            )
+            loss_hist.append(float(total))
 
-        if ep % log_every == 0 or ep == epochs - 1:
-            print(f"Epoch {ep:5d} | total {total:.3e} | pde {pl:.3e} "
-                  f"| ic {il:.3e} | dot {dl:.3e} | bc {bl:.3e}")
+            logs = {"loss": float(total), "pde": float(pl),
+                    "ic": float(il), "bc": float(bl)}
+            logger.on_epoch_end(ep, logs)
+            stopper.on_epoch_end(ep, logs)
+    except StopIteration:
+        pass
+
+    logger.on_train_end({"loss": loss_hist[-1] if loss_hist else float("nan")})
 
     # ── Eval + save ────────────────────────────────────────────────────────────
     np.save(os.path.join(out_dir, "loss_hist.npy"), np.array(loss_hist))
