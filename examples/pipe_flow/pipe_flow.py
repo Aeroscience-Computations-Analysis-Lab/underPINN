@@ -175,6 +175,63 @@ def run_pipe_flow(cfg) -> dict:
             for i, (k, v) in enumerate(zip("uvwp", [u_p, v_p, w_p, p_p]))}
     print("\nRel-L² vs Hagen-Poiseuille exact:", errs)
 
+    # ── Solution visualization ────────────────────────────────────────────────
+    # 1. Cross-section contourf of u(y, z) at x = L/2
+    N_cs = 80
+    y_cs = np.linspace(-float(R), float(R), N_cs, dtype=np.float32)
+    z_cs = np.linspace(-float(R), float(R), N_cs, dtype=np.float32)
+    YY_cs, ZZ_cs = np.meshgrid(y_cs, z_cs)          # shape (N_cs, N_cs)
+    x_mid  = np.full(N_cs * N_cs, float(L) / 2.0, dtype=np.float32)
+    xyz_cs = jnp.array(np.stack([x_mid, YY_cs.ravel(), ZZ_cs.ravel()], axis=1))
+
+    pred_cs = np.array(model.apply(params, xyz_cs))
+    u_cs    = pred_cs[:, 0].reshape(N_cs, N_cs)
+
+    r2_cs   = YY_cs ** 2 + ZZ_cs ** 2
+    u_ex_cs = float(U_max) * (1.0 - r2_cs / float(R) ** 2)
+    # Mask outside the pipe circle
+    outside = r2_cs > float(R) ** 2
+    u_ex_cs = np.where(outside, np.nan, u_ex_cs)
+    u_cs    = np.where(outside, np.nan, u_cs)
+
+    vmax_cs = float(U_max)
+    fig_s, axes_s = plt.subplots(1, 2, figsize=(11, 4))
+    for ax_s, field, title_s in zip(
+            axes_s,
+            [u_ex_cs, u_cs],
+            ["Exact (Hagen-Poiseuille)", "PINN"]):
+        cf = ax_s.contourf(y_cs, z_cs, field, levels=50,
+                           cmap="jet", vmin=0.0, vmax=vmax_cs)
+        plt.colorbar(cf, ax=ax_s, label="u")
+        ax_s.set_title(title_s)
+        ax_s.set_xlabel("y"); ax_s.set_ylabel("z")
+        ax_s.set_aspect("equal")
+    fig_s.suptitle(f"Axial velocity u — cross-section at x=L/2  (Re={Re})")
+    fig_s.tight_layout()
+    fig_s.savefig(os.path.join(out_dir, "solution_crosssection.png"),
+                  dpi=150, bbox_inches="tight")
+    plt.close(fig_s)
+
+    # 2. Radial velocity profile u(r) at x = L/2, z = 0
+    Nr    = 100
+    r_arr = np.linspace(0.0, float(R), Nr, dtype=np.float32)
+    xyz_rp = jnp.array(np.stack(
+        [np.full(Nr, float(L) / 2.0, dtype=np.float32),
+         r_arr,
+         np.zeros(Nr, dtype=np.float32)], axis=1))
+    u_prof_pinn  = np.array(model.apply(params, xyz_rp)[:, 0])
+    u_prof_exact = float(U_max) * (1.0 - r_arr ** 2 / float(R) ** 2)
+
+    fig_r, ax_r = plt.subplots(figsize=(6, 4))
+    ax_r.plot(r_arr, u_prof_exact, "k-",  lw=2.0, label="Exact (Hagen-Poiseuille)")
+    ax_r.plot(r_arr, u_prof_pinn,  "b--", lw=1.8, label="PINN")
+    ax_r.set_xlabel("r"); ax_r.set_ylabel("u")
+    ax_r.set_title(f"Radial velocity profile  Re={Re},  x=L/2")
+    ax_r.legend(); fig_r.tight_layout()
+    fig_r.savefig(os.path.join(out_dir, "solution_radial.png"),
+                  dpi=150, bbox_inches="tight")
+    plt.close(fig_r)
+
     # Loss plot
     fig, ax = plt.subplots(figsize=(7, 3))
     ax.semilogy(loss_hist, lw=1.2)
