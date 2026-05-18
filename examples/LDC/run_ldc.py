@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import numpy as np
+import pandas as pd
 import jax
 import jax.numpy as jnp
 import optax
@@ -161,6 +162,33 @@ def run_ldc(cfg) -> dict:
     )
 
     # ── Plots ─────────────────────────────────────────────────────────────────
+
+
+    nx, ny = 201, 201   # <-- keep these fixed
+    df = pd.read_csv("re100.csv", skipinitialspace=True)
+    df = df.sort_values(by=["y-coordinate", "x-coordinate"], ascending=[True, True]).reset_index(drop=True)
+
+    x_c = df["x-coordinate"].values.reshape(ny, nx)
+    y_c = df["y-coordinate"].values.reshape(ny, nx)
+    p_c = df["pressure"].values.reshape(ny, nx)
+    u_c = df["x-velocity"].values.reshape(ny, nx)
+    v_c = df["y-velocity"].values.reshape(ny, nx)
+    u_mag_c = np.sqrt(u_c**2 + v_c**2)
+
+    plt.figure(figsize=(8,6))
+    plt.plot(u_c[:, 100],  y_c[:,100],  'o', label='CFD Data', markerfacecolor='none', markeredgecolor='blue', markersize=6, markeredgewidth=1.5)
+    plt.plot(u_g[100,:], YY[100,:], label='PINN Prediction', color='red', linewidth=2)
+    plt.xlabel('U-velocity', fontsize=16)
+    plt.ylabel('Y', fontsize=16)
+    # plt.title('Lid-Driven Cavity Flow at Re=1000', fontsize=18)
+    plt.legend(fontsize=14)
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_dir, "Re100_comp.png"), bbox_inches='tight')
+    plt.close()
+
+
+
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
     for ax, field, label in zip(axes, [u_g, v_g, p_g], ["u", "v", "p"]):
         cf = ax.contourf(x_np, y_np, field.T, levels=50, cmap="jet")
