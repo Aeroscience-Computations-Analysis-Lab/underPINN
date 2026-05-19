@@ -1,15 +1,18 @@
-problem: k_epsilon   # run via:  python examples/K-Epsilon/turbulence.py
+problem: k_epsilon   # run via:
+#   python examples/K-Epsilon/turbulence.py
+#   python -m underPINN run examples/K-Epsilon/config.yaml
 
 network:
   layers : [2, 96, 96, 96, 96, 96, 5]   # (x,y) → (u, v, p, k, ε)
+  # 3-subdomain FBPINN with k-ε positivity transform (k > 0, ε > 0 enforced)
 
 physics:
   Re: 10000.0   # Reynolds number (ν = 1/Re)
 
 # Backward-facing step geometry (BFS):
-#   Inlet x=0, 0.9423 ≤ y ≤ 1.9423
-#   Outlet x=35, 0 ≤ y ≤ 1.9423
-#   Step at x=5, 0 ≤ y ≤ 0.9423
+#   Inlet  x=0,    0.9423 ≤ y ≤ 1.9423
+#   Outlet x=35,   0      ≤ y ≤ 1.9423
+#   Step   at x=5, 0 ≤ y ≤ 0.9423  (no-slip)
 geometry:
   step_height : 0.9423
   channel_h   : 1.9423
@@ -20,16 +23,23 @@ data:
   n_collocation : 80000   # interior residual points (boundary-weighted)
   n_inlet       : 200
   n_outlet      : 200
-  n_noslip      : 900     # wall no-slip points (top + bottom + step)
+  n_noslip      : 900     # wall points (top + bottom + step-face + step-floor)
+  n_data        : 500     # sparse CFD reference points from data_file
+
+# Path to CFD reference CSV (relative to working directory).
+# Required columns: x-coordinate, y-coordinate, x-velocity, y-velocity,
+#                   pressure, turb-kinetic-energy, turb-diss-rate
+data_file: Re10000
 
 training:
-  epochs    : 10
+  epochs    : 5000
   lr        : 1.0e-3
   lr_schedule:
-    boundaries : [2000, 4000]
-    scales     : [0.5,  0.5]
+    boundaries_and_scales:
+      2000: 0.5
+      4000: 0.5
   batch_size: 2000
-  log_every : 1
+  log_every : 10
   seed      : 42
 
 loss:
@@ -38,8 +48,6 @@ loss:
   w_outlet : 5.0
   w_noslip : 20.0
   w_data   : 5.0     # sparse CFD data weight
-
-data_file: Re10000   # path to CFD reference CSV (columns: x-coordinate, y-coordinate, ...)
 
 output:
   dir: outputs/k_epsilon

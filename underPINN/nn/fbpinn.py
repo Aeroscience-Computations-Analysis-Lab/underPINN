@@ -23,10 +23,16 @@ class FBPINN(nn.Module):
     smins: jnp.ndarray
     smaxs: jnp.ndarray
     attention_cls: callable = HybridAttention
+    # Optional output transform applied inside every subdomain network.
+    # Pass a callable  f(x) -> x  to enforce positivity, scaling, etc.
+    # Example:  out_transform=k_eps_positivity  for the k-ε turbulence model.
+    out_transform: callable = None
 
     def setup(self):
         self.subnets = [
-            SubdomainNetwork(self.layers, attention_cls=self.attention_cls)
+            SubdomainNetwork(self.layers,
+                             attention_cls=self.attention_cls,
+                             out_transform=self.out_transform)
             for _ in range(self.shifts.shape[0])
         ]
 
