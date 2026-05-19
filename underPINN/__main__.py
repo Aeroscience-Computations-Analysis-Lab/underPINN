@@ -20,6 +20,16 @@ Usage
     python -m underPINN bench
     python -m underPINN bench --problems burgers wave --epochs 500 2000 5000
     python -m underPINN bench --all --output outputs/bench_full
+
+    # Continue a completed run from its last checkpoint
+    #   Step 1 — raise epochs in the YAML (e.g. 5000 → 10000)
+    #   Step 2 — unlock the snapshot so the new config hash is accepted
+    python -m underPINN resume examples/wave/config.yaml
+    #   Step 3 — run normally; training picks up from the saved epoch
+    python -m underPINN run    examples/wave/config.yaml
+
+    # Inspect the current restart snapshot state
+    python -m underPINN status examples/wave/config.yaml
 """
 
 import os
@@ -135,6 +145,171 @@ def _cmd_bench(args):
     generate_report(results, runner=runner, out_dir=out_dir)
 
 
+def _cmd_resume(args):
+    """Unlock a completed restart snapshot so the next ``run`` continues from it.
+
+    Workflow
+    --------
+    A completed run marks its snapshot as ``done`` so that a plain re-run always
+    starts fresh.  When you intentionally want to extend training (e.g. ran 5000
+    epochs and now want 10 000), use this command::
+
+        # 1. Edit the YAML — raise training.epochs to the new target
+        # 2. Unlock the snapshot (updates the config hash + clears done flag)
+        python -m underPINN resume examples/wave/config.yaml
+        # 3. Run normally — picks up from the last saved epoch
+        python -m underPINN run    examples/wave/config.yaml
+    """
+    import hashlib, json, pathlib, types
+    from underPINN.config.loader import load_config, cfg_get
+
+    cfg = load_config(args.config)
+
+    # ── Resolve output directory ──────────────────────────────────────────────
+    if args.out_dir:
+        out_dir = args.out_dir
+    else:
+        out = cfg_get(cfg, "output", default=None)
+        out_dir = cfg_get(out, "dir", default=None) if out else None
+        if not out_dir:
+            print(
+                "\nError: could not find output.dir in the config.\n"
+                "Pass it explicitly with:  --out-dir outputs/wave\n"
+            )
+            sys.exit(1)
+
+    restart_dir = pathlib.Path(out_dir) / "restart"
+    meta_path   = restart_dir / "meta.json"
+    params_path = restart_dir / "params.msgpack"
+
+    # ── Validate snapshot ─────────────────────────────────────────────────────
+    if not meta_path.exists():
+        print(f"\nNo restart snapshot found in  {restart_dir}/")
+        print(
+            "Run the experiment at least once with  save_restart_every > 0  "
+            "in training: to create one.\n"
+        )
+        sys.exit(1)
+
+    if not params_path.exists():
+        print(f"\nmeta.json found but params.msgpack is missing in  {restart_dir}/")
+        print(
+            "The snapshot may be corrupt.  Delete the restart/ folder and "
+            "re-run from scratch.\n"
+        )
+        sys.exit(1)
+
+    # ── Read current metadata ─────────────────────────────────────────────────
+    meta        = json.loads(meta_path.read_text())
+    saved_epoch = meta.get("epoch", -1)
+    was_done    = meta.get("done", False)
+    old_hash    = meta.get("cfg_hash", "")
+
+    # ── Recompute hash for the (possibly modified) config ─────────────────────
+    try:
+        from underPINN.config.loader import _ns_to_dict
+        d = _ns_to_dict(cfg)
+    except Exception:
+        d = vars(cfg) if isinstance(cfg, types.SimpleNamespace) else {}
+
+    new_hash = hashlib.md5(
+        json.dumps(d, sort_keys=True, default=str).encode()
+    ).hexdigest()
+
+    # ── Update snapshot ───────────────────────────────────────────────────────
+    meta["done"]     = False
+    meta["cfg_hash"] = new_hash
+    meta_path.write_text(json.dumps(meta, indent=2))
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+    try:
+        new_epochs = cfg.training.epochs
+    except AttributeError:
+        new_epochs = "?"
+
+    hash_changed = (old_hash != new_hash)
+    print()
+    print("  ┌─ Restart snapshot unlocked ─────────────────────────────┐")
+    print(f"  │  Snapshot dir     : {restart_dir}/")
+    print(f"  │  Last saved epoch : {saved_epoch}")
+    print(f"  │  Was marked done  : {was_done}")
+    if hash_changed:
+        print(f"  │  Config hash      : {old_hash[:8]}… → {new_hash[:8]}…  (config changed)")
+    else:
+        print(f"  │  Config hash      : {new_hash[:8]}…  (unchanged)")
+    print(f"  │  Will resume from : epoch {saved_epoch + 1}")
+    print(f"  │  New epoch target : {new_epochs}")
+    print("  └─────────────────────────────────────────────────────────┘")
+    print()
+    print(f"  Next step:  python -m underPINN run {args.config}")
+    print()
+
+
+def _cmd_status(args):
+    """Show the current state of the restart snapshot for a config."""
+    import json, pathlib
+    from underPINN.config.loader import load_config, cfg_get
+
+    cfg = load_config(args.config)
+
+    if args.out_dir:
+        out_dir = args.out_dir
+    else:
+        out = cfg_get(cfg, "output", default=None)
+        out_dir = cfg_get(out, "dir", default=None) if out else None
+        if not out_dir:
+            print("\nError: no output.dir in config.  Pass --out-dir.\n")
+            sys.exit(1)
+
+    restart_dir = pathlib.Path(out_dir) / "restart"
+    meta_path   = restart_dir / "meta.json"
+
+    if not meta_path.exists():
+        print(f"\n  No snapshot in  {restart_dir}/  — training has never saved a checkpoint.\n")
+        return
+
+    meta        = json.loads(meta_path.read_text())
+    saved_epoch = meta.get("epoch", -1)
+    done        = meta.get("done", False)
+    cfg_hash    = meta.get("cfg_hash", "n/a")
+
+    files = {
+        "params.msgpack":   (restart_dir / "params.msgpack").exists(),
+        "opt_state.msgpack":(restart_dir / "opt_state.msgpack").exists(),
+        "hists.npz":        (restart_dir / "hists.npz").exists(),
+    }
+
+    try:
+        new_epochs = cfg.training.epochs
+    except AttributeError:
+        new_epochs = "?"
+
+    print()
+    print(f"  ┌─ Restart snapshot status ───────────────────────────────┐")
+    print(f"  │  Directory  : {restart_dir}/")
+    print(f"  │  Saved at   : epoch {saved_epoch}  (resume would start at {saved_epoch + 1})")
+    print(f"  │  Done flag  : {done}  {'← completed run; use resume to extend' if done else '← interrupted run; re-run to continue'}")
+    print(f"  │  Config hash: {cfg_hash[:8]}…")
+    print(f"  │  Epoch target (current config): {new_epochs}")
+    print(f"  │  Files      : {', '.join(k for k,v in files.items() if v)}")
+    missing = [k for k,v in files.items() if not v]
+    if missing:
+        print(f"  │  Missing    : {', '.join(missing)}")
+    print(f"  └─────────────────────────────────────────────────────────┘")
+
+    if done:
+        print()
+        print("  To extend training:")
+        print(f"    1. Edit {args.config}  →  increase training.epochs")
+        print(f"    2. python -m underPINN resume {args.config}")
+        print(f"    3. python -m underPINN run    {args.config}")
+    else:
+        print()
+        print(f"  To continue interrupted training (same config):")
+        print(f"    python -m underPINN run {args.config}")
+    print()
+
+
 def _cmd_version(_args):
     from underPINN._version import __version__, version_tag
     print(f"underPINN {version_tag}  (build {__version__})")
@@ -154,6 +329,8 @@ examples:
   python -m underPINN sweep  examples/burgers/burgers_nu_sweep.yaml
   python -m underPINN list
   python -m underPINN show   examples/pipe_flow/pipe_flow.yaml
+  python -m underPINN status examples/wave/config.yaml
+  python -m underPINN resume examples/wave/config.yaml  # then run again
 """,
     )
 
@@ -170,6 +347,36 @@ examples:
 
     p = sub.add_parser("version", help="Print underPINN version and exit")
     p.set_defaults(func=_cmd_version)
+
+    p = sub.add_parser(
+        "resume",
+        help="Unlock a completed snapshot so the next run extends training",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=(
+            "Unlock a completed restart snapshot for continued training.\n\n"
+            "Workflow:\n"
+            "  1. Edit the YAML — raise training.epochs to the new target\n"
+            "  2. python -m underPINN resume <config>   ← this command\n"
+            "  3. python -m underPINN run    <config>   ← resumes from snapshot"
+        ),
+    )
+    p.add_argument("config", help="Path to the YAML config file")
+    p.add_argument(
+        "--out-dir", default=None, metavar="DIR",
+        help="Override output.dir from config (useful if dir was changed)",
+    )
+    p.set_defaults(func=_cmd_resume)
+
+    p = sub.add_parser(
+        "status",
+        help="Show the restart snapshot state for a config",
+    )
+    p.add_argument("config", help="Path to the YAML config file")
+    p.add_argument(
+        "--out-dir", default=None, metavar="DIR",
+        help="Override output.dir from config",
+    )
+    p.set_defaults(func=_cmd_status)
 
     p = sub.add_parser("list", help="List registered problem runners")
     p.set_defaults(func=_cmd_list)
