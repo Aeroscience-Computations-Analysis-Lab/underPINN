@@ -3,8 +3,8 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "underPINN"
-version = "0.1.0"
+name        = "underPINN"
+dynamic     = ["version"]        # resolved from underPINN/_version.py at build time
 description = "Physics-Informed Neural Networks framework built on JAX/Flax"
 requires-python = ">=3.9"
 dependencies = [
@@ -19,9 +19,16 @@ dependencies = [
     "pandas>=2.0",
 ]
 
+# Calendar versioning: YYMM — e.g. May 2026 → "2605"
+# Wheel:      underPINN-2605-py3-none-any.whl
+# dist-info:  underPINN-2605.dist-info/
+# pip show:   Version: 2605
+[tool.setuptools.dynamic]
+version = {attr = "underPINN._version.__version__"}
+
 [project.scripts]
 underpinn = "underPINN.__main__:main"
 
 [tool.setuptools.packages.find]
-where = ["."]
+where   = ["."]
 include = ["underPINN*"]
