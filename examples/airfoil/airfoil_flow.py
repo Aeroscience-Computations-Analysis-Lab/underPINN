@@ -19,6 +19,7 @@ Outputs: field plots (u, v, p), Cp curve, estimated CL, loss history,
 from __future__ import annotations
 
 import os
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -36,6 +37,7 @@ from underPINN.callbacks.early_stopping import EarlyStopping
 from underPINN.utils.io import save_predictions
 from underPINN.utils.checkpoint import save_checkpoint
 from underPINN.utils.sampling import safe_choice
+from underPINN.utils.restart import RestartManager
 
 
 # ---------------------------------------------------------------------------
@@ -183,15 +185,21 @@ def run_airfoil(cfg) -> dict:
         return params, state, loss, aux
 
     # ── Training loop ─────────────────────────────────────────────────────────
+    save_restart = int(cfg_get(tr, "save_restart_every", default=500))
+    restart = RestartManager(out_dir, save_every=save_restart, cfg=cfg)
+    start_ep, params, opt_state, hists = restart.maybe_restore(params, opt_state)
+    loss_hist = hists.get("loss_hist", [])
+    pde_hist  = hists.get("pde_hist",  [])
+    bc_hist   = hists.get("bc_hist",   [])
+
     key       = jax.random.PRNGKey(seed + 99)
     logger    = ConsoleLogger(log_every=log_every)
     stopper   = EarlyStopping(patience=patience)
     n_col_pts = xy_col_j.shape[0]
     n_ff_pts  = xy_ff_j.shape[0]
-    loss_hist, pde_hist, bc_hist = [], [], []
 
     try:
-        for ep in range(epochs):
+        for ep in range(start_ep, epochs):
             key, k1, k2 = jax.random.split(key, 3)
             idx_col = safe_choice(k1, n_col_pts, batch_r)
             idx_ff  = safe_choice(k2, n_ff_pts,  batch_bc)
@@ -209,9 +217,11 @@ def run_airfoil(cfg) -> dict:
                     "bc": float(l_body + l_ff)}
             logger.on_epoch_end(ep, logs)
             stopper.on_epoch_end(ep, logs)
+            restart.maybe_save(ep, params, opt_state, {"loss_hist": loss_hist, "pde_hist": pde_hist, "bc_hist": bc_hist})
     except StopIteration:
         pass
 
+    restart.done()
     logger.on_train_end({"loss": loss_hist[-1] if loss_hist else float("nan")})
 
     # ── Post-processing ───────────────────────────────────────────────────────

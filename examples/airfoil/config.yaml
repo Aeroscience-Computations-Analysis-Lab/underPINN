@@ -23,13 +23,14 @@ data:
   n_farfield_bc : 1600    # farfield boundary (400 per edge)
 
 training:
-  epochs   : 10000
-  lr       : 1.0e-3
-  lr_alpha : 0.01
-  batch_r  : 2048
-  batch_bc : 512
-  log_every: 1000
-  seed     : 0
+  epochs             : 10000
+  lr                 : 1.0e-3
+  lr_alpha           : 0.01
+  batch_r            : 2048
+  batch_bc           : 512
+  log_every          : 1000
+  seed               : 0
+  save_restart_every : 500
 
 loss:
   w_pde   : 1.0

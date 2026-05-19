@@ -25,6 +25,7 @@ Network: (y, z, t) → u  (axial velocity)
 from __future__ import annotations
 
 import os
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 import numpy as np
 import jax
 import jax.numpy as jnp

@@ -140,11 +140,21 @@ class RANSSolver:
             return params, opt_state, new_rsum, loss, aux
         return step
 
-    def train(self, params, inputs: RANSInputWrapper, epochs=5000, batch_size=2000, seed=0):
+    def train(self, params, inputs: RANSInputWrapper, epochs=5000, batch_size=2000, seed=0,
+              out_dir="", save_restart_every=500):
         opt_state  = self.opt.init(params)
         key        = jax.random.PRNGKey(seed)
         loss_hist  = []   # collected once per epoch (avg over mini-batches)
-        
+
+        from underPINN.utils.restart import RestartManager
+        _restart = None
+        if out_dir and save_restart_every > 0:
+            _restart = RestartManager(out_dir, save_every=save_restart_every)
+            start_ep, params, opt_state, _hists = _restart.maybe_restore(params, opt_state)
+            loss_hist = _hists.get("loss_hist", loss_hist)
+        else:
+            start_ep = 0
+
         n_col = inputs.col.shape[0]
         batch_size = min(batch_size, n_col)
         steps_per_epoch = n_col // batch_size
@@ -159,8 +169,8 @@ class RANSSolver:
 
         print(f"RBA Training on {n_col} points. Batch: {batch_size}. Steps: {steps_per_epoch}")
         start_time = time.time()
-        
-        for ep in range(epochs):
+
+        for ep in range(start_ep, epochs):
             # Flag for the special initialization step in your code (init==2)
             is_init_step = (ep == 0)
             
@@ -232,6 +242,12 @@ class RANSSolver:
             if ep % 10 == 0:
                 phys, inl, nos, press, dat = aux
                 print(f"Ep {ep:4d} | Tot: {avg:.3e} | Phys: {phys:.3e} | BC: {inl+nos:.3e} | Data: {dat:.3e}")
+
+            if _restart is not None:
+                _restart.maybe_save(ep, params, opt_state, {"loss_hist": loss_hist})
+
+        if _restart is not None:
+            _restart.done()
 
         print(f"Finished in {time.time()-start_time:.2f}s")
         return params, loss_hist

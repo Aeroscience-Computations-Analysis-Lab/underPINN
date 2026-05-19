@@ -14,13 +14,14 @@ data:
   n_bc         : 800    # total boundary points (all four walls)
 
 training:
-  epochs   : 50
-  lr       : 1.0e-3
-  lr_alpha : 0.01
-  batch_r  : 2048
-  batch_b  : 256
-  log_every: 500
-  seed     : 0
+  epochs             : 50
+  lr                 : 1.0e-3
+  lr_alpha           : 0.01
+  batch_r            : 2048
+  batch_b            : 256
+  log_every          : 500
+  seed               : 0
+  save_restart_every : 500
 
 loss:
   w_pde   : 1.0

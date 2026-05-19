@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>underPINN — JAX Physics-Informed Neural Network Framework</title>
+  <title>underPINN v2605 — JAX Physics-Informed Neural Network Framework</title>
   <style>
     /* ── Reset & tokens ───────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -14,11 +14,18 @@
       --border:   #30363d;
       --text:     #e6edf3;
       --muted:    #8b949e;
-      --accent:   #58a6ff;
+      --accent:   #2563eb;
+      --accent-light: #58a6ff;
       --accent2:  #3fb950;
       --accent3:  #f78166;
       --accent4:  #d2a8ff;
       --accent5:  #ffa657;
+      --warn-bg:  #1a1400;
+      --warn-border: #7d6000;
+      --warn-text: #fbbf24;
+      --info-bg:  #0d1a2b;
+      --info-border: #1d4e89;
+      --info-text: #60a5fa;
       --grad:     linear-gradient(135deg, #1a3a5c 0%, #0d2137 50%, #13111c 100%);
       --card-shadow: 0 4px 24px rgba(0,0,0,.5);
       --r: 10px;
@@ -32,75 +39,75 @@
       line-height: 1.65;
       font-size: 15px;
     }
-    a { color: var(--accent); text-decoration: none; }
+    a { color: var(--accent-light); text-decoration: none; }
     a:hover { text-decoration: underline; }
     h1,h2,h3,h4 { font-weight: 700; line-height: 1.25; }
 
     /* ── Nav ──────────────────────────────────────────────────────────── */
     nav {
       position: sticky; top: 0; z-index: 100;
-      background: rgba(13,17,23,.92);
+      background: rgba(13,17,23,.94);
       backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border);
-      display: flex; align-items: center; gap: 2rem;
-      padding: .75rem 2rem;
+      display: flex; align-items: center; gap: 1.5rem;
+      padding: .7rem 2rem;
     }
     .nav-brand {
-      font-size: 1.15rem; font-weight: 800;
-      color: var(--accent); white-space: nowrap;
+      font-size: 1.1rem; font-weight: 800;
+      color: var(--accent-light); white-space: nowrap; flex-shrink: 0;
     }
     .nav-brand span { color: var(--text); }
-    .nav-links { display: flex; gap: 1.5rem; flex-wrap: wrap; }
-    .nav-links a { color: var(--muted); font-size: .9rem; }
+    .nav-links { display: flex; gap: 1.25rem; flex-wrap: wrap; font-size: .88rem; }
+    .nav-links a { color: var(--muted); }
     .nav-links a:hover { color: var(--text); text-decoration: none; }
-    .nav-right { margin-left: auto; }
+    .nav-right { margin-left: auto; flex-shrink: 0; }
     .btn-gh {
       background: var(--bg3); border: 1px solid var(--border);
-      color: var(--text); padding: .4rem 1rem; border-radius: 6px;
-      font-size: .85rem; display: flex; align-items: center; gap: .4rem;
+      color: var(--text); padding: .38rem .95rem; border-radius: 6px;
+      font-size: .83rem; display: flex; align-items: center; gap: .4rem;
     }
     .btn-gh:hover { background: var(--border); text-decoration: none; }
 
     /* ── Hero ─────────────────────────────────────────────────────────── */
     .hero {
       background: var(--grad);
-      padding: 6rem 2rem 5rem;
+      padding: 5.5rem 2rem 4.5rem;
       text-align: center;
       position: relative; overflow: hidden;
     }
     .hero::before {
       content: '';
       position: absolute; inset: 0;
-      background: radial-gradient(ellipse at 50% 0%, rgba(88,166,255,.12) 0%, transparent 65%);
+      background: radial-gradient(ellipse at 50% 0%, rgba(37,99,235,.15) 0%, transparent 65%);
       pointer-events: none;
     }
+    .hero-badges { display: flex; gap: .6rem; justify-content: center; flex-wrap: wrap; margin-bottom: 1.5rem; }
     .hero-badge {
       display: inline-block;
-      background: rgba(88,166,255,.12); border: 1px solid rgba(88,166,255,.3);
-      color: var(--accent); padding: .25rem .85rem; border-radius: 999px;
-      font-size: .8rem; font-weight: 600; letter-spacing: .05em;
-      margin-bottom: 1.25rem;
+      background: rgba(37,99,235,.15); border: 1px solid rgba(37,99,235,.4);
+      color: #93c5fd; padding: .22rem .8rem; border-radius: 999px;
+      font-size: .78rem; font-weight: 600; letter-spacing: .05em;
     }
     .hero h1 {
       font-size: clamp(2.2rem, 5vw, 3.5rem);
-      background: linear-gradient(135deg, #e6edf3 0%, #58a6ff 55%, #d2a8ff 100%);
+      background: linear-gradient(135deg, #e6edf3 0%, #60a5fa 55%, #d2a8ff 100%);
       -webkit-background-clip: text; -webkit-text-fill-color: transparent;
       background-clip: text;
-      margin-bottom: .75rem;
+      margin-bottom: .7rem;
     }
-    .hero p {
-      max-width: 660px; margin: 0 auto 2rem;
-      color: #a3b3c4; font-size: 1.1rem;
+    .hero-tagline {
+      max-width: 640px; margin: 0 auto 2rem;
+      color: #a3b3c4; font-size: 1.08rem;
     }
     .hero-buttons { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
     .btn-primary {
-      background: var(--accent); color: #0d1117; font-weight: 700;
-      padding: .65rem 1.6rem; border-radius: 8px; font-size: .95rem;
+      background: var(--accent); color: #fff; font-weight: 700;
+      padding: .62rem 1.5rem; border-radius: 8px; font-size: .93rem;
     }
-    .btn-primary:hover { background: #79baff; text-decoration: none; }
+    .btn-primary:hover { background: #1d4ed8; text-decoration: none; }
     .btn-outline {
       background: transparent; color: var(--text); font-weight: 600;
-      padding: .65rem 1.6rem; border-radius: 8px; font-size: .95rem;
+      padding: .62rem 1.5rem; border-radius: 8px; font-size: .93rem;
       border: 1px solid var(--border);
     }
     .btn-outline:hover { background: var(--bg3); text-decoration: none; }
@@ -112,89 +119,87 @@
       display: flex; justify-content: center; gap: 0; flex-wrap: wrap;
     }
     .stat {
-      padding: 1.25rem 2.5rem; text-align: center;
-      border-right: 1px solid var(--border); flex: 1; min-width: 140px;
+      padding: 1.2rem 2.2rem; text-align: center;
+      border-right: 1px solid var(--border); flex: 1; min-width: 130px;
     }
     .stat:last-child { border-right: none; }
-    .stat-number { font-size: 1.8rem; font-weight: 800; color: var(--accent); }
-    .stat-label { font-size: .8rem; color: var(--muted); margin-top: .1rem; }
+    .stat-number { font-size: 1.75rem; font-weight: 800; color: var(--accent-light); }
+    .stat-label { font-size: .78rem; color: var(--muted); margin-top: .1rem; }
 
     /* ── Section layout ───────────────────────────────────────────────── */
-    section { padding: 5rem 2rem; }
+    section { padding: 4.5rem 2rem; }
     .container { max-width: 1100px; margin: 0 auto; }
     .section-tag {
       text-transform: uppercase; letter-spacing: .12em;
-      font-size: .75rem; color: var(--accent); font-weight: 700;
+      font-size: .73rem; color: var(--accent-light); font-weight: 700;
       margin-bottom: .5rem;
     }
     .section-title {
-      font-size: clamp(1.6rem, 3vw, 2.2rem);
-      margin-bottom: .75rem;
+      font-size: clamp(1.5rem, 3vw, 2.1rem);
+      margin-bottom: .7rem;
     }
     .section-sub {
-      color: var(--muted); max-width: 620px;
-      margin-bottom: 3rem; font-size: .97rem;
+      color: var(--muted); max-width: 640px;
+      margin-bottom: 2.75rem; font-size: .96rem;
     }
 
     /* ── Feature grid ─────────────────────────────────────────────────── */
     .feature-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-      gap: 1.25rem;
+      gap: 1.2rem;
     }
     .feature-card {
       background: var(--bg2); border: 1px solid var(--border);
-      border-radius: var(--r); padding: 1.5rem;
+      border-radius: var(--r); padding: 1.4rem;
       transition: border-color .2s, transform .2s;
     }
-    .feature-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .feature-card:hover { border-color: var(--accent-light); transform: translateY(-2px); }
     .feature-icon {
-      width: 40px; height: 40px; border-radius: 8px;
+      width: 38px; height: 38px; border-radius: 8px;
       display: flex; align-items: center; justify-content: center;
-      font-size: 1.3rem; margin-bottom: .9rem;
+      font-size: 1.2rem; margin-bottom: .85rem;
     }
-    .feature-card h3 { font-size: 1rem; margin-bottom: .4rem; }
-    .feature-card p { color: var(--muted); font-size: .88rem; }
+    .feature-card h3 { font-size: .97rem; margin-bottom: .35rem; }
+    .feature-card p { color: var(--muted); font-size: .86rem; }
+    .feature-group-title {
+      font-size: 1.1rem; font-weight: 700; color: var(--accent-light);
+      margin: 2.5rem 0 1rem; padding-bottom: .4rem;
+      border-bottom: 1px solid var(--border);
+    }
 
-    /* ── Architecture ─────────────────────────────────────────────────── */
-    .arch-section { background: var(--bg2); }
-    .arch-grid {
-      display: grid; grid-template-columns: 1fr 1fr; gap: 2.5rem;
+    /* ── Warning / Info boxes ─────────────────────────────────────────── */
+    .box-warn {
+      background: var(--warn-bg); border: 1px solid var(--warn-border);
+      border-left: 4px solid var(--warn-text);
+      color: var(--warn-text); border-radius: 8px;
+      padding: 1rem 1.25rem; margin: 1.5rem 0; font-size: .92rem;
     }
-    @media (max-width: 720px) { .arch-grid { grid-template-columns: 1fr; } }
-    .arch-panel h3 {
-      font-size: 1rem; color: var(--accent4); margin-bottom: 1rem;
+    .box-warn strong { display: block; margin-bottom: .4rem; font-size: 1rem; }
+    .box-info {
+      background: var(--info-bg); border: 1px solid var(--info-border);
+      border-left: 4px solid var(--info-text);
+      color: var(--info-text); border-radius: 8px;
+      padding: 1rem 1.25rem; margin: 1.5rem 0; font-size: .92rem;
     }
-    .layer-list { list-style: none; display: flex; flex-direction: column; gap: .5rem; }
-    .layer-item {
-      background: var(--bg3); border: 1px solid var(--border);
-      border-radius: 6px; padding: .55rem .9rem;
-      font-size: .875rem; display: flex; align-items: center; gap: .6rem;
-    }
-    .layer-dot {
-      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
-    }
-    .dot-blue  { background: var(--accent); }
-    .dot-green { background: var(--accent2); }
-    .dot-red   { background: var(--accent3); }
-    .dot-purple{ background: var(--accent4); }
-    .dot-orange{ background: var(--accent5); }
+    .box-info strong { display: block; margin-bottom: .4rem; font-size: 1rem; }
+    .box-info p, .box-warn p { color: inherit; margin: .3rem 0; }
 
     /* ── Code block ───────────────────────────────────────────────────── */
     pre {
       background: #010409; border: 1px solid var(--border);
-      border-radius: var(--r); padding: 1.25rem 1.4rem;
+      border-radius: var(--r); padding: 1.2rem 1.35rem;
       overflow-x: auto; font-family: var(--mono);
-      font-size: .83rem; line-height: 1.6;
+      font-size: .82rem; line-height: 1.65;
     }
     .code-header {
       background: var(--bg3); border: 1px solid var(--border);
       border-bottom: none; border-radius: var(--r) var(--r) 0 0;
-      padding: .55rem 1rem; display: flex; align-items: center; gap: .5rem;
-      font-family: var(--mono); font-size: .8rem; color: var(--muted);
+      padding: .52rem 1rem; display: flex; align-items: center; gap: .5rem;
+      font-family: var(--mono); font-size: .79rem; color: var(--muted);
     }
     .code-header + pre { border-radius: 0 0 var(--r) var(--r); margin-top: 0; }
-    .dot-row { display: flex; gap: .4rem; margin-right: .5rem; }
+    .dot-row { display: flex; gap: .38rem; margin-right: .45rem; }
     .dot-row span { width: 10px; height: 10px; border-radius: 50%; display: block; }
     .d1 { background: #ff5f56; } .d2 { background: #ffbd2e; } .d3 { background: #27c93f; }
 
@@ -208,8 +213,7 @@
     .nu  { color: #f0b429; }
     .cls { color: #ffa657; }
 
-    /* ── Examples table ───────────────────────────────────────────────── */
-    .examples-section { background: var(--bg); }
+    /* ── Tables ───────────────────────────────────────────────────────── */
     .table-wrap { overflow-x: auto; }
     table {
       width: 100%; border-collapse: collapse; font-size: .875rem;
@@ -217,117 +221,159 @@
     }
     thead { background: var(--bg3); }
     th {
-      padding: .75rem 1rem; text-align: left; font-size: .78rem;
+      padding: .72rem 1rem; text-align: left; font-size: .77rem;
       text-transform: uppercase; letter-spacing: .07em; color: var(--muted);
     }
-    td { padding: .7rem 1rem; border-top: 1px solid var(--border); vertical-align: top; }
-    tr:hover td { background: rgba(88,166,255,.04); }
-    .tag {
-      display: inline-block; padding: .15rem .55rem; border-radius: 4px;
-      font-size: .75rem; font-weight: 600; margin: .1rem .1rem .1rem 0;
-    }
-    .tag-blue   { background: rgba(88,166,255,.15); color: var(--accent); }
-    .tag-green  { background: rgba(63,185,80,.15);  color: var(--accent2); }
-    .tag-red    { background: rgba(247,129,102,.15);color: var(--accent3); }
-    .tag-purple { background: rgba(210,168,255,.15);color: var(--accent4); }
-    .tag-orange { background: rgba(255,166,87,.15); color: var(--accent5); }
-    td code {
+    td { padding: .68rem 1rem; border-top: 1px solid var(--border); vertical-align: top; }
+    tr:hover td { background: rgba(37,99,235,.04); }
+    td code, th code {
       font-family: var(--mono); font-size: .78rem;
       background: var(--bg3); padding: .1rem .35rem;
       border-radius: 4px; border: 1px solid var(--border);
     }
+    .tag {
+      display: inline-block; padding: .14rem .52rem; border-radius: 4px;
+      font-size: .74rem; font-weight: 600; margin: .1rem .1rem .1rem 0;
+    }
+    .tag-blue   { background: rgba(37,99,235,.2);  color: #93c5fd; }
+    .tag-green  { background: rgba(63,185,80,.15); color: var(--accent2); }
+    .tag-red    { background: rgba(247,129,102,.15);color: var(--accent3); }
+    .tag-purple { background: rgba(210,168,255,.15);color: var(--accent4); }
+    .tag-orange { background: rgba(255,166,87,.15); color: var(--accent5); }
+
+    /* ── Architecture ─────────────────────────────────────────────────── */
+    .arch-section { background: var(--bg2); }
+    .arch-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 2.5rem;
+    }
+    @media (max-width: 720px) { .arch-grid { grid-template-columns: 1fr; } }
+    .arch-panel h3 {
+      font-size: .97rem; color: var(--accent4); margin-bottom: 1rem;
+    }
+    .layer-list { list-style: none; display: flex; flex-direction: column; gap: .45rem; }
+    .layer-item {
+      background: var(--bg3); border: 1px solid var(--border);
+      border-radius: 6px; padding: .52rem .9rem;
+      font-size: .85rem; display: flex; align-items: flex-start; gap: .6rem;
+    }
+    .layer-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: .38rem; }
+    .dot-blue   { background: var(--accent-light); }
+    .dot-green  { background: var(--accent2); }
+    .dot-red    { background: var(--accent3); }
+    .dot-purple { background: var(--accent4); }
+    .dot-orange { background: var(--accent5); }
+
+    /* ── Restart section ──────────────────────────────────────────────── */
+    .restart-steps { counter-reset: step; list-style: none; display: flex; flex-direction: column; gap: 1.25rem; margin: 1.5rem 0; }
+    .restart-step {
+      counter-increment: step;
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: var(--r); padding: 1.1rem 1.3rem 1.1rem 3.5rem;
+      position: relative;
+    }
+    .restart-step::before {
+      content: counter(step);
+      position: absolute; left: 1rem; top: 50%; transform: translateY(-50%);
+      width: 1.8rem; height: 1.8rem; border-radius: 50%;
+      background: var(--accent); color: #fff; font-weight: 800; font-size: .85rem;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .restart-step h4 { font-size: .95rem; margin-bottom: .3rem; }
+    .restart-step p { color: var(--muted); font-size: .88rem; }
 
     /* ── CLI section ──────────────────────────────────────────────────── */
     .cli-section { background: var(--bg2); }
-    .cli-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
+    .cli-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.75rem; }
     @media (max-width: 720px) { .cli-grid { grid-template-columns: 1fr; } }
     .cli-card {
       background: var(--bg); border: 1px solid var(--border);
-      border-radius: var(--r); padding: 1.5rem;
+      border-radius: var(--r); padding: 1.4rem;
     }
-    .cli-card h3 {
-      font-size: .95rem; color: var(--accent5); margin-bottom: .4rem;
-    }
-    .cli-card p { font-size: .85rem; color: var(--muted); margin-bottom: 1rem; }
+    .cli-card h3 { font-size: .93rem; color: var(--accent5); margin-bottom: .35rem; }
+    .cli-card p  { font-size: .84rem; color: var(--muted); margin-bottom: .9rem; }
     .shell {
       background: #010409; border: 1px solid var(--border);
-      border-radius: 6px; padding: .9rem 1rem;
-      font-family: var(--mono); font-size: .82rem; line-height: 1.7;
+      border-radius: 6px; padding: .85rem 1rem;
+      font-family: var(--mono); font-size: .81rem; line-height: 1.7;
     }
     .shell .prompt { color: var(--accent2); user-select: none; }
     .shell .cmd    { color: var(--text); }
     .shell .cmt    { color: var(--muted); }
 
-    /* ── Performance section ──────────────────────────────────────────── */
-    .perf-section { background: var(--bg); }
+    /* ── Performance ──────────────────────────────────────────────────── */
     .perf-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-      gap: 1.25rem; margin-bottom: 3rem;
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 1.2rem; margin-bottom: 2.5rem;
     }
     .perf-card {
       background: var(--bg2); border: 1px solid var(--border);
-      border-radius: var(--r); padding: 1.4rem; text-align: center;
+      border-radius: var(--r); padding: 1.3rem; text-align: center;
     }
-    .perf-card .big { font-size: 2.4rem; font-weight: 800; color: var(--accent5); }
-    .perf-card .desc { font-size: .85rem; color: var(--muted); margin-top: .25rem; }
+    .perf-card .big { font-size: 2.2rem; font-weight: 800; color: var(--accent5); }
+    .perf-card .desc { font-size: .84rem; color: var(--muted); margin-top: .2rem; }
     .scan-table { width: 100%; border-collapse: collapse; font-size: .875rem; margin-top: 1rem; }
-    .scan-table th, .scan-table td {
-      padding: .6rem 1rem; border: 1px solid var(--border); text-align: center;
-    }
+    .scan-table th, .scan-table td { padding: .58rem 1rem; border: 1px solid var(--border); text-align: center; }
     .scan-table thead { background: var(--bg3); }
 
-    /* ── Quickstart ───────────────────────────────────────────────────── */
+    /* ── Quick Start tabs ─────────────────────────────────────────────── */
     .qs-section { background: var(--bg2); }
-    .qs-tabs { display: flex; gap: .5rem; margin-bottom: 1rem; }
+    .qs-tabs { display: flex; gap: .45rem; margin-bottom: 1rem; flex-wrap: wrap; }
     .tab-btn {
       background: var(--bg3); border: 1px solid var(--border);
-      color: var(--muted); padding: .4rem .9rem; border-radius: 6px;
-      cursor: pointer; font-size: .85rem;
+      color: var(--muted); padding: .38rem .88rem; border-radius: 6px;
+      cursor: pointer; font-size: .84rem; font-family: inherit;
     }
-    .tab-btn.active { background: var(--accent); color: #0d1117; font-weight: 700; border-color: var(--accent); }
+    .tab-btn.active { background: var(--accent); color: #fff; font-weight: 700; border-color: var(--accent); }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
 
     /* ── Benchmark ────────────────────────────────────────────────────── */
-    .bench-section { background: var(--bg); }
     .bench-outputs {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
       gap: 1rem; margin-top: 2rem;
     }
     .bench-file {
       background: var(--bg2); border: 1px solid var(--border);
-      border-radius: 8px; padding: 1rem 1.1rem;
-      display: flex; gap: .7rem; align-items: flex-start;
+      border-radius: 8px; padding: .95rem 1.1rem;
+      display: flex; gap: .65rem; align-items: flex-start;
     }
-    .bench-file-icon { font-size: 1.25rem; flex-shrink: 0; }
-    .bench-file strong { font-size: .85rem; display: block; margin-bottom: .2rem; }
-    .bench-file span { font-size: .78rem; color: var(--muted); }
+    .bench-file-icon { font-size: 1.2rem; flex-shrink: 0; }
+    .bench-file strong { font-size: .84rem; display: block; margin-bottom: .18rem; }
+    .bench-file span { font-size: .77rem; color: var(--muted); }
 
     /* ── Install ──────────────────────────────────────────────────────── */
-    .install-section { background: var(--bg2); }
+    .install-section { background: var(--bg); }
     .install-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
     @media (max-width: 720px) { .install-grid { grid-template-columns: 1fr; } }
+
+    /* ── VRAM table ───────────────────────────────────────────────────── */
+    .vram-section { background: var(--bg2); }
 
     /* ── Footer ───────────────────────────────────────────────────────── */
     footer {
       background: var(--bg2); border-top: 1px solid var(--border);
-      padding: 3rem 2rem; text-align: center;
+      padding: 2.75rem 2rem; text-align: center;
     }
     .footer-inner { max-width: 600px; margin: 0 auto; }
-    .footer-logo { font-size: 1.4rem; font-weight: 800; color: var(--accent); margin-bottom: .5rem; }
-    footer p { color: var(--muted); font-size: .875rem; margin-bottom: 1rem; }
-    .footer-links { display: flex; gap: 1.5rem; justify-content: center; flex-wrap: wrap; }
-    .footer-links a { color: var(--muted); font-size: .875rem; }
+    .footer-logo { font-size: 1.3rem; font-weight: 800; color: var(--accent-light); margin-bottom: .4rem; }
+    .footer-version { font-size: .78rem; color: var(--muted); margin-bottom: .6rem; }
+    footer p { color: var(--muted); font-size: .86rem; margin-bottom: .9rem; }
+    .footer-links { display: flex; gap: 1.4rem; justify-content: center; flex-wrap: wrap; }
+    .footer-links a { color: var(--muted); font-size: .86rem; }
     .footer-links a:hover { color: var(--text); }
 
     /* ── Misc ─────────────────────────────────────────────────────────── */
-    .divider { border: none; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+    .divider { border: none; border-top: 1px solid var(--border); margin: 2.25rem 0; }
+    .mt-2 { margin-top: 2rem; }
+    .mb-1 { margin-bottom: 1rem; }
+
     @media (max-width: 600px) {
       nav { padding: .6rem 1rem; }
       .nav-links { display: none; }
-      section { padding: 3.5rem 1.2rem; }
+      section { padding: 3.25rem 1.1rem; }
       .stats-bar { flex-direction: column; }
       .stat { border-right: none; border-bottom: 1px solid var(--border); }
+      .arch-grid, .cli-grid, .install-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -337,13 +383,16 @@
 <nav>
   <div class="nav-brand">under<span>PINN</span></div>
   <div class="nav-links">
-    <a href="#features">Features</a>
-    <a href="#architecture">Architecture</a>
-    <a href="#examples">Examples</a>
-    <a href="#cli">CLI</a>
-    <a href="#benchmark">Benchmark</a>
+    <a href="#overview">Overview</a>
+    <a href="#installation">Installation</a>
+    <a href="#gpu-memory">GPU Memory</a>
     <a href="#quickstart">Quick Start</a>
-    <a href="#install">Install</a>
+    <a href="#training">Training System</a>
+    <a href="#restart">Restart System</a>
+    <a href="#examples">Examples</a>
+    <a href="#api">API Reference</a>
+    <a href="#benchmark">Benchmarks</a>
+    <a href="#performance">Performance</a>
   </div>
   <div class="nav-right">
     <a href="https://github.com/Prashantiitk23/PINN" class="btn-gh" target="_blank">
@@ -356,10 +405,16 @@
 </nav>
 
 <!-- ─── Hero ──────────────────────────────────────────────────────────────── -->
-<section class="hero">
-  <div class="hero-badge">JAX · Flax · XLA · GPU-ready</div>
+<section class="hero" id="overview">
+  <div class="hero-badges">
+    <span class="hero-badge">repo status: Active</span>
+    <span class="hero-badge">license: GPL-3.0</span>
+    <span class="hero-badge">Python &ge;3.9</span>
+    <span class="hero-badge">JAX &ge;0.4.26</span>
+    <span class="hero-badge">v2605</span>
+  </div>
   <h1>underPINN</h1>
-  <p>A modular, GPU-accelerated Physics-Informed Neural Network framework — from ODEs to 3-D turbulent Navier-Stokes, all JIT-compiled via XLA.</p>
+  <p class="hero-tagline">A modular, GPU-accelerated Physics-Informed Neural Network framework built on JAX + Flax + Optax — from harmonic oscillators to 3-D turbulent Navier-Stokes, all JIT-compiled via XLA.</p>
   <div class="hero-buttons">
     <a href="#quickstart" class="btn-primary">Get Started</a>
     <a href="#examples" class="btn-outline">Browse Examples</a>
@@ -369,422 +424,246 @@
 
 <!-- ─── Stats bar ─────────────────────────────────────────────────────────── -->
 <div class="stats-bar">
-  <div class="stat"><div class="stat-number">14</div><div class="stat-label">Physics Examples</div></div>
-  <div class="stat"><div class="stat-number">7</div><div class="stat-label">PDE Solvers</div></div>
-  <div class="stat"><div class="stat-number">12</div><div class="stat-label">CLI Runners</div></div>
+  <div class="stat"><div class="stat-number">16</div><div class="stat-label">Physics Examples</div></div>
+  <div class="stat"><div class="stat-number">5</div><div class="stat-label">PDE Solvers</div></div>
+  <div class="stat"><div class="stat-number">12+</div><div class="stat-label">CLI Runners</div></div>
   <div class="stat"><div class="stat-number">500×</div><div class="stat-label">Less GPU Dispatch</div></div>
   <div class="stat"><div class="stat-number">3D</div><div class="stat-label">Navier-Stokes</div></div>
+  <div class="stat"><div class="stat-number">Auto</div><div class="stat-label">Restart/Resume</div></div>
 </div>
 
-<!-- ─── Features ─────────────────────────────────────────────────────────── -->
+<!-- ─── Features / Overview ───────────────────────────────────────────────── -->
 <section id="features">
   <div class="container">
     <div class="section-tag">Core Capabilities</div>
     <h2 class="section-title">Everything you need for PINN research</h2>
-    <p class="section-sub">From simple ODEs to full 3-D turbulence models — one coherent API, no boilerplate.</p>
+    <p class="section-sub">From simple ODEs to full 3-D turbulence — one coherent API, no boilerplate. Automatic GPU memory management, fault-tolerant restart, and YAML-driven experiments out of the box.</p>
 
+    <div class="feature-group-title">Network Architectures</div>
     <div class="feature-grid">
       <div class="feature-card">
-        <div class="feature-icon" style="background:rgba(88,166,255,.12)">🧩</div>
-        <h3>Domain Decomposition (FBPINN)</h3>
-        <p>Overlapping subdomains with sigmoid partition-of-unity windows. Attention-augmented gated residual blocks inside each subdomain for complex geometries.</p>
+        <div class="feature-icon" style="background:rgba(37,99,235,.12)">&#9632;</div>
+        <h3>MLP</h3>
+        <p>Standard multi-layer perceptron with tanh activations. Configurable depth and width via a simple layer list — e.g. <code>[2, 64, 64, 64, 1]</code> for a space-time Burgers network.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon" style="background:rgba(63,185,80,.12)">⚡</div>
-        <h3>lax.scan XLA Fusion</h3>
-        <p>Fuse N gradient steps into a single XLA kernel — 50–500× less Python dispatch overhead on GPU. Works with all solvers; callbacks still fire every N epochs.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon" style="background:rgba(210,168,255,.12)">🎵</div>
+        <div class="feature-icon" style="background:rgba(210,168,255,.12)">&#126;</div>
         <h3>FourierMLP</h3>
-        <p>Trainable random Fourier feature embeddings. Essential for high-frequency oscillatory solutions — Helmholtz, wave equations, high-Re flows.</p>
+        <p>Trainable random Fourier feature embeddings prepended to a standard MLP. Essential for oscillatory solutions — Helmholtz, wave, high-Re flows — where plain MLPs exhibit spectral bias.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon" style="background:rgba(255,166,87,.12)">🎯</div>
-        <h3>Residual-Based Adaptivity (RBA)</h3>
-        <p>Element-wise loss weighting that automatically concentrates training on high-residual boundary and collocation points.</p>
+        <div class="feature-icon" style="background:rgba(63,185,80,.12)">&#9632;&#9632;</div>
+        <h3>FBPINN + SimpleGate</h3>
+        <p>Overlapping subdomain decomposition with sigmoid partition-of-unity windows. HybridAttention and SimpleGate gated residual blocks inside each subdomain for complex geometries.</p>
+      </div>
+    </div>
+
+    <div class="feature-group-title">Training</div>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(63,185,80,.12)">&#9889;</div>
+        <h3>lax.scan XLA Fusion</h3>
+        <p>Fuse N gradient steps into a single XLA kernel — 50–500&times; less Python dispatch overhead on GPU. Works with all solvers; callbacks fire every N outer epochs.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon" style="background:rgba(247,129,102,.12)">🔄</div>
+        <div class="feature-icon" style="background:rgba(255,166,87,.12)">&#9654;</div>
+        <h3>Cosine LR Decay</h3>
+        <p>Via <code>optax.cosine_decay_schedule</code>. Integrates seamlessly with <code>TrainingConfig</code>. Recommended for runs longer than 2 000 epochs — delivers free accuracy improvement.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(247,129,102,.12)">&#8635;</div>
         <h3>RAR-D Adaptive Resampling</h3>
-        <p>Periodically replaces collocation points proportionally to |residual|^k (Lu et al., 2021). Composable with lax.scan; optionally supply a custom domain sampler.</p>
+        <p>Periodically replaces collocation points with samples drawn proportional to |residual|^k (Lu et al., 2021). Focuses compute on high-error regions without changing total batch size.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon" style="background:rgba(88,166,255,.12)">🔬</div>
-        <h3>Inverse Problems</h3>
-        <p>Joint optimisation of network weights + physics parameters. Recover thermal diffusivity from sparse noisy observations using log-parameterised positivity constraints.</p>
+        <div class="feature-icon" style="background:rgba(210,168,255,.12)">&#9878;</div>
+        <h3>RBA Element-wise Weighting</h3>
+        <p>Residual-based adaptivity assigns per-point loss weights so boundary and collocation losses are automatically balanced. Especially effective for stiff boundary conditions.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon" style="background:rgba(63,185,80,.12)">🚀</div>
-        <h3>Transfer Learning</h3>
-        <p>Parameter transfer (different Re / diffusivity) and temporal transfer (extended time horizon). Warm-start any solver from a pre-trained model with one call.</p>
+        <div class="feature-icon" style="background:rgba(37,99,235,.12)">&#9654;&#9646;</div>
+        <h3>EarlyStopping</h3>
+        <p>Monitors a metric (default: total loss) and halts training after <code>patience</code> epochs without improvement. Works correctly inside <code>lax.scan</code> loops — fires at the outer-step boundary.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon" style="background:rgba(210,168,255,.12)">📋</div>
-        <h3>Callbacks + TrainingConfig</h3>
-        <p>ConsoleLogger, EarlyStopping, ModelCheckpoint — and a unified TrainingConfig dataclass with runtime validation. Callbacks fire every N epochs even inside lax.scan loops.</p>
+        <div class="feature-icon" style="background:rgba(63,185,80,.12)">&#9664;</div>
+        <h3>TrainingConfig Dataclass</h3>
+        <p>Centralises all hyperparameters with runtime validation. A single <code>TrainingConfig</code> object is passed to every solver — no kwargs scattered across multiple calls.</p>
+      </div>
+    </div>
+
+    <div class="feature-group-title">Infrastructure</div>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(247,129,102,.12)">&#10067;</div>
+        <h3>Restart / Resume</h3>
+        <p>RestartManager snapshots params + opt state + loss histories every N epochs. Re-run an interrupted job and it picks up exactly where it left off. Config-hash check prevents stale resumption.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon" style="background:rgba(255,166,87,.12)">🌐</div>
-        <h3>3-D Geometry Primitives</h3>
-        <p>Cylinder pipe (interior, wall, inlet, outlet), NACA 4-digit airfoil, arbitrary Shapely polygons, rectangles, intervals — all with boundary-aware sampling.</p>
+        <div class="feature-icon" style="background:rgba(255,166,87,.12)">&#128190;</div>
+        <h3>GPU Memory Management</h3>
+        <p>Sets <code>XLA_PYTHON_CLIENT_PREALLOCATE=false</code> automatically before <code>import jax</code>. A 3-layer MLP uses ~200 MB instead of reserving 73 GB on an 80 GB A100.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon" style="background:rgba(247,129,102,.12)">📊</div>
-        <h3>Benchmark Suite</h3>
-        <p>One command runs all problems across multiple epoch budgets, producing accuracy plots, convergence grids, CSV tables, loss histories, and a Markdown report.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon" style="background:rgba(88,166,255,.12)">⚙️</div>
-        <h3>YAML-Driven CLI</h3>
-        <p>Every hyperparameter lives in a config file. Cartesian sweep support built-in. No code changes needed to run experiments or sweeps.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon" style="background:rgba(63,185,80,.12)">💾</div>
+        <div class="feature-icon" style="background:rgba(37,99,235,.12)">&#128228;</div>
         <h3>Checkpoint &amp; Inference</h3>
         <p>Save Flax params as <code>params.msgpack</code> with a JSON sidecar. Reload in one line with <code>ModelPredictor.from_meta(path)</code> — no need to re-specify the architecture.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon" style="background:rgba(247,129,102,.12)">📦</div>
-        <h3>Prediction Persistence</h3>
-        <p>Automatic compressed .npz saving at collocation points after every training run. Includes coordinates, PINN outputs, and exact solutions where available.</p>
+        <div class="feature-icon" style="background:rgba(63,185,80,.12)">&#128640;</div>
+        <h3>Transfer Learning</h3>
+        <p>Parameter transfer (different Re / diffusivity) and temporal transfer (extended time horizon). Warm-start any solver from a pre-trained model with one call.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(210,168,255,.12)">&#128269;</div>
+        <h3>Inverse Problems</h3>
+        <p>Joint optimisation of network weights + physics parameters. Log-parameterisation ensures positivity without constraints. Demonstrated on thermal diffusivity recovery from sparse noisy data.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(247,129,102,.12)">&#9881;</div>
+        <h3>YAML-Driven CLI + Sweeps</h3>
+        <p>Every hyperparameter lives in a YAML config. Cartesian product sweeps built-in. <code>run</code>, <code>sweep</code>, <code>bench</code>, <code>list</code>, <code>show</code>, <code>version</code> subcommands — no code changes needed.</p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ─── Architecture ──────────────────────────────────────────────────────── -->
-<section id="architecture" class="arch-section">
+<!-- ─── Installation ──────────────────────────────────────────────────────── -->
+<section id="installation" class="install-section">
   <div class="container">
-    <div class="section-tag">Framework Design</div>
-    <h2 class="section-title">Clean abstractions, zero boilerplate</h2>
-    <p class="section-sub">Three abstract base classes form the backbone. Existing classes conform via inheritance — no rewrites required.</p>
+    <div class="section-tag">Installation</div>
+    <h2 class="section-title">Get underPINN running</h2>
+    <p class="section-sub">Pure Python — install in editable mode from the repo root so all examples and the CLI resolve imports automatically.</p>
 
-    <div class="arch-grid">
-      <!-- Module tree -->
-      <div class="arch-panel">
-        <h3>📁 Package Layout</h3>
-        <ul class="layer-list">
-          <li class="layer-item"><span class="layer-dot dot-blue"></span><strong>core/</strong> — BasePDE, BaseLoss, BaseSolver, TrainingConfig</li>
-          <li class="layer-item"><span class="layer-dot dot-purple"></span><strong>nn/</strong> — MLP, FourierMLP, FBPINN, Attention</li>
-          <li class="layer-item"><span class="layer-dot dot-green"></span><strong>pde/</strong> — Burgers, Wave, Helmholtz, Heat, N-S 2D/3D, k-ε, ODE</li>
-          <li class="layer-item"><span class="layer-dot dot-orange"></span><strong>solver/</strong> — FBPINNSolver, SteadySolver, ODESolver, RANSSolver</li>
-          <li class="layer-item"><span class="layer-dot dot-red"></span><strong>losses/</strong> — PINNLoss (RBA), ODELoss, SteadyLoss</li>
-          <li class="layer-item"><span class="layer-dot dot-blue"></span><strong>callbacks/</strong> — ConsoleLogger, EarlyStopping, ModelCheckpoint</li>
-          <li class="layer-item"><span class="layer-dot dot-green"></span><strong>geometry/</strong> — Pipe, Airfoil, Rectangle, Shapely polygon</li>
-          <li class="layer-item"><span class="layer-dot dot-purple"></span><strong>training/</strong> — RAR-D adaptive resampling</li>
-          <li class="layer-item"><span class="layer-dot dot-orange"></span><strong>runner/</strong> — <code>dispatch.py</code>: path-registry + importlib loader (runner logic lives in <code>examples/</code>)</li>
-          <li class="layer-item"><span class="layer-dot dot-red"></span><strong>utils/</strong> — save_predictions, checkpoint, ModelPredictor, metrics</li>
-          <li class="layer-item"><span class="layer-dot dot-blue"></span><strong>benchmark_utils/</strong> — BenchmarkRunner, evaluators, report</li>
-        </ul>
+    <div class="install-grid">
+      <div>
+        <h3 style="color:var(--accent2);margin-bottom:1rem">CPU / Development</h3>
+        <div class="code-header">
+          <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
+          Terminal
+        </div>
+<pre>pip install jax flax optax matplotlib scipy \
+            shapely pandas pyyaml</pre>
       </div>
-
-      <!-- Base classes code -->
-      <div class="arch-panel">
-        <h3>🧬 Core Abstractions</h3>
+      <div>
+        <h3 style="color:var(--accent5);margin-bottom:1rem">GPU (CUDA 12)</h3>
         <div class="code-header">
           <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
-          underPINN/core/base.py
+          Terminal
         </div>
-<pre><span class="kw">class</span> <span class="cls">BasePDE</span>(<span class="cls">ABC</span>):
-    <span class="cm"># Every PDE implements residual()</span>
-    <span class="kw">@abstractmethod</span>
-    <span class="kw">def</span> <span class="fn">residual</span>(<span class="nm">self</span>, params, *args): ...
+<pre>pip install -U <span class="st">"jax[cuda12]"</span>
+pip install -r requirements-gpu.txt</pre>
+      </div>
+    </div>
 
-<span class="kw">class</span> <span class="cls">BaseLoss</span>(<span class="cls">ABC</span>):
-    <span class="cm"># Returns (total_loss, aux_tuple)</span>
-    <span class="kw">@abstractmethod</span>
-    <span class="kw">def</span> <span class="fn">__call__</span>(<span class="nm">self</span>, params, *args, **kwargs): ...
+    <div style="margin-top:1.75rem">
+      <h3 style="color:var(--accent-light);margin-bottom:1rem">From Source (recommended)</h3>
+      <div class="code-header">
+        <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
+        Terminal
+      </div>
+<pre>git clone https://github.com/Prashantiitk23/PINN
+<span class="kw">cd</span> PINN
+pip install -e .
 
-<span class="kw">class</span> <span class="cls">BaseSolver</span>(<span class="cls">ABC</span>):
-    <span class="cm"># Unified init + train interface</span>
-    <span class="kw">@abstractmethod</span>
-    <span class="kw">def</span> <span class="fn">init</span>(<span class="nm">self</span>, key): ...
-    <span class="kw">@abstractmethod</span>
-    <span class="kw">def</span> <span class="fn">train</span>(<span class="nm">self</span>, *args, **kwargs): ...
-</pre>
-        <div style="height:.75rem"></div>
-        <div class="code-header">
-          <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
-          underPINN/core/config.py
-        </div>
-<pre><span class="kw">@dataclass</span>
-<span class="kw">class</span> <span class="cls">TrainingConfig</span>:
-    epochs:        <span class="cls">int</span>   = <span class="nu">1000</span>
-    lr:            <span class="cls">float</span> = <span class="nu">1e-3</span>
-    lr_schedule:   <span class="cls">Any</span>   = <span class="nm">None</span>
-    batch_r:       <span class="cls">int</span>   = <span class="nu">4096</span>
-    batch_i:       <span class="cls">int</span>   = <span class="nu">512</span>
-    batch_b:       <span class="cls">int</span>   = <span class="nu">512</span>
-    n_scan_steps:  <span class="cls">int</span>   = <span class="nu">1</span>    <span class="cm"># lax.scan chunk</span>
-    resample_period: <span class="cls">int</span> = <span class="nu">0</span>    <span class="cm"># RAR-D interval</span>
-    callbacks:     <span class="cls">list</span>  = ...  <span class="cm"># ConsoleLogger, EarlyStopping</span>
+<span class="cm"># Verify GPU is visible</span>
+python -c <span class="st">"import jax; print(jax.devices())"</span>
+<span class="cm"># Expected on GPU: [CudaDevice(id=0)]</span></pre>
+    </div>
 
-    <span class="kw">def</span> <span class="fn">__post_init__</span>(<span class="nm">self</span>):
-        <span class="cm"># Validates all fields before JAX traces anything</span>
-        ...</pre>
+    <hr class="divider">
+    <h3 class="mb-1">Requirements</h3>
+    <div class="feature-grid" style="gap:.7rem;margin-top:.75rem">
+      <div class="feature-card" style="padding:1rem">
+        <strong style="color:var(--accent-light)">jax[cpu] &ge; 0.4.26</strong>
+        <p style="margin-top:.2rem">JIT compilation, autodiff, PRNG</p>
+      </div>
+      <div class="feature-card" style="padding:1rem">
+        <strong style="color:var(--accent2)">flax &ge; 0.8.0</strong>
+        <p style="margin-top:.2rem">Neural network layers and parameter trees</p>
+      </div>
+      <div class="feature-card" style="padding:1rem">
+        <strong style="color:var(--accent4)">optax &ge; 0.2.0</strong>
+        <p style="margin-top:.2rem">Adam, cosine decay, gradient clipping</p>
+      </div>
+      <div class="feature-card" style="padding:1rem">
+        <strong style="color:var(--accent5)">numpy, scipy, matplotlib</strong>
+        <p style="margin-top:.2rem">Numerics, exact solutions, plotting</p>
+      </div>
+      <div class="feature-card" style="padding:1rem">
+        <strong style="color:var(--accent3)">shapely &ge; 2.0</strong>
+        <p style="margin-top:.2rem">Arbitrary polygon geometry support</p>
+      </div>
+      <div class="feature-card" style="padding:1rem">
+        <strong style="color:var(--accent-light)">pyyaml &ge; 6.0</strong>
+        <p style="margin-top:.2rem">YAML config loading and merging</p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ─── Examples table ────────────────────────────────────────────────────── -->
-<section id="examples" class="examples-section">
+<!-- ─── GPU Memory ─────────────────────────────────────────────────────────── -->
+<section id="gpu-memory" class="vram-section">
   <div class="container">
-    <div class="section-tag">Physics Examples</div>
-    <h2 class="section-title">14 worked examples across 6 physics domains</h2>
-    <p class="section-sub">Each example folder is self-contained: one script + one YAML config. Run directly (<code>python examples/burgers/burgers.py</code>) or via the CLI. Saves predictions, plots, and a <code>params.msgpack</code> checkpoint automatically.</p>
+    <div class="section-tag">GPU Memory Management</div>
+    <h2 class="section-title">Why does nvidia-smi show 73 GB on import?</h2>
+    <p class="section-sub">JAX's XLA BFC allocator pre-reserves ~90% of all free VRAM the moment <code>import jax</code> executes — before any tensor is created — to prevent memory fragmentation during training. underPINN disables this automatically.</p>
 
+    <div class="box-warn">
+      <strong>Default JAX behaviour (NOT what underPINN uses)</strong>
+      <p>On an 80 GB A100, <code>import jax</code> immediately reserves ~73 GB of VRAM even if your model only needs 200 MB. This blocks other processes from using the GPU and makes it look like your job consumed the entire card.</p>
+    </div>
+
+    <div class="box-info">
+      <strong>underPINN sets XLA_PYTHON_CLIENT_PREALLOCATE=false automatically</strong>
+      <p>The environment variable is set in <code>underPINN/__main__.py</code> (for CLI runs) and at the top of every example script (for direct <code>python examples/...</code> runs) <em>before</em> <code>import jax</code>. You get on-demand GPU memory growth out of the box — no configuration needed.</p>
+    </div>
+
+    <h3 style="margin:2rem 0 1rem">Manual control via environment variables</h3>
+    <div class="code-header">
+      <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
+      bash
+    </div>
+<pre><span class="cm"># On-demand growth (default in underPINN) — frees unreserved VRAM for other jobs</span>
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+
+<span class="cm"># Hard cap — useful when sharing a node; limits to e.g. 20% of VRAM</span>
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+export XLA_PYTHON_CLIENT_MEM_FRACTION=0.20
+
+<span class="cm"># Platform allocator — no XLA pool at all (slowest, minimal fragmentation)</span>
+export XLA_PYTHON_CLIENT_ALLOCATOR=platform
+
+<span class="cm"># Multi-GPU: restrict to a single device (e.g. GPU 1)</span>
+export CUDA_VISIBLE_DEVICES=1</pre>
+
+    <h3 style="margin:2rem 0 1rem">Programmatic override (must be BEFORE <code>import jax</code>)</h3>
+    <div class="code-header">
+      <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
+      Python
+    </div>
+<pre><span class="kw">import</span> os
+os.environ[<span class="st">"XLA_PYTHON_CLIENT_PREALLOCATE"</span>] = <span class="st">"false"</span>
+os.environ[<span class="st">"XLA_PYTHON_CLIENT_MEM_FRACTION"</span>] = <span class="st">"0.15"</span>
+<span class="kw">import</span> jax  <span class="cm"># now uses at most 15% of VRAM</span></pre>
+
+    <h3 style="margin:2rem 0 1rem">Typical actual VRAM usage (preallocation disabled)</h3>
     <div class="table-wrap">
       <table>
         <thead>
-          <tr>
-            <th>Problem</th>
-            <th>Equation</th>
-            <th>Key Features</th>
-            <th>Script</th>
-          </tr>
+          <tr><th>Problem</th><th>Network</th><th>VRAM (approx)</th></tr>
         </thead>
         <tbody>
-          <tr>
-            <td><strong>Exponential Decay</strong></td>
-            <td>du/dt + λu = 0</td>
-            <td><span class="tag tag-blue">ODESolver</span><span class="tag tag-green">TrainingConfig</span><span class="tag tag-red">EarlyStopping</span></td>
-            <td><code>examples/ode/ode_test.py</code></td>
-          </tr>
-          <tr>
-            <td><strong>Harmonic Oscillator</strong></td>
-            <td>d²u/dt² + ω²u = 0</td>
-            <td><span class="tag tag-blue">ODESolver</span><span class="tag tag-purple">IC derivative</span></td>
-            <td><code>examples/ode/ode_test.py</code></td>
-          </tr>
-          <tr>
-            <td><strong>1-D Burgers</strong></td>
-            <td>u_t + uu_x = νu_xx</td>
-            <td><span class="tag tag-blue">FBPINN</span><span class="tag tag-orange">RBA</span><span class="tag tag-green">cosine LR</span></td>
-            <td><code>examples/burgers/burgers.py</code></td>
-          </tr>
-          <tr>
-            <td><strong>1-D Heat — Forward</strong></td>
-            <td>u_t = αu_xx</td>
-            <td><span class="tag tag-blue">FBPINNSolver</span><span class="tag tag-green">exact Gaussian</span></td>
-            <td><code>examples/heat/forward.py</code></td>
-          </tr>
-          <tr>
-            <td><strong>1-D Heat — Inverse</strong></td>
-            <td>u_t = αu_xx</td>
-            <td><span class="tag tag-red">Recover α</span><span class="tag tag-purple">50 noisy obs.</span></td>
-            <td><code>examples/heat/inverse.py</code></td>
-          </tr>
-          <tr>
-            <td><strong>1-D Wave Equation</strong></td>
-            <td>u_tt = c²u_xx</td>
-            <td><span class="tag tag-purple">FourierMLP</span><span class="tag tag-green">dual IC (u, u_t)</span></td>
-            <td><code>examples/wave/wave.py</code></td>
-          </tr>
-          <tr>
-            <td><strong>2-D Helmholtz</strong></td>
-            <td>Δu + k²u = f</td>
-            <td><span class="tag tag-purple">FourierMLP</span><span class="tag tag-orange">k = 4</span><span class="tag tag-blue">manufactured source</span></td>
-            <td><code>examples/helmholtz/helmholtz.py</code></td>
-          </tr>
-          <tr>
-            <td><strong>2-D Diffusion Inverse</strong></td>
-            <td>u_t = α(u_xx+u_yy)</td>
-            <td><span class="tag tag-red">log-param joint opt.</span><span class="tag tag-green">SteadySolver</span></td>
-            <td><code>examples/inverse/</code></td>
-          </tr>
-          <tr>
-            <td><strong>2-D Lid-Driven Cavity</strong></td>
-            <td>Steady N-S, Re=100</td>
-            <td><span class="tag tag-blue">FBPINN</span><span class="tag tag-purple">SimpleGate attention</span></td>
-            <td><code>examples/LDC/run_ldc.py</code></td>
-          </tr>
-          <tr>
-            <td><strong>2-D Turbulent Channel</strong></td>
-            <td>RANS k-ε</td>
-            <td><span class="tag tag-red">k-ε PDE</span><span class="tag tag-orange">RANSSolver</span><span class="tag tag-blue">BFS geometry</span></td>
-            <td><code>examples/K-Epsilon/</code></td>
-          </tr>
-          <tr>
-            <td><strong>NACA 0012 Airfoil</strong></td>
-            <td>Steady N-S, Re=200</td>
-            <td><span class="tag tag-green">exterior geometry</span><span class="tag tag-purple">Cp curve, CL</span></td>
-            <td><code>examples/airfoil/airfoil_flow.py</code></td>
-          </tr>
-          <tr>
-            <td><strong>3-D Pipe Flow</strong></td>
-            <td>Steady 3-D N-S</td>
-            <td><span class="tag tag-red">double-jacfwd Hessian</span><span class="tag tag-orange">Pipe geometry</span></td>
-            <td><code>examples/pipe_flow/pipe_flow.py</code></td>
-          </tr>
-          <tr>
-            <td><strong>3-D Unsteady Pipe — Transfer</strong></td>
-            <td>u_t = G + ν∇²u</td>
-            <td><span class="tag tag-green">Bessel exact</span><span class="tag tag-blue">Re &amp; temporal TL</span></td>
-            <td><code>examples/pipe_flow/pipe_flow_unsteady_transfer.py</code></td>
-          </tr>
-          <tr>
-            <td><strong>Burgers + Heat 2D Transfer</strong></td>
-            <td>Burgers / 2-D heat</td>
-            <td><span class="tag tag-blue">param transfer (ν, α)</span><span class="tag tag-purple">temporal transfer</span></td>
-            <td><code>examples/transfer/</code></td>
-          </tr>
+          <tr><td>Burgers 1-D</td><td><code>[2,64,64,64,1]</code></td><td>~200 MB</td></tr>
+          <tr><td>Wave 1-D</td><td>FourierMLP</td><td>~300 MB</td></tr>
+          <tr><td>Helmholtz 2-D</td><td>FourierMLP</td><td>~400 MB</td></tr>
+          <tr><td>LDC 2-D</td><td>FBPINN</td><td>~800 MB</td></tr>
+          <tr><td>Airfoil 2-D</td><td><code>[2,128,128,128,3]</code></td><td>~1.2 GB</td></tr>
+          <tr><td>Pipe Flow 3-D</td><td><code>[3,64,64,64,64,4]</code></td><td>~2.0 GB</td></tr>
+          <tr><td>Compressible Ramp</td><td><code>[2,80,80,80,80,80,4]</code></td><td>~1.8 GB</td></tr>
+          <tr><td>k-&epsilon; Turbulence</td><td>FBPINN</td><td>~3.0 GB</td></tr>
         </tbody>
       </table>
-    </div>
-  </div>
-</section>
-
-<!-- ─── CLI ───────────────────────────────────────────────────────────────── -->
-<section id="cli" class="cli-section">
-  <div class="container">
-    <div class="section-tag">Command-Line Interface</div>
-    <h2 class="section-title">YAML-driven experiments, zero code changes</h2>
-    <p class="section-sub">Run scripts directly or via the CLI — both point at the same YAML. Adding a new problem = one script + one YAML + one line in <code>dispatch.py</code>.</p>
-
-    <div class="cli-grid">
-      <div class="cli-card">
-        <h3>🚀 Single Run</h3>
-        <p>Point at a YAML — or run the script directly. Both work.</p>
-        <div class="shell">
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/burgers/config.yaml</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/wave/config.yaml</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/helmholtz/config.yaml</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/heat/heat_forward.yaml</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/heat/heat_inverse.yaml</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/ode/config.yaml</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/LDC/config.yaml</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/airfoil/config.yaml</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/pipe_flow/pipe_flow.yaml</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/transfer/burgers_transfer.yaml</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/pipe_flow/pipe_flow_unsteady_transfer.yaml</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/inverse/config.yaml</span></div>
-        </div>
-      </div>
-      <div class="cli-card">
-        <h3>🔁 Hyperparameter Sweep</h3>
-        <p>Cartesian product across any config keys.</p>
-        <div class="shell">
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN sweep \</span></div>
-          <div><span class="cmd">&nbsp;&nbsp;examples/burgers/burgers_nu_sweep.yaml</span></div>
-          <div class="cmt">&nbsp;</div>
-          <div class="cmt"># sweep YAML anatomy:</div>
-          <div class="cmt"># base: { problem: burgers, ... }</div>
-          <div class="cmt"># sweep:</div>
-          <div class="cmt">#   physics.nu: [0.1, 0.05, 0.01]</div>
-          <div class="cmt">#   training.epochs: [3000, 5000]</div>
-        </div>
-      </div>
-      <div class="cli-card">
-        <h3>🔍 Inspect &amp; List</h3>
-        <p>Print the resolved config or list all runners.</p>
-        <div class="shell">
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN show examples/wave/config.yaml</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN list</span></div>
-          <div class="cmt">&nbsp;</div>
-          <div class="cmt">Registered problem runners:</div>
-          <div class="cmt">&nbsp;&nbsp;burgers</div>
-          <div class="cmt">&nbsp;&nbsp;wave</div>
-          <div class="cmt">&nbsp;&nbsp;helmholtz</div>
-          <div class="cmt">&nbsp;&nbsp;heat_forward</div>
-          <div class="cmt">&nbsp;&nbsp;pipe_flow</div>
-          <div class="cmt">&nbsp;&nbsp;ode</div>
-          <div class="cmt">&nbsp;&nbsp;ldc</div>
-          <div class="cmt">&nbsp;&nbsp;airfoil</div>
-          <div class="cmt">&nbsp;&nbsp;heat_inverse</div>
-          <div class="cmt">&nbsp;&nbsp;inverse_diffusion</div>
-          <div class="cmt">&nbsp;&nbsp;burgers_transfer</div>
-          <div class="cmt">&nbsp;&nbsp;pipe_flow_unsteady_transfer</div>
-        </div>
-      </div>
-      <div class="cli-card">
-        <h3>📊 Benchmark</h3>
-        <p>Accuracy vs. epoch budget across all problems.</p>
-        <div class="shell">
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN bench</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN bench \</span></div>
-          <div><span class="cmd">&nbsp;&nbsp;--problems burgers wave ode_exp \</span></div>
-          <div><span class="cmd">&nbsp;&nbsp;--epochs 500 2000 5000 \</span></div>
-          <div><span class="cmd">&nbsp;&nbsp;--output outputs/bench</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN bench --all</span></div>
-          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN bench --list-problems</span></div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ─── Performance ───────────────────────────────────────────────────────── -->
-<section id="performance" class="perf-section">
-  <div class="container">
-    <div class="section-tag">Performance</div>
-    <h2 class="section-title">Engineered for GPU throughput</h2>
-    <p class="section-sub">Two orthogonal optimisations stack cleanly: scan-based XLA fusion and RAR-D adaptive resampling.</p>
-
-    <div class="perf-grid">
-      <div class="perf-card">
-        <div class="big">500×</div>
-        <div class="desc">Less Python dispatch overhead on GPU with <code>n_scan_steps=500</code></div>
-      </div>
-      <div class="perf-card">
-        <div class="big">|r|^k</div>
-        <div class="desc">RAR-D resampling probability proportional to residual magnitude</div>
-      </div>
-      <div class="perf-card">
-        <div class="big">float32</div>
-        <div class="desc">All arrays cast to float32 at ingestion — optimal on most GPUs</div>
-      </div>
-      <div class="perf-card">
-        <div class="big">XLA</div>
-        <div class="desc">Full JAX JIT compilation — CPU, single GPU, multi-GPU with zero code changes</div>
-      </div>
-    </div>
-
-    <table class="scan-table">
-      <thead>
-        <tr><th>n_scan_steps</th><th>Python calls / 5 000 epochs</th><th>Callback granularity</th><th>Use case</th></tr>
-      </thead>
-      <tbody>
-        <tr><td><strong>1</strong> (default)</td><td>5 000</td><td>every epoch</td><td>Development / debugging</td></tr>
-        <tr><td><strong>100</strong></td><td>50</td><td>every 100 epochs</td><td>GPU training, medium runs</td></tr>
-        <tr><td><strong>500</strong></td><td>10</td><td>every 500 epochs</td><td>Long GPU runs, production</td></tr>
-      </tbody>
-    </table>
-  </div>
-</section>
-
-<!-- ─── Benchmark ─────────────────────────────────────────────────────────── -->
-<section id="benchmark" class="bench-section">
-  <div class="container">
-    <div class="section-tag">Benchmark Suite</div>
-    <h2 class="section-title">Systematic accuracy-vs-epoch analysis</h2>
-    <p class="section-sub">One command trains every registered problem across multiple epoch budgets and produces a complete analysis package.</p>
-
-    <div class="code-header">
-      <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
-      Programmatic usage
-    </div>
-<pre><span class="kw">from</span> <span class="nm">underPINN.benchmark_utils</span> <span class="kw">import</span> <span class="cls">BenchmarkRunner</span>, <span class="fn">generate_report</span>
-
-runner = <span class="cls">BenchmarkRunner</span>(
-    problems=[<span class="st">"burgers"</span>, <span class="st">"wave"</span>, <span class="st">"ode_exp"</span>, <span class="st">"helmholtz"</span>],
-    epoch_budgets=[<span class="nu">500</span>, <span class="nu">1000</span>, <span class="nu">2000</span>, <span class="nu">5000</span>],
-    seed=<span class="nu">0</span>, fast_only=<span class="nm">True</span>, verbose=<span class="nm">True</span>,
-)
-results = runner.<span class="fn">run</span>(out_dir=<span class="st">"outputs/bench"</span>)
-runner.<span class="fn">save_json</span>(<span class="st">"outputs/bench/results.json"</span>)
-<span class="fn">generate_report</span>(results, runner, out_dir=<span class="st">"outputs/bench"</span>)</pre>
-
-    <div class="bench-outputs">
-      <div class="bench-file"><div class="bench-file-icon">📈</div><div><strong>accuracy_vs_epochs.png</strong><span>Log-log rel-L² vs epoch budget, one curve per problem</span></div></div>
-      <div class="bench-file"><div class="bench-file-icon">📊</div><div><strong>accuracy_summary_bar.png</strong><span>Grouped bar chart at each epoch budget</span></div></div>
-      <div class="bench-file"><div class="bench-file-icon">⏱️</div><div><strong>wall_time_vs_epochs.png</strong><span>Training time vs epoch budget</span></div></div>
-      <div class="bench-file"><div class="bench-file-icon">🔁</div><div><strong>loss_grid.png</strong><span>Convergence curves for every problem</span></div></div>
-      <div class="bench-file"><div class="bench-file-icon">📄</div><div><strong>benchmark_results.csv</strong><span>Full raw data table — importable into pandas</span></div></div>
-      <div class="bench-file"><div class="bench-file-icon">📝</div><div><strong>benchmark_summary.md</strong><span>Markdown table, one row per problem at max epochs</span></div></div>
-      <div class="bench-file"><div class="bench-file-icon">🔂</div><div><strong>results.json</strong><span>Reusable for <code>--from-json</code> replays</span></div></div>
-      <div class="bench-file"><div class="bench-file-icon">🗜️</div><div><strong>loss_hists.npz</strong><span>Per-problem loss histories as NumPy arrays</span></div></div>
     </div>
   </div>
 </section>
@@ -794,22 +673,88 @@ runner.<span class="fn">save_json</span>(<span class="st">"outputs/bench/results
   <div class="container">
     <div class="section-tag">Quick Start</div>
     <h2 class="section-title">Up and running in 5 minutes</h2>
-    <p class="section-sub">Five patterns — pick the one that fits your use case.</p>
+    <p class="section-sub">Six patterns — pick the one that fits your use case. All examples set <code>XLA_PYTHON_CLIENT_PREALLOCATE=false</code> automatically.</p>
 
     <div class="qs-tabs">
-      <button class="tab-btn active" onclick="showTab('yaml')">YAML Config</button>
+      <button class="tab-btn active" onclick="showTab('cli')">CLI (zero Python)</button>
       <button class="tab-btn" onclick="showTab('api')">Python API</button>
+      <button class="tab-btn" onclick="showTab('yaml')">YAML Config</button>
       <button class="tab-btn" onclick="showTab('checkpoint')">Checkpoint &amp; Inference</button>
       <button class="tab-btn" onclick="showTab('transfer')">Transfer Learning</button>
       <button class="tab-btn" onclick="showTab('scan')">GPU Acceleration</button>
     </div>
 
-    <div id="tab-yaml" class="tab-content active">
+    <div id="tab-cli" class="tab-content active">
+      <div class="code-header">
+        <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
+        Terminal — CLI (zero Python)
+      </div>
+<pre><span class="cm"># Single run — point at any registered YAML config</span>
+python -m underPINN run  examples/burgers/config.yaml
+python -m underPINN run  examples/wave/config.yaml
+python -m underPINN run  examples/pipe_flow/pipe_flow.yaml
+python -m underPINN run  examples/ramp/config.yaml
+
+<span class="cm"># Hyperparameter sweep (Cartesian product)</span>
+python -m underPINN sweep examples/burgers/burgers_nu_sweep.yaml
+
+<span class="cm"># Benchmark all problems</span>
+python -m underPINN bench
+
+<span class="cm"># List all registered runners</span>
+python -m underPINN list
+
+<span class="cm"># Print resolved config without training</span>
+python -m underPINN show examples/wave/config.yaml
+
+<span class="cm"># Print framework version</span>
+python -m underPINN version</pre>
+    </div>
+
+    <div id="tab-api" class="tab-content">
+      <div class="code-header">
+        <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
+        Python API — Burgers PINN with restart
+      </div>
+<pre><span class="kw">import</span> os
+os.environ.<span class="fn">setdefault</span>(<span class="st">"XLA_PYTHON_CLIENT_PREALLOCATE"</span>, <span class="st">"false"</span>)
+<span class="kw">import</span> jax, optax
+<span class="kw">from</span> <span class="nm">underPINN.nn.mlp</span>                  <span class="kw">import</span> <span class="cls">MLP</span>
+<span class="kw">from</span> <span class="nm">underPINN.pde.burgers</span>              <span class="kw">import</span> <span class="cls">BurgersPDE</span>
+<span class="kw">from</span> <span class="nm">underPINN.losses.loss</span>               <span class="kw">import</span> <span class="cls">PINNLoss</span>
+<span class="kw">from</span> <span class="nm">underPINN.solver.fbpinn</span>             <span class="kw">import</span> <span class="cls">FBPINNSolver</span>
+<span class="kw">from</span> <span class="nm">underPINN.core.config</span>              <span class="kw">import</span> <span class="cls">TrainingConfig</span>
+<span class="kw">from</span> <span class="nm">underPINN.callbacks.logging</span>         <span class="kw">import</span> <span class="cls">ConsoleLogger</span>
+<span class="kw">from</span> <span class="nm">underPINN.callbacks.early_stopping</span>  <span class="kw">import</span> <span class="cls">EarlyStopping</span>
+
+model  = <span class="cls">MLP</span>(layers=[<span class="nu">2</span>, <span class="nu">64</span>, <span class="nu">64</span>, <span class="nu">64</span>, <span class="nu">1</span>])
+pde    = <span class="cls">BurgersPDE</span>(model, nu=<span class="nu">0.01</span>)
+loss   = <span class="cls">PINNLoss</span>(model, pde, ic_weight=<span class="nu">100.0</span>, bc_weight=<span class="nu">10.0</span>, rba=<span class="nm">True</span>)
+solver = <span class="cls">FBPINNSolver</span>(model, pde, loss=loss)
+solver.<span class="fn">init</span>(jax.random.<span class="fn">PRNGKey</span>(<span class="nu">0</span>))
+
+config = <span class="cls">TrainingConfig</span>(
+    epochs             = <span class="nu">5000</span>,
+    lr                 = <span class="nu">1e-3</span>,
+    lr_schedule        = optax.<span class="fn">cosine_decay_schedule</span>(<span class="nu">1e-3</span>, <span class="nu">5000</span>, alpha=<span class="nu">1e-2</span>),
+    batch_r            = <span class="nu">2048</span>,
+    log_every          = <span class="nu">500</span>,
+    out_dir            = <span class="st">"outputs/burgers"</span>,   <span class="cm"># enables auto-restart</span>
+    save_restart_every = <span class="nu">500</span>,
+    callbacks = [
+        <span class="cls">ConsoleLogger</span>(log_every=<span class="nu">500</span>),
+        <span class="cls">EarlyStopping</span>(patience=<span class="nu">400</span>),
+    ],
+)
+solver.<span class="fn">train</span>(*data, config=config)</pre>
+    </div>
+
+    <div id="tab-yaml" class="tab-content">
       <div class="code-header">
         <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
         examples/burgers/config.yaml
       </div>
-<pre><span class="nm">problem</span>: burgers
+<pre><span class="nm">problem</span>: burgers       <span class="cm"># selects the runner</span>
 
 <span class="nm">network</span>:
   <span class="nm">type</span>  : mlp
@@ -825,9 +770,10 @@ runner.<span class="fn">save_json</span>(<span class="st">"outputs/bench/results
   <span class="nm">n_bc</span>: <span class="nu">200</span>
 
 <span class="nm">training</span>:
-  <span class="nm">epochs</span>: <span class="nu">5000</span>
-  <span class="nm">lr</span>    : <span class="nu">1.0e-3</span>
-  <span class="nm">early_stopping_patience</span>: <span class="nu">400</span>
+  <span class="nm">epochs</span>                  : <span class="nu">5000</span>
+  <span class="nm">lr</span>                      : <span class="nu">1.0e-3</span>
+  <span class="nm">early_stopping_patience</span> : <span class="nu">400</span>
+  <span class="nm">save_restart_every</span>      : <span class="nu">500</span>  <span class="cm"># snapshot every 500 epochs</span>
 
 <span class="nm">loss</span>:
   <span class="nm">ic_weight</span>: <span class="nu">100.0</span>
@@ -836,135 +782,50 @@ runner.<span class="fn">save_json</span>(<span class="st">"outputs/bench/results
 
 <span class="nm">output</span>:
   <span class="nm">dir</span>        : outputs/burgers
-  <span class="nm">save_params</span>: <span class="nm">true</span>   <span class="cm"># writes params.msgpack + params_meta.json</span></pre>
+  <span class="nm">save_params</span>: <span class="nm">true</span></pre>
       <div style="height:1rem"></div>
       <div class="shell">
         <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/burgers/config.yaml</span></div>
       </div>
     </div>
 
-    <div id="tab-api" class="tab-content">
-      <div class="code-header">
-        <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
-        Python API — Burgers PINN
-      </div>
-<pre><span class="kw">import</span> jax, optax
-<span class="kw">from</span> <span class="nm">underPINN.nn.mlp</span>       <span class="kw">import</span> <span class="cls">MLP</span>
-<span class="kw">from</span> <span class="nm">underPINN.pde.burgers</span>   <span class="kw">import</span> <span class="cls">BurgersPDE</span>
-<span class="kw">from</span> <span class="nm">underPINN.losses.loss</span>    <span class="kw">import</span> <span class="cls">PINNLoss</span>
-<span class="kw">from</span> <span class="nm">underPINN.solver.fbpinn</span>  <span class="kw">import</span> <span class="cls">FBPINNSolver</span>
-<span class="kw">from</span> <span class="nm">underPINN.core.config</span>   <span class="kw">import</span> <span class="cls">TrainingConfig</span>
-<span class="kw">from</span> <span class="nm">underPINN.callbacks.logging</span>       <span class="kw">import</span> <span class="cls">ConsoleLogger</span>
-<span class="kw">from</span> <span class="nm">underPINN.callbacks.early_stopping</span> <span class="kw">import</span> <span class="cls">EarlyStopping</span>
-<span class="kw">from</span> <span class="nm">underPINN.utils.seed</span>    <span class="kw">import</span> <span class="fn">set_seed</span>
-
-key = <span class="fn">set_seed</span>(<span class="nu">0</span>)   <span class="cm"># seeds Python, NumPy and returns JAX PRNGKey</span>
-
-model  = <span class="cls">MLP</span>(layers=[<span class="nu">2</span>, <span class="nu">64</span>, <span class="nu">64</span>, <span class="nu">64</span>, <span class="nu">1</span>])
-pde    = <span class="cls">BurgersPDE</span>(model, nu=<span class="nu">0.01</span>)
-loss   = <span class="cls">PINNLoss</span>(model, pde, ic_weight=<span class="nu">100.0</span>, bc_weight=<span class="nu">10.0</span>, rba=<span class="nm">True</span>)
-solver = <span class="cls">FBPINNSolver</span>(model, pde, loss=loss)
-solver.<span class="fn">init</span>(key)
-
-config = <span class="cls">TrainingConfig</span>(
-    epochs      = <span class="nu">5000</span>,
-    lr          = <span class="nu">1e-3</span>,
-    lr_schedule = optax.<span class="fn">cosine_decay_schedule</span>(<span class="nu">1e-3</span>, <span class="nu">5000</span>, alpha=<span class="nu">1e-2</span>),
-    batch_r     = <span class="nu">2048</span>,
-    log_every   = <span class="nu">500</span>,
-    callbacks   = [<span class="cls">ConsoleLogger</span>(log_every=<span class="nu">500</span>), <span class="cls">EarlyStopping</span>(patience=<span class="nu">400</span>)],
-)
-solver.<span class="fn">train</span>(*data, config=config)
-</pre>
-    </div>
-
     <div id="tab-checkpoint" class="tab-content">
       <div class="code-header">
         <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
-        Model Checkpoint — save during training
-      </div>
-<pre><span class="kw">from</span> <span class="nm">underPINN.callbacks.checkpoint</span> <span class="kw">import</span> <span class="cls">ModelCheckpoint</span>
-<span class="kw">from</span> <span class="nm">underPINN.callbacks.logging</span>    <span class="kw">import</span> <span class="cls">ConsoleLogger</span>
-<span class="kw">from</span> <span class="nm">underPINN.callbacks.early_stopping</span> <span class="kw">import</span> <span class="cls">EarlyStopping</span>
-<span class="kw">from</span> <span class="nm">underPINN.core.config</span>          <span class="kw">import</span> <span class="cls">TrainingConfig</span>
-
-<span class="cm"># Save best model automatically during training</span>
-config = <span class="cls">TrainingConfig</span>(
-    epochs=<span class="nu">5000</span>,
-    lr=<span class="nu">1e-3</span>,
-    callbacks=[
-        <span class="cls">ConsoleLogger</span>(log_every=<span class="nu">500</span>),
-        <span class="cls">EarlyStopping</span>(patience=<span class="nu">400</span>),
-        <span class="cls">ModelCheckpoint</span>(
-            out_dir=<span class="st">"outputs/burgers/"</span>,
-            monitor=<span class="st">"loss"</span>,       <span class="cm"># metric to watch</span>
-            mode=<span class="st">"min"</span>,           <span class="cm"># save when loss decreases</span>
-            save_best_only=<span class="nm">True</span>,  <span class="cm"># skip non-improving epochs</span>
-            metadata={
-                <span class="st">"problem"</span>: <span class="st">"burgers"</span>,
-                <span class="st">"network"</span>: {<span class="st">"type"</span>: <span class="st">"mlp"</span>, <span class="st">"layers"</span>: [<span class="nu">2</span>, <span class="nu">64</span>, <span class="nu">64</span>, <span class="nu">64</span>, <span class="nu">1</span>]},
-            },
-        ),
-    ],
-)
-solver.<span class="fn">train</span>(*data, config=config)
-<span class="cm"># writes: outputs/burgers/params.msgpack  (best)</span>
-<span class="cm">#         outputs/burgers/params_meta.json</span>
-<span class="cm">#         outputs/burgers/params_final.msgpack  (end of training)</span>
-</pre>
-      <div style="height:.75rem"></div>
-      <div class="code-header">
-        <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
-        Model Inference — load and predict
+        Checkpoint &amp; Inference
       </div>
 <pre><span class="kw">from</span> <span class="nm">underPINN.utils.checkpoint</span> <span class="kw">import</span> <span class="cls">ModelPredictor</span>
-<span class="kw">import</span> jax.numpy <span class="kw">as</span> jnp, numpy <span class="kw">as</span> np
+<span class="kw">import</span> jax.numpy <span class="kw">as</span> jnp
 
-<span class="cm"># ── Option A: auto-rebuild model from saved metadata ─────</span>
+<span class="cm"># Option A — auto-rebuild model from saved metadata (zero boilerplate)</span>
 predictor = <span class="cls">ModelPredictor</span>.<span class="fn">from_meta</span>(<span class="st">"outputs/burgers/"</span>)
 
-<span class="cm"># ── Option B: supply model explicitly ─────────────────────</span>
+<span class="cm"># Option B — supply model explicitly</span>
 <span class="kw">from</span> <span class="nm">underPINN.nn.mlp</span> <span class="kw">import</span> <span class="cls">MLP</span>
 predictor = <span class="cls">ModelPredictor</span>.<span class="fn">from_checkpoint</span>(
     <span class="cls">MLP</span>(layers=[<span class="nu">2</span>, <span class="nu">64</span>, <span class="nu">64</span>, <span class="nu">64</span>, <span class="nu">1</span>]),
     <span class="st">"outputs/burgers/"</span>,
 )
 
-<span class="cm"># ── Inference ─────────────────────────────────────────────</span>
-x_test = jnp.<span class="fn">linspace</span>(-<span class="nu">1</span>, <span class="nu">1</span>, <span class="nu">256</span>)
-t_test = jnp.<span class="fn">full_like</span>(x_test, <span class="nu">0.5</span>)
-inputs = jnp.<span class="fn">stack</span>([x_test, t_test], axis=<span class="nu">1</span>)
-
-u = predictor.<span class="fn">predict</span>(inputs)            <span class="cm"># JAX array</span>
-u_np = predictor.<span class="fn">predict_numpy</span>(inputs)   <span class="cm"># NumPy array</span>
-u_np = <span class="fn">np.array</span>(predictor(inputs))       <span class="cm"># callable syntax</span>
-</pre>
+<span class="cm"># Inference</span>
+x_test = jnp.<span class="fn">linspace</span>(-<span class="nu">1.0</span>, <span class="nu">1.0</span>, <span class="nu">500</span>)
+t_test = jnp.<span class="fn">full</span>(<span class="nu">500</span>, <span class="nu">0.8</span>)
+u = predictor.<span class="fn">predict</span>(jnp.<span class="fn">stack</span>([x_test, t_test], axis=<span class="nu">1</span>))</pre>
     </div>
 
     <div id="tab-transfer" class="tab-content">
       <div class="code-header">
         <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
-        Transfer Learning — warm-start from source model
+        Transfer Learning
       </div>
-<pre><span class="cm"># ── Phase 1: train on source domain ──────────────────────</span>
-config_src = <span class="cls">TrainingConfig</span>(
-    epochs=<span class="nu">2500</span>, lr=<span class="nu">1e-3</span>,
-    callbacks=[<span class="cls">ConsoleLogger</span>(), <span class="cls">EarlyStopping</span>(patience=<span class="nu">300</span>)],
-)
-solver_src.<span class="fn">init</span>(jax.<span class="fn">random.PRNGKey</span>(<span class="nu">0</span>))
-solver_src.<span class="fn">train</span>(*data_src, config=config_src)
+<pre><span class="cm"># Phase 1: train source model (e.g. Burgers nu=0.1)</span>
+solver_src.<span class="fn">train</span>(*data_src, config=cfg_src)
+solver_src.<span class="fn">save_checkpoint</span>(<span class="st">"outputs/source/"</span>)
 
-<span class="cm"># ── Phase 2: fine-tune on target domain ──────────────────</span>
-config_tgt = <span class="cls">TrainingConfig</span>(
-    epochs=<span class="nu">2000</span>,
-    lr=<span class="nu">3e-4</span>,  <span class="cm"># lower LR for fine-tuning</span>
-    callbacks=[<span class="cls">ConsoleLogger</span>(), <span class="cls">EarlyStopping</span>(patience=<span class="nu">200</span>)],
-)
-solver_tgt.<span class="fn">load_params</span>(solver_src.params)  <span class="cm"># warm start</span>
-solver_tgt.<span class="fn">train</span>(*data_tgt, config=config_tgt)
-
-<span class="cm"># Transfer converges 2–3× faster than training from scratch</span>
-</pre>
+<span class="cm"># Phase 2: warm-start target from source weights (e.g. nu=0.01)</span>
+solver_tgt.<span class="fn">load_params</span>(solver_src.params)       <span class="cm"># or restore_checkpoint(...)</span>
+solver_tgt.<span class="fn">train</span>(*data_tgt, config=cfg_tgt)     <span class="cm"># lower lr recommended (3e-4)</span>
+<span class="cm"># Converges 2-3x faster than training from scratch</span></pre>
     </div>
 
     <div id="tab-scan" class="tab-content">
@@ -974,98 +835,569 @@ solver_tgt.<span class="fn">train</span>(*data_tgt, config=config_tgt)
       </div>
 <pre><span class="cm"># Fuse 100 gradient steps per XLA kernel + adaptive resampling</span>
 config = <span class="cls">TrainingConfig</span>(
-    epochs=<span class="nu">5000</span>,
-    lr=<span class="nu">1e-3</span>,
-    n_scan_steps=<span class="nu">100</span>,      <span class="cm"># 50 Python calls instead of 5000</span>
-    resample_period=<span class="nu">5</span>,     <span class="cm"># RAR-D every 5 outer steps (=500 epochs)</span>
-    resample_k=<span class="nu">1.0</span>,        <span class="cm"># probability ∝ |residual|^1</span>
-    callbacks=[<span class="cls">ConsoleLogger</span>(log_every=<span class="nu">500</span>)],
+    epochs          = <span class="nu">5000</span>,
+    lr              = <span class="nu">1e-3</span>,
+    n_scan_steps    = <span class="nu">100</span>,   <span class="cm"># 50 Python calls instead of 5000</span>
+    resample_period = <span class="nu">5</span>,     <span class="cm"># RAR-D every 5 outer steps (= 500 epochs)</span>
+    resample_k      = <span class="nu">1.0</span>,   <span class="cm"># probability proportional to |residual|^1</span>
+    callbacks       = [<span class="cls">ConsoleLogger</span>(log_every=<span class="nu">500</span>)],
 )
-solver.<span class="fn">train</span>(*data, config=config)
-
-<span class="cm"># Optional: supply a domain sampler for better RAR-D candidates</span>
-<span class="kw">from</span> <span class="nm">underPINN.training.resample</span> <span class="kw">import</span> <span class="fn">rar_d_resample</span>
-
-x_r, t_r = <span class="fn">rar_d_resample</span>(
-    pde, params, x_r, t_r,
-    k=<span class="nu">1.0</span>, n_candidates=<span class="nu">30_000</span>,
-    candidate_sampler=<span class="kw">lambda</span> n, key: my_geometry.<span class="fn">sample</span>(n, key),
-    key=jax.<span class="fn">random.PRNGKey</span>(<span class="nu">42</span>),
-)
-</pre>
+solver.<span class="fn">train</span>(*data, config=config)</pre>
     </div>
   </div>
 </section>
 
-<!-- ─── Install ───────────────────────────────────────────────────────────── -->
-<section id="install" class="install-section">
+<!-- ─── Training System ────────────────────────────────────────────────────── -->
+<section id="training" class="arch-section">
   <div class="container">
-    <div class="section-tag">Installation</div>
-    <h2 class="section-title">Get underPINN running</h2>
-    <p class="section-sub">Pure Python — install in editable mode from the repo root so all examples and the CLI resolve imports automatically.</p>
+    <div class="section-tag">Training System</div>
+    <h2 class="section-title">TrainingConfig — full field reference</h2>
+    <p class="section-sub">A single dataclass centralises all hyperparameters. Pass it to any solver's <code>train()</code> method.</p>
 
-    <div class="install-grid">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Field</th><th>Type</th><th>Default</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>epochs</code></td><td>int</td><td>1000</td><td>Total training epochs</td></tr>
+          <tr><td><code>lr</code></td><td>float</td><td>1e-3</td><td>Base learning rate</td></tr>
+          <tr><td><code>lr_schedule</code></td><td>optax schedule</td><td>None</td><td>Overrides <code>lr</code> when set; use <code>optax.cosine_decay_schedule</code></td></tr>
+          <tr><td><code>batch_r</code></td><td>int</td><td>4096</td><td>Collocation mini-batch size</td></tr>
+          <tr><td><code>batch_i</code></td><td>int</td><td>512</td><td>Initial-condition mini-batch size</td></tr>
+          <tr><td><code>batch_b</code></td><td>int</td><td>512</td><td>Boundary-condition mini-batch size</td></tr>
+          <tr><td><code>log_every</code></td><td>int</td><td>100</td><td>Print interval (used by ConsoleLogger)</td></tr>
+          <tr><td><code>seed</code></td><td>int</td><td>0</td><td>PRNG seed</td></tr>
+          <tr><td><code>callbacks</code></td><td>list</td><td>[]</td><td>List of Callback objects</td></tr>
+          <tr><td><code>n_scan_steps</code></td><td>int</td><td>1</td><td>Fuse N steps into one XLA kernel (1 = Python loop)</td></tr>
+          <tr><td><code>resample_period</code></td><td>int</td><td>0</td><td>RAR-D resampling every N outer steps (0 = off)</td></tr>
+          <tr><td><code>resample_candidates</code></td><td>int</td><td>0</td><td>Candidate pool size (0 &rarr; 5 &times; batch_r)</td></tr>
+          <tr><td><code>resample_k</code></td><td>float</td><td>1.0</td><td>Exponent in p &prop; |residual|^k</td></tr>
+          <tr><td><code>out_dir</code></td><td>str</td><td>""</td><td>Output directory; enables auto-restart when non-empty</td></tr>
+          <tr><td><code>save_restart_every</code></td><td>int</td><td>500</td><td>Snapshot interval in epochs (0 = off)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <hr class="divider">
+    <h3 style="margin-bottom:1rem">Callbacks</h3>
+    <div class="arch-grid">
       <div>
-        <h3 style="color:var(--accent2);margin-bottom:1rem">CPU (development)</h3>
         <div class="code-header">
           <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
-          Terminal
+          ConsoleLogger + EarlyStopping
         </div>
-<pre><span class="cm"># Clone the repo</span>
-git clone https://github.com/Prashantiitk23/PINN
-<span class="kw">cd</span> PINN
+<pre><span class="kw">from</span> <span class="nm">underPINN.callbacks.logging</span>        <span class="kw">import</span> <span class="cls">ConsoleLogger</span>
+<span class="kw">from</span> <span class="nm">underPINN.callbacks.early_stopping</span> <span class="kw">import</span> <span class="cls">EarlyStopping</span>
 
-<span class="cm"># Install in editable mode (adds underPINN to sys.path)</span>
-pip install -e .
+<span class="cm"># Prints loss every 500 epochs</span>
+<span class="cls">ConsoleLogger</span>(log_every=<span class="nu">500</span>)
 
-<span class="cm"># Verify</span>
-python -m underPINN list</pre>
+<span class="cm"># Halt after 400 epochs without improvement</span>
+<span class="cls">EarlyStopping</span>(
+    patience  = <span class="nu">400</span>,
+    monitor   = <span class="st">"loss"</span>,
+    min_delta = <span class="nu">1e-8</span>,
+)</pre>
       </div>
       <div>
-        <h3 style="color:var(--accent5);margin-bottom:1rem">GPU (CUDA 12)</h3>
         <div class="code-header">
           <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
-          Terminal
+          ModelCheckpoint
         </div>
-<pre><span class="cm"># Upgrade JAX with CUDA 12 support</span>
-pip install -U <span class="st">"jax[cuda12]"</span>
+<pre><span class="kw">from</span> <span class="nm">underPINN.callbacks.checkpoint</span> <span class="kw">import</span> <span class="cls">ModelCheckpoint</span>
 
-<span class="cm"># Install the framework</span>
-pip install -e .
-
-<span class="cm"># Confirm GPU is visible</span>
-python -c <span class="st">"import jax; print(jax.devices())"</span>
-<span class="cm"># [CudaDevice(id=0), ...]</span></pre>
+<span class="cls">ModelCheckpoint</span>(
+    out_dir       = <span class="st">"outputs/burgers/"</span>,
+    monitor       = <span class="st">"loss"</span>,
+    mode          = <span class="st">"min"</span>,
+    save_best_only= <span class="nm">True</span>,
+    metadata      = {
+        <span class="st">"problem"</span>: <span class="st">"burgers"</span>,
+        <span class="st">"network"</span>: {
+            <span class="st">"type"</span>  : <span class="st">"mlp"</span>,
+            <span class="st">"layers"</span>: [<span class="nu">2</span>, <span class="nu">64</span>, <span class="nu">64</span>, <span class="nu">64</span>, <span class="nu">1</span>],
+        },
+    },
+)</pre>
       </div>
     </div>
 
     <hr class="divider">
+    <h3 style="margin-bottom:.75rem">lax.scan acceleration — n_scan_steps</h3>
+    <table class="scan-table">
+      <thead>
+        <tr><th>n_scan_steps</th><th>Python calls / 5 000 epochs</th><th>Callback granularity</th><th>Use case</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>1</strong> (default)</td><td>5 000</td><td>every epoch</td><td>Development / debugging</td></tr>
+        <tr><td><strong>100</strong></td><td>50</td><td>every 100 epochs</td><td>GPU training, medium runs</td></tr>
+        <tr><td><strong>500</strong></td><td>10</td><td>every 500 epochs</td><td>Long GPU runs, production</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
 
-    <h3 style="margin-bottom:1rem">Requirements</h3>
-    <div class="feature-grid" style="gap:.75rem">
-      <div class="feature-card" style="padding:1rem">
-        <strong style="color:var(--accent)">jax[cpu] ≥ 0.4.26</strong>
-        <p style="margin-top:.2rem">JIT compilation, autodiff, PRNG</p>
+<!-- ─── Restart System ─────────────────────────────────────────────────────── -->
+<section id="restart">
+  <div class="container">
+    <div class="section-tag">Restart / Resume System</div>
+    <h2 class="section-title">Fault-tolerant training — resume from any interruption</h2>
+    <p class="section-sub">Set <code>save_restart_every: 500</code> in your YAML (or <code>TrainingConfig</code>) and interrupted runs automatically resume from the last snapshot. No code changes needed — it just works.</p>
+
+    <div class="box-info">
+      <strong>Config-hash safety</strong>
+      <p>The MD5 of the JSON-serialised YAML is stored in <code>meta.json</code>. If you change <em>any</em> field — <code>lr</code>, <code>epochs</code>, <code>layers</code>, physics constants — the hash differs and a clean run starts. It is safe to leave <code>save_restart_every</code> on permanently.</p>
+    </div>
+
+    <ol class="restart-steps">
+      <li class="restart-step">
+        <h4>Snapshot written every N epochs</h4>
+        <p>Every <code>save_restart_every</code> epochs, RestartManager writes <code>params.msgpack</code>, <code>opt_state.msgpack</code>, <code>hists.npz</code>, and <code>meta.json</code> to <code>&lt;out_dir&gt;/restart/</code>.</p>
+      </li>
+      <li class="restart-step">
+        <h4>Re-run detects and verifies the snapshot</h4>
+        <p>On re-run with the same config file, RestartManager detects the snapshot directory, verifies the config MD5 hash, and resumes training from the saved epoch. Loss histories are stitched together so plots are continuous.</p>
+      </li>
+      <li class="restart-step">
+        <h4>Config change triggers fresh start</h4>
+        <p>If the YAML config changed between runs (any field), the stored hash differs from the current hash. The snapshot is silently ignored and a fresh run starts.</p>
+      </li>
+      <li class="restart-step">
+        <h4>Completion marks the snapshot as done</h4>
+        <p>After training finishes — normally or via early stopping — <code>done()</code> writes <code>"done": true</code> to <code>meta.json</code>. The next run with the same config starts fresh rather than re-resuming a completed run.</p>
+      </li>
+    </ol>
+
+    <h3 style="margin:2rem 0 1rem">Snapshot directory contents</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>File</th><th>Contents</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>params.msgpack</code></td><td>Flax-serialised model parameters at the snapshot epoch</td></tr>
+          <tr><td><code>opt_state.msgpack</code></td><td>Flax-serialised optimizer state (Adam moments, step count)</td></tr>
+          <tr><td><code>hists.npz</code></td><td>All loss history arrays accumulated so far (<code>loss_hist</code>, <code>pde_hist</code>, etc.)</td></tr>
+          <tr><td><code>meta.json</code></td><td><code>{"epoch": N, "cfg_hash": "...", "done": false}</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 style="margin:2rem 0 1rem">Configuration</h3>
+    <div class="arch-grid">
+      <div>
+        <div class="code-header">
+          <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
+          YAML (the only change needed)
+        </div>
+<pre><span class="nm">training</span>:
+  <span class="nm">save_restart_every</span>: <span class="nu">500</span>   <span class="cm"># 0 to disable</span></pre>
       </div>
-      <div class="feature-card" style="padding:1rem">
-        <strong style="color:var(--accent2)">flax ≥ 0.8.0</strong>
-        <p style="margin-top:.2rem">Neural network layers and parameter trees</p>
+      <div>
+        <div class="code-header">
+          <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
+          Python API
+        </div>
+<pre>config = <span class="cls">TrainingConfig</span>(
+    epochs             = <span class="nu">10000</span>,
+    out_dir            = <span class="st">"outputs/burgers"</span>,
+    save_restart_every = <span class="nu">500</span>,
+)
+solver.<span class="fn">train</span>(*data, config=config)
+<span class="cm"># If killed at epoch 3700, next run resumes</span>
+<span class="cm"># from epoch 3500 (last snapshot) automatically.</span></pre>
       </div>
-      <div class="feature-card" style="padding:1rem">
-        <strong style="color:var(--accent4)">optax ≥ 0.2.0</strong>
-        <p style="margin-top:.2rem">Adam, cosine decay, gradient clipping</p>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Examples table ────────────────────────────────────────────────────── -->
+<section id="examples">
+  <div class="container">
+    <div class="section-tag">Physics Examples</div>
+    <h2 class="section-title">16 worked examples across 7 physics domains</h2>
+    <p class="section-sub">Each example folder is self-contained: one script + one YAML config. Run directly (<code>python examples/burgers/burgers.py</code>) or via the CLI. Saves predictions, plots, and a <code>params.msgpack</code> checkpoint automatically.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Problem</th>
+            <th>PDE</th>
+            <th>Network</th>
+            <th>Key Features</th>
+            <th>Config</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Exponential Decay</strong></td>
+            <td>du/dt + &lambda;u = 0</td>
+            <td>MLP [1,32,32,1]</td>
+            <td><span class="tag tag-blue">ODESolver</span><span class="tag tag-green">TrainingConfig</span></td>
+            <td><code>examples/ode/config.yaml</code></td>
+          </tr>
+          <tr>
+            <td><strong>Harmonic Oscillator</strong></td>
+            <td>d&sup2;u/dt&sup2; + &omega;&sup2;u = 0</td>
+            <td>MLP [1,32,32,1]</td>
+            <td><span class="tag tag-blue">ODESolver</span><span class="tag tag-purple">IC derivative</span></td>
+            <td><code>examples/ode/config.yaml</code></td>
+          </tr>
+          <tr>
+            <td><strong>1-D Burgers</strong></td>
+            <td>u_t + uu_x = &nu;u_xx</td>
+            <td>MLP [2,64,64,64,1]</td>
+            <td><span class="tag tag-blue">FBPINN</span><span class="tag tag-orange">RBA</span><span class="tag tag-green">cosine LR</span></td>
+            <td><code>examples/burgers/config.yaml</code></td>
+          </tr>
+          <tr>
+            <td><strong>1-D Heat — Forward</strong></td>
+            <td>u_t = &alpha;u_xx</td>
+            <td>MLP [2,64,64,64,1]</td>
+            <td><span class="tag tag-blue">FBPINNSolver</span><span class="tag tag-green">exact Gaussian</span></td>
+            <td><code>examples/heat/heat_forward.yaml</code></td>
+          </tr>
+          <tr>
+            <td><strong>1-D Heat — Inverse</strong></td>
+            <td>u_t = &alpha;u_xx</td>
+            <td>MLP [2,64,64,64,1]</td>
+            <td><span class="tag tag-red">Recover &alpha;</span><span class="tag tag-purple">50 noisy obs.</span><span class="tag tag-orange">log-param</span></td>
+            <td><code>examples/heat/heat_inverse.yaml</code></td>
+          </tr>
+          <tr>
+            <td><strong>1-D Wave Equation</strong></td>
+            <td>u_tt = c&sup2;u_xx</td>
+            <td>FourierMLP [2,128,128,1]</td>
+            <td><span class="tag tag-purple">FourierMLP</span><span class="tag tag-green">dual IC (u, u_t)</span></td>
+            <td><code>examples/wave/config.yaml</code></td>
+          </tr>
+          <tr>
+            <td><strong>2-D Helmholtz</strong></td>
+            <td>&Delta;u + k&sup2;u = f</td>
+            <td>FourierMLP [2,128,128,1]</td>
+            <td><span class="tag tag-purple">FourierMLP</span><span class="tag tag-orange">k=4</span><span class="tag tag-blue">manufactured source</span></td>
+            <td><code>examples/helmholtz/config.yaml</code></td>
+          </tr>
+          <tr>
+            <td><strong>2-D Diffusion Inverse</strong></td>
+            <td>u_t = &alpha;&nabla;&sup2;u</td>
+            <td>MLP [3,64,64,64,1]</td>
+            <td><span class="tag tag-red">log-param joint opt.</span><span class="tag tag-green">SteadySolver</span></td>
+            <td><code>examples/inverse/config.yaml</code></td>
+          </tr>
+          <tr>
+            <td><strong>2-D Lid-Driven Cavity</strong></td>
+            <td>Steady N-S, Re=100</td>
+            <td>FBPINN + SimpleGate</td>
+            <td><span class="tag tag-blue">LDCSolver</span><span class="tag tag-purple">SimpleGate attention</span></td>
+            <td><code>examples/LDC/config.yaml</code></td>
+          </tr>
+          <tr>
+            <td><strong>2-D RANS k-&epsilon;</strong></td>
+            <td>RANS k-&epsilon;, Re=10000</td>
+            <td>FBPINN</td>
+            <td><span class="tag tag-red">RANSSolver</span><span class="tag tag-orange">RBA</span><span class="tag tag-blue">turbulent channel</span></td>
+            <td><code>examples/K-Epsilon/config.yaml</code></td>
+          </tr>
+          <tr>
+            <td><strong>2-D Compressible Ramp</strong></td>
+            <td>Steady Euler, M=3</td>
+            <td>MLP [2,80,80,80,80,80,4]</td>
+            <td><span class="tag tag-red">oblique shock &theta;=10&deg;</span><span class="tag tag-orange">ramp geometry</span></td>
+            <td><code>examples/ramp/config.yaml</code></td>
+          </tr>
+          <tr>
+            <td><strong>NACA 0012 Airfoil</strong></td>
+            <td>Steady N-S, Re=200</td>
+            <td>MLP [2,128,128,128,3]</td>
+            <td><span class="tag tag-green">exterior geometry</span><span class="tag tag-purple">Cp curve, CL</span></td>
+            <td><code>examples/airfoil/config.yaml</code></td>
+          </tr>
+          <tr>
+            <td><strong>3-D Pipe Flow</strong></td>
+            <td>Steady 3-D N-S</td>
+            <td>MLP [3,64,64,64,64,4]</td>
+            <td><span class="tag tag-red">double-jacfwd Hessian</span><span class="tag tag-orange">Pipe geometry</span></td>
+            <td><code>examples/pipe_flow/pipe_flow.yaml</code></td>
+          </tr>
+          <tr>
+            <td><strong>3-D Unsteady Pipe — Transfer</strong></td>
+            <td>u_t = G + &nu;&nabla;&sup2;u</td>
+            <td>MLP [3,64,64,64,64,1]</td>
+            <td><span class="tag tag-green">Bessel exact</span><span class="tag tag-blue">Re &amp; temporal TL</span></td>
+            <td><code>examples/pipe_flow/pipe_flow_unsteady_transfer.yaml</code></td>
+          </tr>
+          <tr>
+            <td><strong>Burgers Transfer</strong></td>
+            <td>Burgers</td>
+            <td>MLP [2,64,64,64,1]</td>
+            <td><span class="tag tag-blue">param transfer (&nu;)</span><span class="tag tag-purple">temporal transfer</span></td>
+            <td><code>examples/transfer/burgers_transfer.yaml</code></td>
+          </tr>
+          <tr>
+            <td><strong>Heat 2-D Transfer</strong></td>
+            <td>2-D unsteady heat</td>
+            <td>MLP [3,64,64,64,1]</td>
+            <td><span class="tag tag-blue">cross-diffusivity TL</span><span class="tag tag-purple">temporal transfer</span></td>
+            <td><code>examples/transfer/heat2d_transfer.yaml</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ─── API Reference ─────────────────────────────────────────────────────── -->
+<section id="api" class="arch-section">
+  <div class="container">
+    <div class="section-tag">API Reference</div>
+    <h2 class="section-title">Core abstractions &amp; module layout</h2>
+    <p class="section-sub">Three abstract base classes form the backbone. Every PDE, loss, and solver conforms via inheritance — no rewrites required.</p>
+
+    <div class="arch-grid">
+      <div class="arch-panel">
+        <h3>Package Layout</h3>
+        <ul class="layer-list">
+          <li class="layer-item"><span class="layer-dot dot-blue"></span><strong>core/</strong> &mdash; BasePDE, BaseLoss, BaseSolver, TrainingConfig</li>
+          <li class="layer-item"><span class="layer-dot dot-purple"></span><strong>nn/</strong> &mdash; MLP, FourierMLP, FBPINN, HybridAttention, SimpleGate</li>
+          <li class="layer-item"><span class="layer-dot dot-green"></span><strong>pde/</strong> &mdash; Burgers, Wave, Helmholtz, Heat, N-S 2D/3D, k-&epsilon;, Euler, ODE</li>
+          <li class="layer-item"><span class="layer-dot dot-orange"></span><strong>solver/</strong> &mdash; FBPINNSolver, SteadySolver, ODESolver, LDCSolver, RANSSolver</li>
+          <li class="layer-item"><span class="layer-dot dot-red"></span><strong>losses/</strong> &mdash; PINNLoss (RBA), ODELoss, SteadyLoss</li>
+          <li class="layer-item"><span class="layer-dot dot-blue"></span><strong>callbacks/</strong> &mdash; ConsoleLogger, EarlyStopping, ModelCheckpoint</li>
+          <li class="layer-item"><span class="layer-dot dot-green"></span><strong>geometry/</strong> &mdash; Interval, Rectangle, Airfoil, Pipe, Ramp, Composite, ShapelyGeom</li>
+          <li class="layer-item"><span class="layer-dot dot-purple"></span><strong>training/</strong> &mdash; rar_d_resample (RAR-D adaptive collocation)</li>
+          <li class="layer-item"><span class="layer-dot dot-orange"></span><strong>runner/</strong> &mdash; dispatch.py path-registry + importlib loader</li>
+          <li class="layer-item"><span class="layer-dot dot-red"></span><strong>utils/</strong> &mdash; save_predictions, checkpoint, restart, ModelPredictor, metrics</li>
+          <li class="layer-item"><span class="layer-dot dot-blue"></span><strong>benchmark_utils/</strong> &mdash; BenchmarkRunner, evaluators, report</li>
+        </ul>
       </div>
-      <div class="feature-card" style="padding:1rem">
-        <strong style="color:var(--accent5)">numpy, scipy, matplotlib</strong>
-        <p style="margin-top:.2rem">Numerics, exact solutions, plotting</p>
+
+      <div class="arch-panel">
+        <h3>Core Abstractions</h3>
+        <div class="code-header">
+          <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
+          underPINN/core/base.py
+        </div>
+<pre><span class="kw">class</span> <span class="cls">BasePDE</span>(<span class="cls">ABC</span>):
+    <span class="cm"># Every PDE implements residual()</span>
+    <span class="kw">@abstractmethod</span>
+    <span class="kw">def</span> <span class="fn">residual</span>(<span class="nm">self</span>, params, *args): ...
+
+<span class="kw">class</span> <span class="cls">BaseLoss</span>(<span class="cls">ABC</span>):
+    <span class="cm"># Returns (total_loss, aux_tuple)</span>
+    <span class="kw">@abstractmethod</span>
+    <span class="kw">def</span> <span class="fn">__call__</span>(<span class="nm">self</span>, params, *args): ...
+
+<span class="kw">class</span> <span class="cls">BaseSolver</span>(<span class="cls">ABC</span>):
+    <span class="cm"># Concrete helpers on every solver:</span>
+    <span class="kw">def</span> <span class="fn">save_checkpoint</span>(<span class="nm">self</span>, out_dir, ...): ...
+    <span class="kw">def</span> <span class="fn">restore_checkpoint</span>(<span class="nm">self</span>, path): ...
+    <span class="kw">def</span> <span class="fn">load_params</span>(<span class="nm">self</span>, params): ...  <span class="cm"># TL warm-start</span></pre>
+        <div style="height:.75rem"></div>
+        <div class="code-header">
+          <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
+          PDE + Geometry reference
+        </div>
+<pre><span class="cm"># Every PDE:</span>
+<span class="kw">class</span> <span class="cls">BurgersPDE</span>(<span class="cls">BasePDE</span>):
+    <span class="kw">def</span> <span class="fn">residual</span>(<span class="nm">self</span>, params, x, t):
+        <span class="cm"># returns |u_t + u*u_x - nu*u_xx|</span>
+
+<span class="cm"># Every geometry:</span>
+<span class="kw">class</span> <span class="cls">Pipe</span>:
+    <span class="kw">def</span> <span class="fn">sample_interior</span>(<span class="nm">self</span>, n, key): ...
+    <span class="kw">def</span> <span class="fn">sample_wall</span>(<span class="nm">self</span>, n, key): ...
+    <span class="kw">def</span> <span class="fn">sample_inlet</span>(<span class="nm">self</span>, n, key): ...
+    <span class="kw">def</span> <span class="fn">sample_outlet</span>(<span class="nm">self</span>, n, key): ...</pre>
       </div>
-      <div class="feature-card" style="padding:1rem">
-        <strong style="color:var(--accent3)">shapely ≥ 2.0</strong>
-        <p style="margin-top:.2rem">Arbitrary polygon geometry support</p>
+    </div>
+
+    <hr class="divider">
+    <h3 style="margin-bottom:1rem">Adding a new case — one line</h3>
+    <div class="code-header">
+      <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
+      underPINN/runner/dispatch.py
+    </div>
+<pre><span class="cm"># 1. Create examples/mycase/mycase.py  — define run_mycase(cfg) -> dict</span>
+<span class="cm"># 2. Create examples/mycase/config.yaml  — set problem: mycase</span>
+<span class="cm"># 3. Add ONE line here:</span>
+_REGISTRY = {
+    <span class="st">"burgers"</span>  : (<span class="st">"examples/burgers/burgers.py"</span>,  <span class="st">"run_burgers"</span>),
+    <span class="st">"wave"</span>     : (<span class="st">"examples/wave/wave.py"</span>,        <span class="st">"run_wave"</span>),
+    <span class="st">"mycase"</span>   : (<span class="st">"examples/mycase/mycase.py"</span>,    <span class="st">"run_mycase"</span>),  <span class="cm"># &larr; add this</span>
+    <span class="cm"># ... no other files need to change</span>
+}</pre>
+  </div>
+</section>
+
+<!-- ─── CLI ───────────────────────────────────────────────────────────────── -->
+<section id="cli" class="cli-section">
+  <div class="container">
+    <div class="section-tag">Command-Line Interface</div>
+    <h2 class="section-title">YAML-driven experiments, zero code changes</h2>
+    <p class="section-sub">Run scripts directly or via the CLI — both point at the same YAML. Adding a new problem = one script + one YAML + one line in <code>dispatch.py</code>.</p>
+
+    <div class="cli-grid">
+      <div class="cli-card">
+        <h3>Single Run</h3>
+        <p>Point at a YAML — or run the script directly. Both work identically.</p>
+        <div class="shell">
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/burgers/config.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/wave/config.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/helmholtz/config.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/ramp/config.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/airfoil/config.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/pipe_flow/pipe_flow.yaml</span></div>
+        </div>
       </div>
-      <div class="feature-card" style="padding:1rem">
-        <strong style="color:var(--accent)">pyyaml ≥ 6.0</strong>
-        <p style="margin-top:.2rem">YAML config loading and merging</p>
+      <div class="cli-card">
+        <h3>Hyperparameter Sweep</h3>
+        <p>Cartesian product across any config key. Each run gets its own sub-directory.</p>
+        <div class="shell">
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN sweep \</span></div>
+          <div><span class="cmd">&nbsp;&nbsp;examples/burgers/burgers_nu_sweep.yaml</span></div>
+          <div class="cmt">&nbsp;</div>
+          <div class="cmt"># sweep YAML anatomy:</div>
+          <div class="cmt"># base: { problem: burgers, ... }</div>
+          <div class="cmt"># sweep:</div>
+          <div class="cmt">#   physics.nu: [0.1, 0.05, 0.01]</div>
+          <div class="cmt">#   training.epochs: [3000, 5000]</div>
+        </div>
+      </div>
+      <div class="cli-card">
+        <h3>Inspect &amp; List</h3>
+        <p>Print the resolved config or list all registered runners.</p>
+        <div class="shell">
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN show examples/wave/config.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN list</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN version</span></div>
+          <div class="cmt">&nbsp;</div>
+          <div class="cmt">Registered runners: burgers, wave,</div>
+          <div class="cmt">helmholtz, heat_forward, heat_inverse,</div>
+          <div class="cmt">ode, ldc, airfoil, pipe_flow, ramp,</div>
+          <div class="cmt">burgers_transfer, pipe_flow_unsteady_transfer,</div>
+          <div class="cmt">inverse_diffusion, ...</div>
+        </div>
+      </div>
+      <div class="cli-card">
+        <h3>Benchmark Suite</h3>
+        <p>Accuracy vs. epoch budget analysis across all problems.</p>
+        <div class="shell">
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN bench</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN bench \</span></div>
+          <div><span class="cmd">&nbsp;&nbsp;--problems burgers wave ode_exp \</span></div>
+          <div><span class="cmd">&nbsp;&nbsp;--epochs 500 2000 5000 \</span></div>
+          <div><span class="cmd">&nbsp;&nbsp;--output outputs/bench</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN bench --all</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN bench \</span></div>
+          <div><span class="cmd">&nbsp;&nbsp;--from-json outputs/bench/results.json</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Benchmark ─────────────────────────────────────────────────────────── -->
+<section id="benchmark">
+  <div class="container">
+    <div class="section-tag">Benchmark Suite</div>
+    <h2 class="section-title">Systematic accuracy-vs-epoch analysis</h2>
+    <p class="section-sub">One command trains every registered problem across multiple epoch budgets and produces a complete analysis package — plots, CSV, Markdown, and reusable JSON.</p>
+
+    <div class="code-header">
+      <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
+      Programmatic usage
+    </div>
+<pre><span class="kw">from</span> <span class="nm">underPINN.benchmark_utils</span> <span class="kw">import</span> <span class="cls">BenchmarkRunner</span>, <span class="fn">generate_report</span>
+
+runner = <span class="cls">BenchmarkRunner</span>(
+    problems      = [<span class="st">"burgers"</span>, <span class="st">"wave"</span>, <span class="st">"ode_exp"</span>, <span class="st">"helmholtz"</span>],
+    epoch_budgets = [<span class="nu">500</span>, <span class="nu">1000</span>, <span class="nu">2000</span>, <span class="nu">5000</span>],
+    seed          = <span class="nu">0</span>, fast_only=<span class="nm">True</span>, verbose=<span class="nm">True</span>,
+)
+results = runner.<span class="fn">run</span>(out_dir=<span class="st">"outputs/bench"</span>)
+runner.<span class="fn">save_json</span>(<span class="st">"outputs/bench/results.json"</span>)
+<span class="fn">generate_report</span>(results, runner, out_dir=<span class="st">"outputs/bench"</span>)</pre>
+
+    <div class="bench-outputs">
+      <div class="bench-file"><div class="bench-file-icon">&#128200;</div><div><strong>accuracy_vs_epochs.png</strong><span>Log-log rel-L&sup2; vs epoch budget, one curve per problem</span></div></div>
+      <div class="bench-file"><div class="bench-file-icon">&#128202;</div><div><strong>accuracy_summary_bar.png</strong><span>Grouped bar chart at each epoch budget</span></div></div>
+      <div class="bench-file"><div class="bench-file-icon">&#9201;</div><div><strong>wall_time_vs_epochs.png</strong><span>Training time vs epoch budget</span></div></div>
+      <div class="bench-file"><div class="bench-file-icon">&#128203;</div><div><strong>ms_per_epoch.png</strong><span>Bar chart of training throughput per problem</span></div></div>
+      <div class="bench-file"><div class="bench-file-icon">&#128260;</div><div><strong>loss_grid.png</strong><span>Convergence curves for every problem</span></div></div>
+      <div class="bench-file"><div class="bench-file-icon">&#128196;</div><div><strong>benchmark_results.csv</strong><span>Full raw data table — importable into pandas</span></div></div>
+      <div class="bench-file"><div class="bench-file-icon">&#128221;</div><div><strong>benchmark_summary.md</strong><span>Markdown table, one row per problem at max epochs</span></div></div>
+      <div class="bench-file"><div class="bench-file-icon">&#128260;</div><div><strong>results.json</strong><span>Reusable for <code>--from-json</code> replays without re-training</span></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Performance ───────────────────────────────────────────────────────── -->
+<section id="performance">
+  <div class="container">
+    <div class="section-tag">Performance</div>
+    <h2 class="section-title">Engineered for GPU throughput</h2>
+    <p class="section-sub">Two orthogonal optimisations stack cleanly: scan-based XLA fusion eliminates Python overhead, RAR-D concentrates compute on hard regions. Both are composable with all solvers.</p>
+
+    <div class="perf-grid">
+      <div class="perf-card">
+        <div class="big">500&times;</div>
+        <div class="desc">Less Python dispatch overhead on GPU with <code>n_scan_steps=500</code></div>
+      </div>
+      <div class="perf-card">
+        <div class="big">|r|^k</div>
+        <div class="desc">RAR-D resampling probability proportional to residual magnitude</div>
+      </div>
+      <div class="perf-card">
+        <div class="big">float32</div>
+        <div class="desc">All arrays cast to float32 — optimal throughput on all GPUs; do not enable x64</div>
+      </div>
+      <div class="perf-card">
+        <div class="big">0 MB</div>
+        <div class="desc">Wasted VRAM — on-demand XLA allocation by default via XLA_PYTHON_CLIENT_PREALLOCATE=false</div>
+      </div>
+    </div>
+
+    <h3 style="margin-bottom:.75rem">lax.scan — n_scan_steps reference</h3>
+    <table class="scan-table">
+      <thead>
+        <tr><th>n_scan_steps</th><th>Python calls / 5 000 epochs</th><th>Callback granularity</th><th>Use case</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>1</strong> (default)</td><td>5 000</td><td>every epoch</td><td>Development / debugging</td></tr>
+        <tr><td><strong>100</strong></td><td>50</td><td>every 100 epochs</td><td>GPU training, medium runs</td></tr>
+        <tr><td><strong>500</strong></td><td>10</td><td>every 500 epochs</td><td>Long GPU runs, production</td></tr>
+      </tbody>
+    </table>
+
+    <hr class="divider">
+    <h3 style="margin-bottom:1rem">Performance tips summary</h3>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <h3>GPU Memory</h3>
+        <p>Already handled — underPINN sets <code>XLA_PYTHON_CLIENT_PREALLOCATE=false</code> in every entry point before <code>import jax</code>. If writing a new script, add this at the very top.</p>
+      </div>
+      <div class="feature-card">
+        <h3>lax.scan on GPU</h3>
+        <p>Use <code>n_scan_steps=100</code> for medium GPU runs. For long runs (&gt;5 000 epochs), use 500. On CPU, leave at 1 for full callback granularity.</p>
+      </div>
+      <div class="feature-card">
+        <h3>RAR-D for sharp solutions</h3>
+        <p>Enable RAR-D (<code>resample_period=5</code>, <code>resample_k=1.0</code>) when the solution has sharp gradients or shocks — Burgers at low &nu;, Euler ramp, wave at high frequency.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Early stopping patience</h3>
+        <p>Fast ODEs: patience=200. Medium PDEs: 400–800. Complex PDEs (LDC, airfoil, 3-D): 1 000–2 000. Combine with cosine LR decay for best results.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Float32 — do not use float64</h3>
+        <p>Do not call <code>jax.config.update("jax_enable_x64", True)</code>. Float64 halves throughput on CUDA devices and is not needed for PINN training.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Multi-GPU</h3>
+        <p>Use <code>CUDA_VISIBLE_DEVICES=1</code> to restrict to a specific GPU. Full multi-GPU pmap training is not currently implemented; use the fastest single device.</p>
       </div>
     </div>
   </div>
@@ -1075,13 +1407,20 @@ python -c <span class="st">"import jax; print(jax.devices())"</span>
 <footer>
   <div class="footer-inner">
     <div class="footer-logo">underPINN</div>
+    <div class="footer-version">v2605 &mdash; May 2026</div>
     <p>A modular JAX framework for Physics-Informed Neural Networks.<br>Released under the GPL-3.0 License.</p>
     <div class="footer-links">
       <a href="https://github.com/Prashantiitk23/PINN" target="_blank">GitHub</a>
-      <a href="#features">Features</a>
-      <a href="#examples">Examples</a>
+      <a href="#overview">Overview</a>
+      <a href="#installation">Installation</a>
+      <a href="#gpu-memory">GPU Memory</a>
       <a href="#quickstart">Quick Start</a>
-      <a href="#install">Install</a>
+      <a href="#training">Training</a>
+      <a href="#restart">Restart</a>
+      <a href="#examples">Examples</a>
+      <a href="#api">API</a>
+      <a href="#benchmark">Benchmarks</a>
+      <a href="#performance">Performance</a>
     </div>
   </div>
 </footer>
@@ -1089,8 +1428,8 @@ python -c <span class="st">"import jax; print(jax.devices())"</span>
 <!-- ─── Tab switching JS ──────────────────────────────────────────────────── -->
 <script>
   function showTab(name) {
-    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-    document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(function(el) { el.classList.remove('active'); });
+    document.querySelectorAll('.tab-btn').forEach(function(el) { el.classList.remove('active'); });
     document.getElementById('tab-' + name).classList.add('active');
     event.currentTarget.classList.add('active');
   }

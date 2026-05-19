@@ -135,6 +135,35 @@ class FBPINNSolver(BaseSolver):
             resample_k = 1.0
             candidate_sampler = None
 
+        # ------------------------------------------------------------------ #
+        # Restart — attempt to resume from a previous interrupted run          #
+        # ------------------------------------------------------------------ #
+        _restart = None
+        _ep_resume = 0        # epoch to start from (0 = fresh start)
+        if (config is not None
+                and config.out_dir
+                and config.save_restart_every > 0):
+            from underPINN.utils.restart import RestartManager
+            _restart = RestartManager(
+                config.out_dir,
+                save_every=config.save_restart_every,
+                cfg=config,
+            )
+            _ep_resume, self.params, self.state, hists = \
+                _restart.maybe_restore(self.params, self.state)
+            if _ep_resume > 0:
+                # Restore all loss-history components that were saved
+                for attr, key in (
+                    ("loss_hist", "loss_hist"),
+                    ("pde_hist",  "pde_hist"),
+                    ("ic_hist",   "ic_hist"),
+                    ("bc_hist",   "bc_hist"),
+                    ("reg_hist",  "reg_hist"),
+                ):
+                    saved = hists.get(key, [])
+                    if saved:
+                        getattr(self, attr).extend(saved)
+
         # Convert to JAX arrays once (safe no-op if already JAX)
         x_r = jnp.asarray(x_r)
         t_r = jnp.asarray(t_r)
@@ -220,6 +249,18 @@ class FBPINNSolver(BaseSolver):
                     for cb in callbacks:
                         cb.on_epoch_end(ep, logs)
 
+                    # --- Restart snapshot (scan mode: save between outer steps) ---
+                    if _restart is not None:
+                        _restart.maybe_save(
+                            ep,
+                            self.params, self.state,
+                            {"loss_hist": self.loss_hist,
+                             "pde_hist":  self.pde_hist,
+                             "ic_hist":   self.ic_hist,
+                             "bc_hist":   self.bc_hist,
+                             "reg_hist":  self.reg_hist},
+                        )
+
                     # --- RAR-D adaptive resampling ---
                     if resample_period > 0 and (outer + 1) % resample_period == 0:
                         key, rkey = jax.random.split(key)
@@ -256,7 +297,15 @@ class FBPINNSolver(BaseSolver):
         # ------------------------------------------------------------------ #
         # PYTHON-LOOP MODE  (n_scan == 1, or scan tail)                       #
         # ------------------------------------------------------------------ #
-        ep_offset = len(self.loss_hist)  # so epoch numbers stay contiguous
+        # ep_offset keeps absolute epoch numbers contiguous across both modes
+        # and across a restart (histories already extended above).
+        ep_offset = len(self.loss_hist)
+
+        # In pure Python-loop mode we also respect the resume epoch.
+        if n_scan == 1 and _ep_resume > 0:
+            # Skip epochs already completed before the interruption.
+            # ep_offset already accounts for restored histories.
+            epochs = epochs - _ep_resume
 
         try:
             for ep in range(epochs):
@@ -301,6 +350,18 @@ class FBPINNSolver(BaseSolver):
                 for cb in callbacks:
                     cb.on_epoch_end(ep_offset + ep, logs)
 
+                # --- Restart snapshot (Python-loop mode) ---
+                if _restart is not None:
+                    _restart.maybe_save(
+                        ep_offset + ep,
+                        self.params, self.state,
+                        {"loss_hist": self.loss_hist,
+                         "pde_hist":  self.pde_hist,
+                         "ic_hist":   self.ic_hist,
+                         "bc_hist":   self.bc_hist,
+                         "reg_hist":  self.reg_hist},
+                    )
+
                 # RAR-D at per-epoch granularity in Python-loop mode
                 if (resample_period > 0
                         and (ep_offset + ep + 1) % resample_period == 0):
@@ -328,6 +389,10 @@ class FBPINNSolver(BaseSolver):
             cb.on_train_end(final_logs)
         if not callbacks:
             print(f"Training complete — final loss {final_logs['loss']:.3e}")
+
+        # Mark restart snapshot as done so next run starts fresh
+        if _restart is not None:
+            _restart.done()
 
     # ------------------------------------------------------------------
     # Internal helpers

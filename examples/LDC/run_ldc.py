@@ -15,6 +15,7 @@ Uses the FBPINN + SimpleGate architecture with LDCSolver.
 from __future__ import annotations
 
 import os
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 import numpy as np
 import pandas as pd
 import jax
@@ -124,6 +125,8 @@ def run_ldc(cfg) -> dict:
             ConsoleLogger(log_every=log_every),
             # EarlyStopping(patience=patience),
         ],
+        out_dir            = out_dir,
+        save_restart_every = int(cfg_get(tr, "save_restart_every", default=500)),
     )
 
     # ── Geometry ──────────────────────────────────────────────────────────────

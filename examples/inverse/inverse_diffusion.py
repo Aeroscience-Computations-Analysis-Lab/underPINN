@@ -12,7 +12,9 @@ Run directly or via the CLI:
 from __future__ import annotations
 
 import importlib.util
+import os
 import pathlib
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 
 # Dynamically load run_heat_inverse from examples/heat/inverse.py
 _REPO_ROOT = pathlib.Path(__file__).parent.parent.parent

@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import math
 import os
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 
 import jax
 import jax.numpy as jnp
@@ -53,6 +54,7 @@ from underPINN.geometry.ramp import RampGeometry
 from underPINN.nn.mlp import MLP
 from underPINN.pde.compressible_euler import CompressibleEulerPDE
 from underPINN.utils.checkpoint import save_checkpoint
+from underPINN.utils.restart import RestartManager
 from underPINN.utils.sampling import safe_choice
 
 
@@ -179,6 +181,13 @@ def run_ramp(cfg) -> dict:
         params = optax.apply_updates(params, updates)
         return params, state, total, aux
 
+    # ── Restart ───────────────────────────────────────────────────────────────
+    save_restart = int(cfg_get(tr, "save_restart_every", default=500))
+    restart = RestartManager(out_dir, save_every=save_restart, cfg=cfg)
+    start_ep, params, opt_state, hists = restart.maybe_restore(params, opt_state)
+    loss_hist = hists.get("loss_hist", [])
+    pde_hist  = hists.get("pde_hist",  [])
+
     # ── Training loop ─────────────────────────────────────────────────────────
     N_r    = xy_r.shape[0]
     N_in   = xy_in.shape[0]
@@ -187,11 +196,10 @@ def run_ramp(cfg) -> dict:
 
     logger   = ConsoleLogger(log_every=log_every)
     stopper  = EarlyStopping(patience=patience)
-    loss_hist, pde_hist = [], []
     key = jax.random.PRNGKey(seed + 7)
 
     try:
-        for ep in range(epochs):
+        for ep in range(start_ep, epochs):
             key, k1, k2, k3, k4 = jax.random.split(key, 5)
             ir  = safe_choice(k1, N_r,    batch_r)
             iin = safe_choice(k2, N_in,   min(batch_bc, N_in))
@@ -209,9 +217,12 @@ def run_ramp(cfg) -> dict:
                     "inlet": float(il), "wall": float(wl)}
             logger.on_epoch_end(ep, logs)
             stopper.on_epoch_end(ep, logs)
+            restart.maybe_save(ep, params, opt_state,
+                               {"loss_hist": loss_hist, "pde_hist": pde_hist})
     except StopIteration:
         pass
 
+    restart.done()
     logger.on_train_end({"loss": loss_hist[-1] if loss_hist else float("nan")})
     print(f"  Stopped at epoch {len(loss_hist)}")
 

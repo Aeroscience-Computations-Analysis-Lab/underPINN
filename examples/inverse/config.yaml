@@ -26,6 +26,7 @@ training:
   log_every              : 500
   early_stopping_patience: 600
   seed                   : 0
+  save_restart_every     : 500
 
 loss:
   ic_weight  : 100.0

@@ -24,6 +24,7 @@ training:
   log_every              : 500
   # early_stopping_patience: 400
   seed                   : 0
+  save_restart_every     : 500
   # Performance knobs (GPU-friendly defaults shown; omit to use default=off)
   # n_scan_steps    : 100   # fuse 100 steps into one XLA kernel (reduces Python overhead)
   # resample_period : 5     # RAR-D resampling every 5 outer steps (= 500 epochs)

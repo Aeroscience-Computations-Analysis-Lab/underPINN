@@ -73,6 +73,12 @@ class TrainingConfig:
     candidate_sampler: Optional[Any] = None  # fn(n, key) → (x, t) or None
 
     # ------------------------------------------------------------------ #
+    # Restart / resume                                                     #
+    # ------------------------------------------------------------------ #
+    out_dir: str = ""              # output dir; when non-empty, enables auto-restart
+    save_restart_every: int = 500  # save restart snapshot every N epochs; 0 = off
+
+    # ------------------------------------------------------------------ #
     # Validation                                                            #
     # ------------------------------------------------------------------ #
 
@@ -121,4 +127,10 @@ class TrainingConfig:
         if self.resample_candidates < 0:
             raise ValueError(
                 f"TrainingConfig.resample_candidates must be >= 0, got {self.resample_candidates!r}"
+            )
+
+        if not isinstance(self.save_restart_every, int) or self.save_restart_every < 0:
+            raise ValueError(
+                f"TrainingConfig.save_restart_every must be a non-negative int, "
+                f"got {self.save_restart_every!r}"
             )
