@@ -29,9 +29,11 @@ _REGISTRY: dict[str, tuple[str, str]] = {
     "ode":          ("examples/ode/ode_test.py",             "run_ode"),
 
     # Fluid dynamics
+    "k_epsilon":    ("examples/K-Epsilon/turbulence.py",    "run_turbulence"),
     "ldc":          ("examples/LDC/run_ldc.py",             "run_ldc"),
     "airfoil":      ("examples/airfoil/airfoil_flow.py",    "run_airfoil"),
     "pipe_flow":    ("examples/pipe_flow/pipe_flow.py",     "run_pipe_flow"),
+    "ramp":         ("examples/ramp/ramp.py",               "run_ramp"),
 
     # Inverse problems
     "heat_inverse":      ("examples/heat/inverse.py",        "run_heat_inverse"),
