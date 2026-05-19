@@ -25,9 +25,16 @@ except ImportError as e:
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _to_ns(data):
-    """Recursively convert a YAML-loaded value to nested SimpleNamespace."""
+    """Recursively convert a YAML-loaded value to nested SimpleNamespace.
+
+    YAML scalars used as mapping keys (e.g. ``2000: 0.5``) are parsed by
+    PyYAML as Python ints, not strings.  ``SimpleNamespace`` requires string
+    keyword arguments, so we stringify all keys here.  Any code that reads
+    such a sub-namespace should access the field as ``ns.__dict__`` or use
+    ``cfg_get`` rather than attribute access when keys were originally integers.
+    """
     if isinstance(data, dict):
-        return types.SimpleNamespace(**{k: _to_ns(v) for k, v in data.items()})
+        return types.SimpleNamespace(**{str(k): _to_ns(v) for k, v in data.items()})
     if isinstance(data, list):
         return [_to_ns(v) for v in data]
     return data

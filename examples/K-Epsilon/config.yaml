@@ -32,15 +32,14 @@ data:
 data_file: Re10000
 
 training:
-  epochs    : 5000
-  lr        : 1.0e-3
-  lr_schedule:
-    boundaries_and_scales:
-      2000: 0.5
-      4000: 0.5
-  batch_size: 2000
-  log_every : 10
-  seed      : 42
+  epochs        : 5000
+  lr            : 1.0e-3
+  # Piecewise-constant LR decay: multiply by scale[i] at step boundary[i]
+  lr_boundaries : [2000, 4000]
+  lr_scales     : [0.5,  0.5]
+  batch_size    : 2000
+  log_every     : 10
+  seed          : 42
 
 loss:
   w_pde    : 1.0

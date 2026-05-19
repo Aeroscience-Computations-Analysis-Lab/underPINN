@@ -211,14 +211,12 @@ def run_turbulence(cfg) -> dict:
     pde = KEpsilonPDE(model, Re=Re)
 
     # ── Optimizer ─────────────────────────────────────────────────────────────
+    lr_boundaries = cfg_get(tr, "lr_boundaries", default=[2000, 4000])
+    lr_scales     = cfg_get(tr, "lr_scales",     default=[0.5, 0.5])
     schedule = optax.piecewise_constant_schedule(
         init_value=lr,
-        boundaries_and_scales=dict(cfg_get(
-            tr, "lr_schedule",
-            default={"boundaries_and_scales": {2000: 0.5, 4000: 0.5}}
-        ).boundaries_and_scales if hasattr(
-            cfg_get(tr, "lr_schedule", default=None), "boundaries_and_scales"
-        ) else {int(k): float(v) for k, v in [("2000", 0.5), ("4000", 0.5)]})
+        boundaries_and_scales={int(b): float(s)
+                                for b, s in zip(lr_boundaries, lr_scales)},
     )
     optimizer = optax.adam(learning_rate=schedule)
 
