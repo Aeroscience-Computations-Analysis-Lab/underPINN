@@ -107,12 +107,14 @@ class RANSSolver:
         out_outlet = self.model.apply(params, outlet)
         loss_pressure = jnp.mean(out_outlet[:, 2]**2)
 
-        out_data = self.model.apply(params, data_x)
-        # Weights: u,v,p,eps=1.0, k=2.0
-        loss_data = jnp.mean((out_data[:,0]-data_u[:,0])**2 + 
-                             (out_data[:,1]-data_u[:,1])**2 + 
-                             (out_data[:,2]-data_u[:,2])**2 + 
-                             2.0*(out_data[:,3]-data_u[:,3])**2 + 
+        # Use pde.u() so the positivity transform (k, ε via softplus) is applied
+        # consistently before comparing with physical reference data.
+        out_data = self.pde.u(params, data_x)
+        # Weights: u,v,p,ε=1.0; k=2.0 (harder to fit)
+        loss_data = jnp.mean((out_data[:,0]-data_u[:,0])**2 +
+                             (out_data[:,1]-data_u[:,1])**2 +
+                             (out_data[:,2]-data_u[:,2])**2 +
+                             2.0*(out_data[:,3]-data_u[:,3])**2 +
                              (out_data[:,4]-data_u[:,4])**2)
 
         # Total Loss
@@ -139,8 +141,9 @@ class RANSSolver:
         return step
 
     def train(self, params, inputs: RANSInputWrapper, epochs=5000, batch_size=2000, seed=0):
-        opt_state = self.opt.init(params)
-        key = jax.random.PRNGKey(seed)
+        opt_state  = self.opt.init(params)
+        key        = jax.random.PRNGKey(seed)
+        loss_hist  = []   # collected once per epoch (avg over mini-batches)
         
         n_col = inputs.col.shape[0]
         batch_size = min(batch_size, n_col)
@@ -224,10 +227,11 @@ class RANSSolver:
             # if spatial locality matters for stability, but for RBA which is point-specific, 
             # keeping (x, weight) paired via the shuffle-carry mechanism is sufficient.
             
+            avg = epoch_loss / steps_per_epoch
+            loss_hist.append(float(avg))
             if ep % 10 == 0:
                 phys, inl, nos, press, dat = aux
-                avg = epoch_loss / steps_per_epoch
                 print(f"Ep {ep:4d} | Tot: {avg:.3e} | Phys: {phys:.3e} | BC: {inl+nos:.3e} | Data: {dat:.3e}")
-        
+
         print(f"Finished in {time.time()-start_time:.2f}s")
-        return params
+        return params, loss_hist
