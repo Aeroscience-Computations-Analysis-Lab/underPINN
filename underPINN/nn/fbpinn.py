@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 from flax import linen as nn
 from .subdomain import SubdomainNetwork
-from .attention import HybridAttention
+from .attention import HybridAttention, SimpleGate
 
 
 def window_1d(x, xmin, xmax, smin, smax):
@@ -22,7 +22,7 @@ class FBPINN(nn.Module):
     xs_max: jnp.ndarray
     smins: jnp.ndarray
     smaxs: jnp.ndarray
-    attention_cls: callable = HybridAttention
+    attention_cls: callable = SimpleGate
     # Optional output transform applied inside every subdomain network.
     # Pass a callable  f(x) -> x  to enforce positivity, scaling, etc.
     # Example:  out_transform=k_eps_positivity  for the k-ε turbulence model.
