@@ -37,14 +37,15 @@ data:
   n_upper   : 200    # upper farfield points   (freestream)
 
 training:
-  epochs  : 15000
-  lr      : 5.0e-4
-  lr_alpha: 0.01       # cosine decay end-value = lr * alpha
-  log_every: 500
-  seed    : 0
-  batch_r : 2048       # interior batch
-  batch_bc: 256        # boundary batch
-  early_stopping_patience: 2000
+  epochs                   : 15000
+  lr                       : 5.0e-4
+  lr_alpha                 : 0.01       # cosine decay end-value = lr * alpha
+  log_every                : 500
+  seed                     : 0
+  batch_r                  : 2048       # interior batch
+  batch_bc                 : 256        # boundary batch
+  early_stopping_patience  : 2000
+  save_restart_every       : 500        # save restart snapshot every N epochs (0 = off)
 
 loss:
   w_pde  : 1.0

@@ -22,9 +22,18 @@ Usage
     python -m underPINN bench --all --output outputs/bench_full
 """
 
-import argparse
 import os
 import sys
+
+# ── JAX memory allocation ─────────────────────────────────────────────────────
+# By default JAX pre-allocates ~90 % of GPU VRAM on the first import, which
+# makes `nvidia-smi` show 70–75 GB even for a 3-layer MLP.
+# Setting PREALLOCATE=false makes JAX grow memory on demand (like PyTorch).
+# Users can override by setting XLA_PYTHON_CLIENT_PREALLOCATE=true in their
+# shell, or cap usage with XLA_PYTHON_CLIENT_MEM_FRACTION=0.4 (= 40 % of VRAM).
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
+
+import argparse
 
 
 def _cmd_run(args):

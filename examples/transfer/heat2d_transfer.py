@@ -37,6 +37,8 @@ heat2d_temporal_transfer.png — strategy 2: loss + error curves
 heat2d_temporal_solution.png — strategy 2: solution maps at t=0.6
 """
 
+import os
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 import numpy as np
 import jax
 import jax.numpy as jnp

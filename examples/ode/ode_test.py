@@ -13,6 +13,7 @@ Two ODE problems are solved in sequence:
 from __future__ import annotations
 
 import os
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -68,6 +69,8 @@ def run_ode(cfg) -> dict:
                 ConsoleLogger(log_every=log_every),
                 EarlyStopping(patience=patience),
             ],
+            out_dir             = out_dir,
+            save_restart_every  = int(cfg_get(tr, "save_restart_every", default=500)),
         )
 
     # ── 1. Exponential Decay  du/dt + λu = 0 ─────────────────────────────────

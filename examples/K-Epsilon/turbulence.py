@@ -22,6 +22,7 @@ Data file: CSV with columns [x-coordinate, y-coordinate, x-velocity, y-velocity,
 from __future__ import annotations
 
 import os
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 import pathlib
 
 import jax
@@ -230,7 +231,10 @@ def run_turbulence(cfg) -> dict:
     print("Starting training …")
     final_params, loss_hist = solver.train(
         params, inputs,
-        epochs=epochs, batch_size=batch_size, seed=seed)
+        epochs=epochs, batch_size=batch_size, seed=seed,
+        out_dir=out_dir,
+        save_restart_every=int(cfg_get(tr, "save_restart_every", default=500)),
+    )
 
     # ── Save ──────────────────────────────────────────────────────────────────
     np.save(os.path.join(out_dir, "loss_hist.npy"), np.array(loss_hist))

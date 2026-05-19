@@ -14,14 +14,15 @@ data:
   n_bc         : 300
 
 training:
-  epochs   : 5000
-  lr       : 1.0e-3
-  lr_alpha : 0.01
-  batch_r  : 2048
-  batch_i  : 256
-  batch_b  : 256
-  log_every: 500
-  seed     : 0
+  epochs             : 5000
+  lr                 : 1.0e-3
+  lr_alpha           : 0.01
+  batch_r            : 2048
+  batch_i            : 256
+  batch_b            : 256
+  log_every          : 500
+  seed               : 0
+  save_restart_every : 500
 
 loss:
   ic_weight: 100.0

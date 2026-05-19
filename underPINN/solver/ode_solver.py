@@ -85,6 +85,23 @@ class ODESolver(BaseSolver):
             callbacks = []
             n_scan = 1
 
+        # ── Restart ──────────────────────────────────────────────────────────────
+        _restart = None
+        if (config is not None
+                and getattr(config, "out_dir", "")
+                and getattr(config, "save_restart_every", 0) > 0):
+            from underPINN.utils.restart import RestartManager
+            _restart = RestartManager(config.out_dir,
+                                      save_every=config.save_restart_every)
+            _ep_resume, self.params, self.state, _hists = \
+                _restart.maybe_restore(self.params, self.state)
+            if _ep_resume > 0:
+                self.loss_hist.extend(_hists.get("loss_hist", []))
+                self.pde_hist.extend(_hists.get("pde_hist",   []))
+                self.ic_hist.extend( _hists.get("ic_hist",    []))
+                self.ic_dot_hist.extend(_hists.get("ic_dot_hist", []))
+                epochs = max(0, epochs - _ep_resume)
+
         if u_ic_dot is None:
             u_ic_dot = jnp.zeros_like(u_ic)
 
@@ -185,6 +202,12 @@ class ODESolver(BaseSolver):
                 for cb in callbacks:
                     cb.on_epoch_end(ep_offset + ep, logs)
 
+                if _restart is not None:
+                    _restart.maybe_save(
+                        ep_offset + ep, self.params, self.state,
+                        {"loss_hist": self.loss_hist, "pde_hist": self.pde_hist,
+                         "ic_hist": self.ic_hist, "ic_dot_hist": self.ic_dot_hist})
+
         except StopIteration:
             pass
 
@@ -197,6 +220,9 @@ class ODESolver(BaseSolver):
             cb.on_train_end(final_logs)
         if not callbacks:
             print(f"Training complete — final loss {final_logs['loss']:.3e}")
+
+        if _restart is not None:
+            _restart.done()
 
     # ------------------------------------------------------------------
     # Internal helpers

@@ -12,6 +12,7 @@ Source: f = 2π² sin(πx) sin(πy),  BCs: u = 0 on all edges of [0,1]².
 from __future__ import annotations
 
 import os
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -90,6 +91,8 @@ def run_heat_forward(cfg) -> dict:
             EarlyStopping(patience=int(cfg_get(tr, "early_stopping_patience",
                                                default=max(500, epochs // 10)))),
         ],
+        out_dir            = out_dir,
+        save_restart_every = int(cfg_get(tr, "save_restart_every", default=500)),
     )
     solver.train(xy_r, xy_b, u_b, config=config)
     save_config(cfg, os.path.join(out_dir, "config.yaml"))

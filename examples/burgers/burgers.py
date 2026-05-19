@@ -11,6 +11,7 @@ All parameters live in config.yaml — edit there, no code changes needed.
 from __future__ import annotations
 
 import os
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -107,6 +108,8 @@ def run_burgers(cfg) -> dict:
         resample_period     = cfg_get(tr, "resample_period",     default=0),
         resample_candidates = cfg_get(tr, "resample_candidates", default=0),
         resample_k          = cfg_get(tr, "resample_k",          default=1.0),
+        out_dir             = out_dir,
+        save_restart_every  = int(cfg_get(tr, "save_restart_every", default=500)),
     )
 
     data = _make_data(cfg.data, seed)

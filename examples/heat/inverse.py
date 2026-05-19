@@ -16,6 +16,7 @@ Exact: u(x, t) = sin(πx) exp(−α π² t)
 from __future__ import annotations
 
 import os
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -32,6 +33,7 @@ from underPINN.callbacks.early_stopping import EarlyStopping
 from underPINN.utils.io import save_predictions
 from underPINN.utils.checkpoint import save_checkpoint
 from underPINN.utils.seed import set_seed
+from underPINN.utils.restart import RestartManager
 
 
 def run_heat_inverse(cfg) -> dict:
@@ -135,12 +137,17 @@ def run_heat_inverse(cfg) -> dict:
         return params, state, loss, aux
 
     # ── Training loop ─────────────────────────────────────────────────────────
+    save_restart = int(cfg_get(tr, "save_restart_every", default=500))
+    restart = RestartManager(out_dir, save_every=save_restart, cfg=cfg)
+    start_ep, all_params, opt_state, hists = restart.maybe_restore(all_params, opt_state)
+    loss_hist  = hists.get("loss_hist",  [])
+    alpha_hist = hists.get("alpha_hist", [])
+
     logger  = ConsoleLogger(log_every=log_every)
     stopper = EarlyStopping(patience=patience)
-    loss_hist, alpha_hist = [], []
 
     try:
-        for ep in range(epochs):
+        for ep in range(start_ep, epochs):
             all_params, opt_state, loss, (pde_l, ic_l, bc_l, data_l) = step(
                 all_params, opt_state)
             alpha_now = float(jnp.exp(all_params["log_alpha"]))
@@ -151,12 +158,14 @@ def run_heat_inverse(cfg) -> dict:
                     "ic": float(ic_l), "bc": float(bc_l)}
             logger.on_epoch_end(ep, logs)
             stopper.on_epoch_end(ep, logs)
+            restart.maybe_save(ep, all_params, opt_state, {"loss_hist": loss_hist, "alpha_hist": alpha_hist})
 
             if ep % log_every == 0:
                 print(f"  α = {alpha_now:.6f}  (true = {alpha_true:.6f})")
     except StopIteration:
         pass
 
+    restart.done()
     logger.on_train_end({"loss": loss_hist[-1] if loss_hist else float("nan")})
 
     # ── Results ───────────────────────────────────────────────────────────────
