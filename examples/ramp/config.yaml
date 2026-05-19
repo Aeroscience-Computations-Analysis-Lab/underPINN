@@ -1,0 +1,57 @@
+# ── 2-D Compressible Euler — Mach-3 Ramp (θ = 10°) ──────────────────────────
+#
+# Run directly:
+#   python examples/ramp/ramp.py                   # uses this file
+#   python examples/ramp/ramp.py myconfig.yaml
+#   python -m underPINN run examples/ramp/config.yaml
+#
+# Non-dimensionalisation:  ρ_∞ = 1,  a_∞ = 1
+#   → p_∞ = 1/γ ≈ 0.714,   u_∞ = M_∞ = 3,   v_∞ = 0
+#
+# Analytical oblique-shock solution (M=3, θ=10°, γ=1.4):
+#   Shock angle β ≈ 27.4°
+#   Post-shock:  M2 ≈ 2.50,  ρ2 ≈ 1.66,  p2 ≈ 1.47,  u2 ≈ 2.73,  v2 ≈ 0.48
+# ─────────────────────────────────────────────────────────────────────────────
+
+problem: ramp
+
+network:
+  type : mlp
+  # (x, y) → (f_ρ, f_u, f_v, f_p)  — 2-in / 4-out
+  # Deeper / wider than typical because compressible flow has sharp gradients.
+  layers: [2, 80, 80, 80, 80, 80, 4]
+
+physics:
+  gamma    : 1.4     # ratio of specific heats (air)
+  M_inf    : 3.0     # inlet Mach number
+  theta_deg: 10.0    # ramp angle (degrees)
+
+geometry:
+  L: 1.0   # domain length (x)
+  H: 0.8   # domain height (y)
+
+data:
+  n_interior: 8000   # interior collocation points
+  n_inlet   : 300    # inlet boundary points  (all vars fixed)
+  n_wall    : 400    # ramp wall points        (slip BC)
+  n_upper   : 200    # upper farfield points   (freestream)
+
+training:
+  epochs  : 15000
+  lr      : 5.0e-4
+  lr_alpha: 0.01       # cosine decay end-value = lr * alpha
+  log_every: 500
+  seed    : 0
+  batch_r : 2048       # interior batch
+  batch_bc: 256        # boundary batch
+  early_stopping_patience: 2000
+
+loss:
+  w_pde  : 1.0
+  w_inlet: 200.0   # strong — supersonic inflow fixes all characteristics
+  w_wall : 80.0    # slip-wall normal velocity
+  w_upper: 30.0    # farfield freestream
+
+output:
+  dir        : outputs/ramp
+  save_params: true
