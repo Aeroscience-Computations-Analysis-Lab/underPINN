@@ -126,13 +126,21 @@ def _cmd_bench(args):
     generate_report(results, runner=runner, out_dir=out_dir)
 
 
+def _cmd_version(_args):
+    from underPINN._version import __version__, version_tag
+    print(f"underPINN {version_tag}  (build {__version__})")
+
+
 def main():
+    from underPINN._version import version_tag
+
     parser = argparse.ArgumentParser(
         prog="python -m underPINN",
-        description="underPINN — YAML-driven PINN experiment runner",
+        description=f"underPINN {version_tag} — YAML-driven PINN experiment runner",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 examples:
+  python -m underPINN version
   python -m underPINN run    examples/burgers/config.yaml
   python -m underPINN sweep  examples/burgers/burgers_nu_sweep.yaml
   python -m underPINN list
@@ -150,6 +158,9 @@ examples:
                        help="Run a hyperparameter sweep from a sweep YAML")
     p.add_argument("config", help="Path to sweep .yaml file")
     p.set_defaults(func=_cmd_sweep)
+
+    p = sub.add_parser("version", help="Print underPINN version and exit")
+    p.set_defaults(func=_cmd_version)
 
     p = sub.add_parser("list", help="List registered problem runners")
     p.set_defaults(func=_cmd_list)
