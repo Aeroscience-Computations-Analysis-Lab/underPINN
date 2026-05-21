@@ -861,7 +861,7 @@ If you use underPINN in research or publications, please cite:
 
 ```bibtex
 @software{underPINN_v2605,
-  author  = {},
+  author  = {Kumar Prashant, Ranjan Rajesh},
   title   = {underPINN-v2605: A Modular JAX Framework for Physics-Informed Neural Networks},
   year    = {2026},
   version = {v2605},
