@@ -1,7 +1,7 @@
-# underPINN
+# underPINN-v2605
 > A modular, GPU-accelerated Physics-Informed Neural Network framework built on JAX + Flax + Optax
 
-![Static Badge](https://img.shields.io/badge/repo%20status-Active-95eb34) ![Static Badge](https://img.shields.io/badge/license-GPL--3.0-green) ![Static Badge](https://img.shields.io/badge/python-%3E%3D3.9-blue) ![Static Badge](https://img.shields.io/badge/jax-%3E%3D0.4.26-orange)
+![Static Badge](https://img.shields.io/badge/version-v2605-blue) ![Static Badge](https://img.shields.io/badge/repo%20status-Active-95eb34) ![Static Badge](https://img.shields.io/badge/license-GPL--3.0-green) ![Static Badge](https://img.shields.io/badge/python-%3E%3D3.9-blue) ![Static Badge](https://img.shields.io/badge/jax-%3E%3D0.4.26-orange)
 
 underPINN is a research-grade PINN engine that combines classical collocation-based PINNs with Finite Basis decomposition (FBPINN), attention-augmented networks, residual-based adaptive weighting, transfer learning, inverse problems, and a full restart/resume system — all JIT-compiled and differentiable via XLA.
 
@@ -110,8 +110,8 @@ pip install -U "jax[cuda12]" && pip install -r requirements-gpu.txt
 
 ```bash
 # From source (editable install — recommended)
-git clone https://github.com/Prashantiitk23/PINN
-cd PINN
+git clone https://github.com/Prashantiitk23/underPINN-v2605
+cd underPINN-v2605
 pip install -e .
 ```
 
@@ -860,14 +860,15 @@ class BaseSolver(ABC):
 If you use underPINN in research or publications, please cite:
 
 ```bibtex
-@software{underPINN,
-  author = {},
-  title  = {underPINN: A Modular JAX Framework for Physics-Informed Neural Networks},
-  year   = {2026},
-  note   = {https://github.com/Prashantiitk23/PINN}
+@software{underPINN_v2605,
+  author  = {},
+  title   = {underPINN-v2605: A Modular JAX Framework for Physics-Informed Neural Networks},
+  year    = {2026},
+  version = {v2605},
+  url     = {https://github.com/Prashantiitk23/underPINN-v2605}
 }
 ```
 
 ## License
 
-underPINN is released under the GPL-3.0 License. See [LICENSE.txt](https://github.com/lohithgsk/PINN/blob/main/LICENSE) for the full text.
+underPINN is released under the GPL-3.0 License. See [LICENSE.txt](https://github.com/Prashantiitk23/underPINN-v2605/blob/main/LICENSE) for the full text.
