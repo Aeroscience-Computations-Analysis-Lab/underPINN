@@ -8,8 +8,8 @@ authors:
 title: "underPINN-v2605"
 version: "2605"
 date-released: "2026-05-19"
-url: "https://github.com/Prashantiitk23/underPINN-v2605"
-repository-code: "https://github.com/Prashantiitk23/underPINN-v2605"
+url: "https://github.com/Aeroscience-Computations-Analysis-Lab/underPINN.git"
+repository-code: "https://github.com/Aeroscience-Computations-Analysis-Lab/underPINN.git"
 license: GPL-3.0
 abstract: >
   underPINN-v2605 is a modular, GPU-accelerated Physics-Informed Neural Network
