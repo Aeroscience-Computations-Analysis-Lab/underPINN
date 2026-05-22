@@ -865,7 +865,7 @@ If you use underPINN in research or publications, please cite:
   title   = {underPINN-v2605: A Modular JAX Framework for Physics-Informed Neural Networks},
   year    = {2026},
   version = {v2605},
-  url     = {https://github.com/Prashantiitk23/underPINN-v2605}
+  url     = {https://github.com/Aeroscience-Computations-Analysis-Lab/underPINN.git}
 }
 ```
 
