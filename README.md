@@ -110,7 +110,7 @@ pip install -U "jax[cuda12]" && pip install -r requirements-gpu.txt
 
 ```bash
 # From source (editable install — recommended)
-git clone https://github.com/Prashantiitk23/underPINN-v2605
+git clone https://github.com/Aeroscience-Computations-Analysis-Lab/underPINN.git
 cd underPINN-v2605
 pip install -e .
 ```
@@ -871,4 +871,4 @@ If you use underPINN in research or publications, please cite:
 
 ## License
 
-underPINN is released under the GPL-3.0 License. See [LICENSE.txt](https://github.com/Prashantiitk23/underPINN-v2605/blob/main/LICENSE) for the full text.
+underPINN is released under the GPL-3.0 License. See [LICENSE.txt](https://github.com/Aeroscience-Computations-Analysis-Lab/underPINN/blob/main/LICENSE) for the full text.
