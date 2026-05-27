@@ -3,6 +3,8 @@ message: "If you use this software, please cite it as below."
 authors:
   - family-names: "Kumar"
     given-names: "Prashant"
+  - family-names: "Senthilkumar"
+    given-names: "Lohith"
   - family-names: "Ranjan"
     given-names: "Rajesh"
 title: "underPINN-v2605"
