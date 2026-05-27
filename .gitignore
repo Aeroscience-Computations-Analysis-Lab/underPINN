@@ -5,3 +5,4 @@ underPINN/utils/__pycache__/
 underPINN/pde/__pycache__/
 underPINN/solver/__pycache__/
 underPINN/geometry/__pycache__/
+.vscode/
