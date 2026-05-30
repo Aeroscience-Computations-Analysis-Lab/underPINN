@@ -13,6 +13,16 @@ BCs:
   • Airfoil  : u = v = 0  (no-slip)
   • Pressure : p = 0 at one upstream point (gauge)
 
+Adaptive resampling (RAR-D)
+---------------------------
+Set ``training.resample_period > 0`` in config to periodically replace the
+interior collocation pool with points sampled proportional to the local NS
+residual magnitude.  Each resample evaluates the residual at a large
+candidate pool (``resample_candidates × n_col`` points), then draws the
+final set with weights  p ∝ |r|^resample_k.  This concentrates points in
+high-error regions (shear layers, wake, boundary-layer separation) without
+touching the fixed boundary condition points.
+
 Outputs: field plots (u, v, p), Cp curve, estimated CL, loss history,
          params checkpoint.
 """
@@ -65,6 +75,90 @@ def _estimate_CL(xy_s, Cp):
 
 
 # ---------------------------------------------------------------------------
+# RAR-D adaptive collocation resampling
+# ---------------------------------------------------------------------------
+
+def _rar_d_resample_col(
+    pde,
+    params,
+    af: NACAAirfoil,
+    n_col: int,
+    near_frac: float,
+    xmin: float,
+    xmax: float,
+    ymin: float,
+    ymax: float,
+    k: float,
+    n_candidates: int,
+    key: jax.Array,
+) -> jnp.ndarray:
+    """Replace the interior collocation pool using RAR-D weighting.
+
+    Generates ``n_candidates`` fresh domain points (preserving the original
+    exterior / near-surface split ratio), evaluates the NS residual magnitude
+    at each, then draws ``n_col`` replacement points proportional to
+    ``|residual|^k``.  Returns a new ``(n_col, 2)`` JAX array.
+
+    Parameters
+    ----------
+    pde :
+        ``NavierStokesPDE`` instance — provides ``residual(params, xy)``.
+    params :
+        Current network parameters.
+    af :
+        ``NACAAirfoil`` geometry used to draw valid exterior candidates.
+    n_col :
+        Number of collocation points to return (same as current pool size).
+    near_frac :
+        Fraction of candidates to draw from the near-surface subdomain.
+        Mirrors the original exterior / near-surface split.
+    xmin, xmax, ymin, ymax :
+        Far-field bounding box — passed to ``af.sample_exterior``.
+    k :
+        RAR-D exponent; ``p ∝ |r|^k``.  ``k=1`` is the standard choice.
+        Higher values concentrate points more aggressively in high-error
+        regions.
+    n_candidates :
+        Total candidate pool size (recommended: 5 × n_col).
+    key :
+        JAX PRNG key (consumed).
+
+    Returns
+    -------
+    xy_new : (n_col, 2) jnp.ndarray
+    """
+    key, k1, k2 = jax.random.split(key, 3)
+    # Convert JAX key to a NumPy integer seed for the geometry samplers
+    np_seed = int(jax.random.randint(k1, (), 0, 2**31 - 1))
+
+    # ── 1. Generate candidate pool ────────────────────────────────────────
+    n_near_c = max(1, int(n_candidates * near_frac))
+    n_ext_c  = n_candidates - n_near_c
+
+    xy_ext_c  = af.sample_exterior(n_ext_c, xmin, xmax, ymin, ymax, seed=np_seed)
+    xy_near_c = af.sample_near_surface(n_near_c, seed=np_seed + 1)
+    xy_cand   = jnp.array(np.concatenate([xy_ext_c, xy_near_c], axis=0))
+
+    # ── 2. NS residual magnitude at every candidate ───────────────────────
+    # residual returns (n_cand, 3): [continuity, x-momentum, y-momentum]
+    res     = pde.residual(params, xy_cand)
+    res_mag = (jnp.sqrt(jnp.sum(res ** 2, axis=-1))
+               if res.ndim > 1 else jnp.abs(res))   # (n_cand,)
+
+    # ── 3. Build sampling weights  p ∝ |r|^k ─────────────────────────────
+    w     = res_mag ** k
+    total = w.sum()
+    # Guard: if all residuals are zero (fully converged), use uniform weights
+    w = jnp.where(total > 0.0, w / total,
+                  jnp.ones_like(w) / n_candidates)
+
+    # ── 4. Draw n_col replacement points ─────────────────────────────────
+    idx = jax.random.choice(k2, n_candidates, shape=(n_col,),
+                            replace=True, p=w)
+    return xy_cand[idx]
+
+
+# ---------------------------------------------------------------------------
 # Main runner
 # ---------------------------------------------------------------------------
 
@@ -103,6 +197,12 @@ def run_airfoil(cfg) -> dict:
     patience  = int(cfg_get(tr, "early_stopping_patience", default=1000))
     seed      = int(cfg_get(tr, "seed",         default=0))
 
+    # ── RAR-D adaptive resampling ─────────────────────────────────────────────
+    resample_period     = int(cfg_get(tr, "resample_period",     default=0))
+    resample_candidates = int(cfg_get(tr, "resample_candidates", default=5))
+    resample_k          = float(cfg_get(tr, "resample_k",        default=1.0))
+    _near_frac          = n_near / (n_ext + n_near)   # preserve original split
+
     W_BODY = float(cfg_get(lw, "w_body",  default=50.0))
     W_FF   = float(cfg_get(lw, "w_ff",    default=10.0))
     W_PREF = float(cfg_get(lw, "w_pref",  default=10.0))
@@ -112,7 +212,11 @@ def run_airfoil(cfg) -> dict:
     u_ff_val  = U_INF * np.cos(alpha_rad)
     v_ff_val  = U_INF * np.sin(alpha_rad)
 
+    rar_info = (f"  RAR-D every {resample_period} ep, "
+                f"pool={resample_candidates}×, k={resample_k}"
+                if resample_period > 0 else "  RAR-D disabled (resample_period=0)")
     print(f"Airfoil:  NACA {naca},  Re={Re},  AoA={aoa}°,  epochs={epochs}")
+    print(rar_info)
 
     # ── Geometry ──────────────────────────────────────────────────────────────
     af = NACAAirfoil(naca=naca, chord=chord)
@@ -160,6 +264,9 @@ def run_airfoil(cfg) -> dict:
     opt_state = optimizer.init(params)
 
     # ── JIT step ──────────────────────────────────────────────────────────────
+    # NOTE: xy_body_j and xy_pref_j are captured in the closure — they are fixed
+    # boundary condition arrays that never change.  Only the interior collocation
+    # mini-batch (col_b) is drawn fresh each step and resampled via RAR-D.
     @jax.jit
     def step(params, state, col_b, ff_b, uff_b, vff_b):
         def loss_fn(p):
@@ -200,6 +307,25 @@ def run_airfoil(cfg) -> dict:
 
     try:
         for ep in range(start_ep, epochs):
+            # ── RAR-D adaptive resampling ─────────────────────────────────────
+            # Skip epoch 0 — residuals are random before the first gradient step.
+            # Resamples fire at ep == resample_period, 2×, 3×, …
+            if resample_period > 0 and ep > 0 and ep % resample_period == 0:
+                key, rkey = jax.random.split(key)
+                n_cand    = resample_candidates * n_col_pts
+                xy_col_j  = _rar_d_resample_col(
+                    pde, params, af,
+                    n_col=n_col_pts,
+                    near_frac=_near_frac,
+                    xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax,
+                    k=resample_k,
+                    n_candidates=n_cand,
+                    key=rkey,
+                )
+                # n_col_pts stays the same — just the pool content changes
+                print(f"  [RAR-D ep {ep:5d}] Resampled {n_col_pts} collocation points "
+                      f"(pool={n_cand}, k={resample_k})")
+
             key, k1, k2 = jax.random.split(key, 3)
             idx_col = safe_choice(k1, n_col_pts, batch_r)
             idx_ff  = safe_choice(k2, n_ff_pts,  batch_bc)
@@ -217,7 +343,10 @@ def run_airfoil(cfg) -> dict:
                     "bc": float(l_body + l_ff)}
             logger.on_epoch_end(ep, logs)
             stopper.on_epoch_end(ep, logs)
-            restart.maybe_save(ep, params, opt_state, {"loss_hist": loss_hist, "pde_hist": pde_hist, "bc_hist": bc_hist})
+            restart.maybe_save(ep, params, opt_state,
+                               {"loss_hist": loss_hist,
+                                "pde_hist":  pde_hist,
+                                "bc_hist":   bc_hist})
     except StopIteration:
         pass
 
@@ -284,6 +413,12 @@ def run_airfoil(cfg) -> dict:
     ax4.semilogy(loss_hist, label="Total",  alpha=0.9)
     ax4.semilogy(pde_hist,  label="PDE",    alpha=0.75)
     ax4.semilogy(bc_hist,   label="BC",     alpha=0.75)
+    # Mark RAR-D resample epochs with vertical dashed lines
+    if resample_period > 0:
+        for rep_ep in range(resample_period, len(loss_hist), resample_period):
+            ax4.axvline(rep_ep, color="grey", lw=0.8, ls="--", alpha=0.5)
+        ax4.axvline(resample_period, color="grey", lw=0.8, ls="--",
+                    alpha=0.5, label="RAR-D resample")
     ax4.set_xlabel("Epoch"); ax4.set_ylabel("Loss")
     ax4.set_title(f"Airfoil PINN — Re={Re},  NACA {naca}")
     ax4.legend(); fig4.tight_layout()

@@ -6,3 +6,6 @@ underPINN/pde/__pycache__/
 underPINN/solver/__pycache__/
 underPINN/geometry/__pycache__/
 .vscode/
+underPINN/benchmark_utils/__pycache__/evaluators.cpython-313.pyc
+underPINN/benchmark_utils/__pycache__/__init__.cpython-313.pyc
+underPINN/benchmark_utils/__pycache__/benchmark_suite.cpython-313.pyc

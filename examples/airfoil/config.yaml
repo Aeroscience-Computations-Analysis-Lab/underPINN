@@ -23,7 +23,7 @@ data:
   n_farfield_bc : 1600    # farfield boundary (400 per edge)
 
 training:
-  epochs             : 10000
+  epochs             : 2000
   lr                 : 1.0e-3
   lr_alpha           : 0.01
   batch_r            : 2048
@@ -31,6 +31,15 @@ training:
   log_every          : 1000
   seed               : 0
   save_restart_every : 500
+
+  # ── RAR-D adaptive collocation resampling ────────────────────────────
+  # Every resample_period epochs the interior collocation pool is replaced
+  # with points sampled proportional to |NS residual|^resample_k, drawn
+  # from a pool of resample_candidates × n_col fresh domain candidates.
+  # Set resample_period: 0 to disable (default).
+  resample_period    : 500    # 0 = off;  500 = resample every 500 epochs
+  resample_candidates: 5      # candidate pool = 5 × n_col  (~250 k pts)
+  resample_k         : 1.0    # 1.0 = standard RAR-D;  >1 = more aggressive
 
 loss:
   w_pde   : 1.0
