@@ -946,8 +946,8 @@ solver.<span class="fn">train</span>(*data, config=config)</pre>
     <p class="section-sub">Set <code>save_restart_every: 500</code> in your YAML (or <code>TrainingConfig</code>) and interrupted runs automatically resume from the last snapshot. No code changes needed — it just works.</p>
 
     <div class="box-info">
-      <strong>Config-hash safety</strong>
-      <p>The MD5 of the JSON-serialised YAML is stored in <code>meta.json</code>. If you change <em>any</em> field — <code>lr</code>, <code>epochs</code>, <code>layers</code>, physics constants — the hash differs and a clean run starts. It is safe to leave <code>save_restart_every</code> on permanently.</p>
+      <strong>How resumption is gated</strong>
+      <p>Solvers check the <code>done</code> flag in <code>meta.json</code>. If <code>done: false</code> (run was interrupted), the snapshot is restored automatically — regardless of config changes. To verify config integrity before resuming a completed run, use <code>python -m underPINN resume config.yaml</code>. To force a fresh start, delete <code>&lt;out_dir&gt;/restart/</code> manually.</p>
     </div>
 
     <ol class="restart-steps">
@@ -956,12 +956,12 @@ solver.<span class="fn">train</span>(*data, config=config)</pre>
         <p>Every <code>save_restart_every</code> epochs, RestartManager writes <code>params.msgpack</code>, <code>opt_state.msgpack</code>, <code>hists.npz</code>, and <code>meta.json</code> to <code>&lt;out_dir&gt;/restart/</code>.</p>
       </li>
       <li class="restart-step">
-        <h4>Re-run detects and verifies the snapshot</h4>
-        <p>On re-run with the same config file, RestartManager detects the snapshot directory, verifies the config MD5 hash, and resumes training from the saved epoch. Loss histories are stitched together so plots are continuous.</p>
+        <h4>Re-run checks the <code>done</code> flag and resumes</h4>
+        <p>On re-run, RestartManager reads <code>meta.json</code>. If <code>done: false</code> (run was interrupted), params, optimizer state, and loss histories are restored — training continues from the saved epoch. Plots stay continuous across restarts.</p>
       </li>
       <li class="restart-step">
-        <h4>Config change triggers fresh start</h4>
-        <p>If the YAML config changed between runs (any field), the stored hash differs from the current hash. The snapshot is silently ignored and a fresh run starts.</p>
+        <h4>Config-change safety via <code>resume</code> command</h4>
+        <p>Solvers do not hash-check configs — an interrupted run resumes even if you changed <code>lr</code>, <code>epochs</code>, etc. Run <code>python -m underPINN resume config.yaml</code> to detect config changes before resuming. To force a fresh start, delete <code>&lt;out_dir&gt;/restart/</code>.</p>
       </li>
       <li class="restart-step">
         <h4>Completion marks the snapshot as done</h4>
@@ -979,7 +979,7 @@ solver.<span class="fn">train</span>(*data, config=config)</pre>
           <tr><td><code>params.msgpack</code></td><td>Flax-serialised model parameters at the snapshot epoch</td></tr>
           <tr><td><code>opt_state.msgpack</code></td><td>Flax-serialised optimizer state (Adam moments, step count)</td></tr>
           <tr><td><code>hists.npz</code></td><td>All loss history arrays accumulated so far (<code>loss_hist</code>, <code>pde_hist</code>, etc.)</td></tr>
-          <tr><td><code>meta.json</code></td><td><code>{"epoch": N, "cfg_hash": "...", "done": false}</code></td></tr>
+          <tr><td><code>meta.json</code></td><td><code>{"epoch": N, "cfg_hash": null, "done": false}</code> — <code>cfg_hash</code> is <code>null</code> when written by a solver; populated by the <code>resume</code> CLI</td></tr>
         </tbody>
       </table>
     </div>
@@ -1112,7 +1112,7 @@ solver.<span class="fn">train</span>(*data, config=config)
             <td><strong>NACA 0012 Airfoil</strong></td>
             <td>Steady N-S, Re=200</td>
             <td>MLP [2,128,128,128,3]</td>
-            <td><span class="tag tag-green">exterior geometry</span><span class="tag tag-purple">Cp curve, CL</span></td>
+            <td><span class="tag tag-green">exterior geometry</span><span class="tag tag-purple">Cp curve, CL</span><span class="tag tag-orange">RAR-D</span></td>
             <td><code>examples/airfoil/config.yaml</code></td>
           </tr>
           <tr>
@@ -1169,7 +1169,7 @@ solver.<span class="fn">train</span>(*data, config=config)
           <li class="layer-item"><span class="layer-dot dot-green"></span><strong>geometry/</strong> &mdash; Interval, Rectangle, Airfoil, Pipe, Ramp, Composite, ShapelyGeom</li>
           <li class="layer-item"><span class="layer-dot dot-purple"></span><strong>training/</strong> &mdash; rar_d_resample (RAR-D adaptive collocation)</li>
           <li class="layer-item"><span class="layer-dot dot-orange"></span><strong>runner/</strong> &mdash; dispatch.py path-registry + importlib loader</li>
-          <li class="layer-item"><span class="layer-dot dot-red"></span><strong>utils/</strong> &mdash; save_predictions, checkpoint, restart, ModelPredictor, metrics</li>
+          <li class="layer-item"><span class="layer-dot dot-red"></span><strong>utils/</strong> &mdash; save_predictions, checkpoint, restart, ModelPredictor, timing, metrics</li>
           <li class="layer-item"><span class="layer-dot dot-blue"></span><strong>benchmark_utils/</strong> &mdash; BenchmarkRunner, evaluators, report</li>
         </ul>
       </div>
@@ -1271,6 +1271,7 @@ _REGISTRY = {
         <p>Print the resolved config or list all registered runners.</p>
         <div class="shell">
           <div><span class="prompt">$ </span><span class="cmd">python -m underPINN show examples/wave/config.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN resume examples/burgers/config.yaml</span></div>
           <div><span class="prompt">$ </span><span class="cmd">python -m underPINN list</span></div>
           <div><span class="prompt">$ </span><span class="cmd">python -m underPINN version</span></div>
           <div class="cmt">&nbsp;</div>
@@ -1398,6 +1399,10 @@ runner.<span class="fn">save_json</span>(<span class="st">"outputs/bench/results
       <div class="feature-card">
         <h3>Multi-GPU</h3>
         <p>Use <code>CUDA_VISIBLE_DEVICES=1</code> to restrict to a specific GPU. Full multi-GPU pmap training is not currently implemented; use the fastest single device.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Training time reporting</h3>
+        <p>Every solver prints timing stats at completion: <code>45s&nbsp;[JIT≈12s&nbsp;+&nbsp;3.3ms/ep]</code>. The <code>JIT≈…</code> component appears when XLA compilation overhead is detected, cleanly separating compile time from per-epoch cost.</p>
       </div>
     </div>
   </div>

@@ -16,6 +16,7 @@ import optax
 
 from underPINN.core.base import BaseSolver
 from underPINN.core.config import TrainingConfig
+from underPINN.utils.timing import fmt_train_time
 
 
 class ODESolver(BaseSolver):
@@ -180,7 +181,9 @@ class ODESolver(BaseSolver):
                 for cb in callbacks:
                     cb.on_train_end(final_logs)
                 if not callbacks:
-                    print(f"Training complete — final loss {final_logs['loss']:.3e}")
+                    elapsed = time.time() - start
+                    print(f"Training complete — final loss {final_logs['loss']:.3e} | "
+                          f"{elapsed:.1f}s")
                 if _restart is not None:
                     _restart.done()
                 return
@@ -189,12 +192,17 @@ class ODESolver(BaseSolver):
         # PYTHON-LOOP MODE  (n_scan == 1, or scan tail)                       #
         # ------------------------------------------------------------------ #
         ep_offset = len(self.loss_hist)
+        _t_first: float | None = None   # first-step time for JIT detection
+        _n_start = len(self.loss_hist)  # history length before this run
 
         try:
             for ep in range(epochs):
+                _t0 = time.time()
                 self.params, self.state, loss, pde_l, ic_l, ic_dot_l = self._step(
                     self.params, self.state, t_r, t_ic, u_ic, u_ic_dot
                 )
+                if _t_first is None:
+                    _t_first = time.time() - _t0
                 self.loss_hist.append(float(loss))
                 self.pde_hist.append(float(pde_l))
                 self.ic_hist.append(float(ic_l))
@@ -232,10 +240,13 @@ class ODESolver(BaseSolver):
             "pde":  self.pde_hist[-1] if self.pde_hist else float("nan"),
             "ic":   self.ic_hist[-1] if self.ic_hist else float("nan"),
         }
+        elapsed = time.time() - start
+        _n_ep   = len(self.loss_hist) - _n_start
         for cb in callbacks:
             cb.on_train_end(final_logs)
         if not callbacks:
-            print(f"Training complete — final loss {final_logs['loss']:.3e}")
+            print(f"Training complete — final loss {final_logs['loss']:.3e} | "
+                  f"{fmt_train_time(elapsed, _t_first, _n_ep)}")
 
         if _restart is not None:
             _restart.done()

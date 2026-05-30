@@ -6,6 +6,7 @@ import optax
 from underPINN.core.base import BaseSolver
 from underPINN.core.config import TrainingConfig
 from underPINN.utils.sampling import safe_choice
+from underPINN.utils.timing import fmt_train_time
 
 
 class SteadySolver(BaseSolver):
@@ -105,8 +106,12 @@ class SteadySolver(BaseSolver):
         key = jax.random.PRNGKey(seed)
         start = time.time()
 
+        _t_first: float | None = None   # first-step time for JIT detection
+        _n_start = len(self.loss_hist)  # history length before this run
+
         try:
             for ep in range(start_ep, epochs):
+                _t0 = time.time()
                 key, k1, k2 = jax.random.split(key, 3)
 
                 idx_r = safe_choice(k1, xy_r.shape[0], batch_r)
@@ -116,6 +121,8 @@ class SteadySolver(BaseSolver):
                     self.params, self.state,
                     xy_r[idx_r], xy_b[idx_b], u_b[idx_b],
                 )
+                if _t_first is None:
+                    _t_first = time.time() - _t0
 
                 self.loss_hist.append(float(loss))
                 self.pde_hist.append(float(pde_l))
@@ -156,10 +163,13 @@ class SteadySolver(BaseSolver):
             "pde": self.pde_hist[-1] if self.pde_hist else float("nan"),
             "bc": self.bc_hist[-1] if self.bc_hist else float("nan"),
         }
+        elapsed = time.time() - start
+        _n_ep   = len(self.loss_hist) - _n_start
         for cb in callbacks:
             cb.on_train_end(final_logs)
         if not callbacks:
-            print(f"Training complete — final loss {final_logs['loss']:.3e}")
+            print(f"Training complete — final loss {final_logs['loss']:.3e} | "
+                  f"{fmt_train_time(elapsed, _t_first, _n_ep)}")
 
         if _restart is not None:
             _restart.done()

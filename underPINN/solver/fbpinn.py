@@ -26,6 +26,8 @@ import jax
 import jax.numpy as jnp
 import optax
 
+from underPINN.utils.timing import fmt_train_time
+
 from underPINN.core.base import BaseSolver
 from underPINN.core.config import TrainingConfig
 from underPINN.training.resample import rar_d_resample
@@ -291,7 +293,9 @@ class FBPINNSolver(BaseSolver):
                 for cb in callbacks:
                     cb.on_train_end(final_logs)
                 if not callbacks:
-                    print(f"Training complete — final loss {final_logs['loss']:.3e}")
+                    elapsed = time.time() - start
+                    print(f"Training complete — final loss {final_logs['loss']:.3e} | "
+                          f"{elapsed:.1f}s")
                 return
 
         # ------------------------------------------------------------------ #
@@ -307,8 +311,12 @@ class FBPINNSolver(BaseSolver):
             # ep_offset already accounts for restored histories.
             epochs = epochs - _ep_resume
 
+        _t_first: float | None = None   # first-step time for JIT detection
+        _n_start = len(self.loss_hist)  # history length before this run
+
         try:
             for ep in range(epochs):
+                _t0 = time.time()
                 key, k1, k2, k3 = jax.random.split(key, 4)
 
                 idx_r = safe_choice(k1, N_r, batch_r)
@@ -322,6 +330,9 @@ class FBPINNSolver(BaseSolver):
                     x_i[idx_i], u_i[idx_i],
                     x_b[idx_b], t_b[idx_b], u_b[idx_b],
                 )
+
+                if _t_first is None:
+                    _t_first = time.time() - _t0
 
                 self.loss_hist.append(float(loss))
                 self.pde_hist.append(float(pde_l))
@@ -385,10 +396,13 @@ class FBPINNSolver(BaseSolver):
             "ic":   self.ic_hist[-1] if self.ic_hist else float("nan"),
             "bc":   self.bc_hist[-1] if self.bc_hist else float("nan"),
         }
+        elapsed = time.time() - start
+        _n_ep   = len(self.loss_hist) - _n_start
         for cb in callbacks:
             cb.on_train_end(final_logs)
         if not callbacks:
-            print(f"Training complete — final loss {final_logs['loss']:.3e}")
+            print(f"Training complete — final loss {final_logs['loss']:.3e} | "
+                  f"{fmt_train_time(elapsed, _t_first, _n_ep)}")
 
         # Mark restart snapshot as done so next run starts fresh
         if _restart is not None:

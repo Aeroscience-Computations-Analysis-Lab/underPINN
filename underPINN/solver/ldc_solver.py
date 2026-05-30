@@ -5,6 +5,7 @@ import time
 from jax.tree_util import register_pytree_node_class
 
 from underPINN.core.base import BaseSolver
+from underPINN.utils.timing import fmt_train_time
 from underPINN.core.config import TrainingConfig
 
 
@@ -79,13 +80,9 @@ class LDCSolver(BaseSolver):
             callbacks  = list(config.callbacks)
             self._attach_checkpoint_callbacks(callbacks)
             if config.lr_schedule is not None:
-                if hasattr(config, 'lr'):
-                    schedule = config.lr_schedule
-                else:
-                    schedule = config.lr_schedule
                 self.opt = optax.chain(
                     optax.scale_by_adam(),
-                    optax.scale_by_schedule(schedule),
+                    optax.scale_by_schedule(config.lr_schedule),
                     optax.scale(-1.0),
                 )
                 self._step     = self._build_step()
@@ -138,8 +135,12 @@ class LDCSolver(BaseSolver):
             f"col={n_col} inlet={n_inlet} noslip={n_noslip}"
         )
 
+        _t_first: float | None = None   # first-step time for JIT detection
+        _n_start = len(self.loss_hist)  # history length before this run
+
         try:
             for ep in range(start_ep, epochs):
+                _t0 = time.time()
                 # True for the first epoch of any run — fresh start or resumed.
                 # Ensures RBA running sums are properly seeded even after restart
                 # (rsum1/2/3 are zeroed above; is_init=True sets eta=1.0).
@@ -176,6 +177,9 @@ class LDCSolver(BaseSolver):
                 rsum1 = jnp.concatenate(r1_ups)
                 rsum2 = jnp.concatenate(r2_ups)
                 rsum3 = jnp.concatenate(r3_ups)
+
+                if _t_first is None:
+                    _t_first = time.time() - _t0
 
                 avg_loss = ep_loss / steps
                 phys_l, lin, lno = aux
@@ -216,10 +220,13 @@ class LDCSolver(BaseSolver):
             "pde":  self.phys_hist[-1] if self.phys_hist else float("nan"),
             "bc":   self.bc_hist[-1]   if self.bc_hist   else float("nan"),
         }
+        elapsed = time.time() - start
+        _n_ep   = len(self.loss_hist) - _n_start
         for cb in callbacks:
             cb.on_train_end(final_logs)
         if not callbacks:
-            print(f"Training complete — final loss {final_logs['loss']:.3e}")
+            print(f"Training complete — final loss {final_logs['loss']:.3e} | "
+                  f"{fmt_train_time(elapsed, _t_first, _n_ep)}")
 
         # Mark snapshot as done so the next identical run starts fresh.
         if _restart is not None:

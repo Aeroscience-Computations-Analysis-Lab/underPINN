@@ -87,21 +87,40 @@ def load_config(path: str) -> types.SimpleNamespace:
     return _to_ns(data)
 
 
-def cfg_get(ns, *attrs, default=None):
+def cfg_get(ns, *attrs, default=None, warn: bool = False):
     """Safely traverse a nested SimpleNamespace chain.
 
     Returns *default* if any level of the path is missing.
+
+    Parameters
+    ----------
+    ns      : root SimpleNamespace (usually the top-level config)
+    *attrs  : sequence of attribute names forming the key path
+    default : value returned when the path is absent
+    warn    : if ``True``, emit a :mod:`warnings` warning whenever the
+              default is used because an attribute was not found.  Useful
+              for catching typos in field names (e.g. ``"n_colocation"``
+              instead of ``"n_collocation"``).
 
     Example::
 
         out_dir = cfg_get(cfg, "output", "dir", default="outputs/run")
         patience = cfg_get(cfg, "training", "early_stopping_patience", default=None)
+        n_col    = cfg_get(cfg.data, "n_collocation", default=5000, warn=True)
     """
+    import warnings as _warnings
     obj = ns
-    for a in attrs:
+    for i, a in enumerate(attrs):
         try:
             obj = getattr(obj, a)
         except AttributeError:
+            if warn:
+                path = ".".join(str(x) for x in attrs[: i + 1])
+                _warnings.warn(
+                    f"cfg_get: '{path}' not found in config — "
+                    f"using default={default!r}",
+                    stacklevel=2,
+                )
             return default
     return default if obj is None else obj
 

@@ -26,9 +26,9 @@ underPINN is a research-grade PINN engine that combines classical collocation-ba
 
 ### Restart / Resume
 - **`RestartManager`** saves `params.msgpack`, `opt_state.msgpack`, loss histories, and a `meta.json` to `<out_dir>/restart/` every `save_restart_every` epochs
-- On re-run with the same config file, training resumes exactly from the last snapshot — epoch counter, optimizer state, and loss histories are all restored
-- **Config-hash check** — the MD5 of the JSON-serialised YAML is stored in `meta.json`; if _any_ field changes (epochs, lr, layers, …), the hash differs and a fresh run starts automatically; it is safe to leave `save_restart_every` on permanently
-- **`done()` marker** — once training completes normally or via early stopping, the snapshot is marked `"done": true`; the next run with the same config starts fresh instead of re-resuming a completed run
+- On re-run, `RestartManager` checks the `"done"` flag; if `done: false` (interrupted run), training resumes exactly from the last snapshot — epoch counter, optimizer state, and loss histories are all restored
+- **`done()` marker** — once training completes normally or via early stopping, the snapshot is marked `"done": true`; the next `run` starts fresh. An interrupted run leaves `done: false` and auto-resumes on the next `run`
+- **`resume` CLI command** — `python -m underPINN resume <config.yaml>` verifies the MD5 config hash and resets `done` so a completed run can be continued; warns if any field (lr, epochs, layers, …) changed since the last snapshot
 
 ### GPU Memory
 - JAX's XLA BFC allocator pre-reserves ~90% of all free VRAM the moment `import jax` executes; on an 80 GB A100 this shows as ~73 GB reserved even for a 3-layer MLP
@@ -85,6 +85,7 @@ underPINN is a research-grade PINN engine that combines classical collocation-ba
 
 ### CLI
 - **`run`** — run a single problem from a YAML config
+- **`resume`** — verify the config MD5 hash against a stored snapshot and reset `done` for continuation; warns if any config field changed
 - **`sweep`** — Cartesian product hyperparameter sweep; each combination gets its own sub-directory
 - **`bench`** — full benchmark suite
 - **`list`** — list all registered runners
@@ -443,9 +444,9 @@ The restart system lets you safely interrupt and resume any training run without
    - `hists.npz` — all loss history arrays accumulated so far (`loss_hist`, `pde_hist`, etc.)
    - `meta.json` — `{"epoch": N, "cfg_hash": "...", "done": false}`
 
-2. On re-run with the same config file, `RestartManager` detects the snapshot directory, verifies the config MD5 hash, and resumes training from the saved epoch. The loss histories are stitched together so plots are continuous.
+2. On re-run, `RestartManager` detects the snapshot directory and reads `meta.json`. If `done: false` (the run was interrupted), params, optimizer state, and loss histories are restored and training continues from the saved epoch. Plots are continuous across restarts.
 
-3. If the YAML config changed between runs (different `lr`, `epochs`, `layers`, or any field), the stored hash differs from the current config's hash → the snapshot is silently ignored and a fresh run starts.
+3. **Config-change safety** — solvers do not hash-check configs automatically. An interrupted run will resume even if you changed `lr`, `epochs`, or other fields. Use `python -m underPINN resume <config.yaml>` to verify the config hash before resuming. To force a fresh start without the command, delete `<out_dir>/restart/` manually.
 
 4. After training finishes — either normally or via early stopping — `done()` marks the snapshot with `"done": true`. The next run with the same config file starts fresh rather than re-resuming a completed run.
 
@@ -476,11 +477,19 @@ That's all. If the process is killed at epoch 3 700, the next run resumes from e
 | `params.msgpack` | Flax-serialised model parameters |
 | `opt_state.msgpack` | Flax-serialised optimizer state |
 | `hists.npz` | Loss history arrays (`loss_hist`, `pde_hist`, etc.) |
-| `meta.json` | `{"epoch": N, "cfg_hash": "...", "done": false}` |
+| `meta.json` | `{"epoch": N, "cfg_hash": null, "done": false}` — `cfg_hash` is `null` when run via solver; populated by the `resume` CLI |
 
 ### Config change detection
 
-The config hash is the MD5 of the JSON-serialised YAML after loading. It covers every field — `epochs`, `lr`, `layers`, physics constants, loss weights. Changing any value produces a different hash → clean start. This means you can keep `save_restart_every` enabled permanently: sweeps and updated configs always get fresh runs, while interrupted runs of the same config always resume.
+Solvers gate resumption on the `done` flag only — not on a config hash. This means an interrupted run will auto-resume even if you changed `lr`, `epochs`, `layers`, or physics parameters. To check for config changes before resuming, use the `resume` CLI command:
+
+```bash
+python -m underPINN resume examples/burgers/config.yaml
+```
+
+`resume` computes the MD5 of the current YAML, compares it against the hash stored in `meta.json`, and warns you if any field changed since the last snapshot. If everything is consistent, it resets `done` to `false` so the next `run` will resume.
+
+To force a fresh start without the command, simply delete `<out_dir>/restart/` or set `save_restart_every: 0` temporarily.
 
 ---
 
@@ -679,6 +688,7 @@ underPINN/
 │   ├── seed.py            # set_seed (Python + NumPy + JAX)
 │   ├── checkpoint.py      # save_checkpoint, load_checkpoint, ModelPredictor
 │   ├── restart.py         # RestartManager (snapshot + resume + done marker)
+│   ├── timing.py          # fmt_train_time (JIT-aware training time reporting)
 │   ├── metrics.py         # rel_l2, mse helpers
 │   └── plotting.py        # plot_losses, plot_ode_result
 │
@@ -724,7 +734,7 @@ docs/
 | 2-D Lid-Driven Cavity | Steady N-S, Re=100 | FBPINN + SimpleGate | `LDCSolver`, attention, Re=100 | `examples/LDC/config.yaml` |
 | 2-D RANS k-ε | Turbulent channel | FBPINN | `RANSSolver`, RBA, Re=10000 | `examples/K-Epsilon/config.yaml` |
 | 2-D Compressible Ramp | Steady Euler, M=3 | MLP [2,80,80,80,80,80,4] | Oblique shock θ=10°, ramp geometry | `examples/ramp/config.yaml` |
-| NACA 0012 Airfoil | Steady N-S, Re=200 | MLP [2,128,128,128,3] | Exterior geometry, Cp curve, CL | `examples/airfoil/config.yaml` |
+| NACA 0012 Airfoil | Steady N-S, Re=200 | MLP [2,128,128,128,3] | Exterior geometry, Cp curve, CL, RAR-D resampling | `examples/airfoil/config.yaml` |
 | 3-D Pipe Flow | Steady 3-D N-S | MLP [3,64,64,64,64,4] | Double-jacfwd Hessian, Pipe geometry | `examples/pipe_flow/pipe_flow.yaml` |
 | 3-D Unsteady Pipe Transfer | u_t = G + ν∇²u | MLP [3,64,64,64,64,1] | Bessel exact solution, Re + temporal TL | `examples/pipe_flow/pipe_flow_unsteady_transfer.yaml` |
 | Burgers Transfer | Burgers | MLP [2,64,64,64,1] | Parameter transfer (ν) + temporal transfer | `examples/transfer/burgers_transfer.yaml` |
@@ -823,6 +833,13 @@ Use `CUDA_VISIBLE_DEVICES=1` to restrict to a specific GPU. Full multi-GPU `pmap
 
 ### Cosine LR decay
 Always prefer `optax.cosine_decay_schedule` over a fixed learning rate for runs longer than 2 000 epochs. It provides free accuracy improvement at no cost by reducing the LR smoothly toward a small `alpha` value (recommended: `alpha=1e-2`).
+
+### Training time reporting
+Every solver prints a timing summary at the end of training:
+```
+Training complete — final loss 1.23e-04 | 45.2s  [JIT≈12s + 3.3ms/ep]
+```
+The `JIT≈…` component appears when the first epoch is ≥ 3 s and at least 4× slower than the average of subsequent epochs, separating XLA compilation overhead from actual training time. The `ms/ep` figure is the mean wall-clock cost per epoch after JIT warm-up — useful for benchmarking solver configurations.
 
 ---
 
