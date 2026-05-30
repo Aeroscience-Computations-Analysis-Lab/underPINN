@@ -30,7 +30,7 @@ from underPINN.utils.timing import fmt_train_time
 
 from underPINN.core.base import BaseSolver
 from underPINN.core.config import TrainingConfig
-from underPINN.training.resample import rar_d_resample
+from underPINN.training.resample import rar_d_resample_split as rar_d_resample
 from underPINN.utils.sampling import safe_choice
 
 
@@ -411,16 +411,6 @@ class FBPINNSolver(BaseSolver):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _make_opt(lr, lr_schedule):
-        if lr_schedule is not None:
-            return optax.chain(
-                optax.scale_by_adam(),
-                optax.scale_by_schedule(lr_schedule),
-                optax.scale(-1.0),
-            )
-        return optax.adam(lr)
 
     def _build_step(self):
         """Single JIT-compiled gradient step (Python-loop mode)."""

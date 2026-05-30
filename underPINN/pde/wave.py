@@ -35,13 +35,17 @@ class WavePDE(BasePDE):
         J = jax.vmap(jax.jacfwd(u_single))(xy)
         return J[:, 1]
 
-    def residual(self, params, x, t):
-        xy = jnp.stack([x, t], axis=1)
+    def residual(self, params, xt):
+        """Compute u_tt − c²·u_xx at collocation points.
 
+        Parameters
+        ----------
+        xt : (N, 2) packed array — xt[:, 0] = x, xt[:, 1] = t.
+        """
         def u_single(xy_i):
             return self.model.apply(params, xy_i[None, :])[0, 0]
 
-        H = jax.vmap(jax.hessian(u_single))(xy)
+        H = jax.vmap(jax.hessian(u_single))(xt)
         u_tt = H[:, 1, 1]
         u_xx = H[:, 0, 0]
         return u_tt - self.c ** 2 * u_xx

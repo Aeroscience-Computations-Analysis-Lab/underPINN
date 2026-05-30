@@ -27,21 +27,25 @@ class BurgersPDE(BasePDE):
     def u(self, params, x, t):
         return self.model.apply(params, jnp.stack([x, t], axis=1))[:, 0]
 
-    def residual(self, params, x, t):
-        xy = jnp.stack([x, t], axis=1)  # (N, 2)
+    def residual(self, params, xt):
+        """Compute u_t + u·u_x − ν·u_xx at collocation points.
 
+        Parameters
+        ----------
+        xt : (N, 2) packed array — xt[:, 0] = x, xt[:, 1] = t.
+        """
         def u_single(xy_i):
             """Scalar network output at one (x, t) point."""
             return self.model.apply(params, xy_i[None, :])[0, 0]
 
         # First derivatives via forward-mode AD → (N, 2): [u_x, u_t]
-        J = jax.vmap(jax.jacfwd(u_single))(xy)
+        J = jax.vmap(jax.jacfwd(u_single))(xt)
         ux = J[:, 0]
         ut = J[:, 1]
 
         # Second derivative u_xx from Hessian diagonal → (N, 2, 2)
-        H = jax.vmap(jax.hessian(u_single))(xy)
+        H = jax.vmap(jax.hessian(u_single))(xt)
         uxx = H[:, 0, 0]
 
-        u = self.model.apply(params, xy)[:, 0]
+        u = self.model.apply(params, xt)[:, 0]
         return ut + u * ux - self.nu * uxx

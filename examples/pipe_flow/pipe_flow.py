@@ -89,9 +89,8 @@ def run_pipe_flow(cfg) -> dict:
     @jax.jit
     def step(params, state, xyz_r, xyz_w, xyz_in, xyz_out):
         def loss_fn(p):
-            cont, mx, my, mz = pde.residual(p, xyz_r)
-            pde_l  = (jnp.mean(cont**2) + jnp.mean(mx**2)
-                      + jnp.mean(my**2) + jnp.mean(mz**2))
+            _res   = pde.residual(p, xyz_r)          # (N, 4): [cont, mx, my, mz]
+            pde_l  = jnp.mean(jnp.sum(_res ** 2, axis=-1))
 
             out_w  = model.apply(p, xyz_w)
             wall_l = jnp.mean(out_w[:, 0]**2 + out_w[:, 1]**2 + out_w[:, 2]**2)

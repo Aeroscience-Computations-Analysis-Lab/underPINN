@@ -35,17 +35,15 @@ class UnsteadyHeat2DPDE(BasePDE):
         xyt = jnp.concatenate([xy, t[:, None]], axis=1)   # (N, 3)
         return self.model.apply(params, xyt)[:, 0]
 
-    def residual(self, params, xy, t, alpha=None):
+    def residual(self, params, xyt, alpha=None):
         """Compute u_t − α (u_xx + u_yy) at collocation points.
 
         Parameters
         ----------
-        xy    : (N, 2) spatial coordinates
-        t     : (N,)  times
-        alpha : override self.alpha (for inverse problems)
+        xyt   : (N, 3) packed array — xyt[:, 0:2] = (x, y), xyt[:, 2] = t.
+        alpha : Overrides ``self.alpha`` when given (inverse-problem use).
         """
-        a   = self.alpha if alpha is None else alpha
-        xyt = jnp.concatenate([xy, t[:, None]], axis=1)   # (N, 3)
+        a = self.alpha if alpha is None else alpha
 
         def u_single(xyt_i):
             return self.model.apply(params, xyt_i[None, :])[0, 0]

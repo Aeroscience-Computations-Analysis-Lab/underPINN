@@ -147,9 +147,8 @@ def run_ramp(cfg) -> dict:
     def step(params, state, xy_r_, xy_in_, xy_wall_, xy_up_):
         def loss_fn(p):
             # PDE residuals
-            cont, mom_x, mom_y, energy = pde.residual(p, xy_r_)
-            pde_l = (jnp.mean(cont   ** 2) + jnp.mean(mom_x ** 2)
-                     + jnp.mean(mom_y ** 2) + jnp.mean(energy ** 2))
+            _res  = pde.residual(p, xy_r_)          # (N, 4): [cont, mom_x, mom_y, energy]
+            pde_l = jnp.mean(jnp.sum(_res ** 2, axis=-1))
 
             # Inlet BC — all four primitives fixed to freestream
             pv_in  = pde.apply(p, xy_in_)

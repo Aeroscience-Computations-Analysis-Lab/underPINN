@@ -5,6 +5,7 @@ import optax
 
 from underPINN.core.base import BaseSolver
 from underPINN.core.config import TrainingConfig
+from underPINN.training.resample import rar_d_resample
 from underPINN.utils.sampling import safe_choice
 from underPINN.utils.timing import fmt_train_time
 
@@ -65,19 +66,27 @@ class SteadySolver(BaseSolver):
         config : :class:`TrainingConfig` — preferred production path
         """
         if config is not None:
-            epochs = config.epochs
-            batch_r = config.batch_r
-            batch_b = config.batch_b
-            seed = config.seed
-            log_every = config.log_every
-            callbacks = list(config.callbacks)
+            epochs     = config.epochs
+            batch_r    = config.batch_r
+            batch_b    = config.batch_b
+            seed       = config.seed
+            log_every  = config.log_every
+            callbacks  = list(config.callbacks)
             self._attach_checkpoint_callbacks(callbacks)
+            resample_period     = config.resample_period
+            resample_k          = config.resample_k
+            resample_candidates = config.resample_candidates
+            candidate_sampler   = config.candidate_sampler
             if config.lr_schedule is not None:
                 self.opt = self._make_opt(config.lr, config.lr_schedule)
                 self._step = self._build_step()
                 self.state = self.opt.init(self.params)
         else:
-            callbacks = []
+            callbacks           = []
+            resample_period     = 0
+            resample_k          = 1.0
+            resample_candidates = 0
+            candidate_sampler   = None
 
         # ── Restart / resume ──────────────────────────────────────────────────
         _restart = None
@@ -138,6 +147,18 @@ class SteadySolver(BaseSolver):
                          "bc_hist":   self.bc_hist},
                     )
 
+                # ── RAR-D adaptive resampling ─────────────────────────────────
+                if resample_period > 0 and (ep + 1) % resample_period == 0:
+                    key, rkey = jax.random.split(key)
+                    n_cands = resample_candidates or 5 * xy_r.shape[0]
+                    xy_r = rar_d_resample(
+                        self.pde, self.params, xy_r,
+                        k=resample_k,
+                        n_candidates=n_cands,
+                        candidate_sampler=candidate_sampler,
+                        key=rkey,
+                    )
+
                 logs = {
                     "loss": float(loss),
                     "pde": float(pde_l),
@@ -177,16 +198,6 @@ class SteadySolver(BaseSolver):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _make_opt(lr, lr_schedule):
-        if lr_schedule is not None:
-            return optax.chain(
-                optax.scale_by_adam(),
-                optax.scale_by_schedule(lr_schedule),
-                optax.scale(-1.0),
-            )
-        return optax.adam(lr)
 
     def _build_step(self):
         loss_fn = self.loss

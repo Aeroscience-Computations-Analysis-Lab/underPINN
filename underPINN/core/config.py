@@ -29,10 +29,17 @@ class TrainingConfig:
         ``1.0`` is the standard choice; larger values focus more aggressively
         on high-residual regions.
     candidate_sampler : callable, optional
-        ``fn(n: int, key) → (x, t)`` that draws fresh candidate points from
-        the problem domain.  When *None* (default) bootstrap resampling from
-        the current collocation set is used — adequate for most problems but
-        inferior to a proper domain sampler.
+        Callable that draws fresh candidate points from the problem domain.
+        The expected signature depends on which solver uses this config:
+
+        * Solvers that use **packed** collocation (e.g. :class:`SteadySolver`):
+          ``fn(n: int, key) → xy``  where ``xy`` is an ``(n, D)`` array.
+        * Solvers that use **split** collocation (e.g. :class:`FBPINNSolver`):
+          ``fn(n: int, key) → (x, t)``  returning a pair of arrays.
+
+        When *None* (default) bootstrap resampling from the current
+        collocation set is used — adequate for most problems but inferior to
+        a proper domain sampler.
 
     Examples
     --------

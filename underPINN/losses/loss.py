@@ -50,7 +50,11 @@ class PINNLoss(BaseLoss):
 
     def __call__(self, params, x_r, t_r, x_i, u_i, x_b=None, t_b=None, u_b=None):
         # ---------- PDE residual ----------
-        res = self.pde.residual(params, x_r, t_r) # NOTE: MULTI OUTPUT SUPPORT NEEDED
+        # Pack (x, t) into a single (N, D) array following the unified convention.
+        # x_r may be 1-D (scalar spatial) or 2-D (multi-component spatial).
+        x_r2d = x_r if x_r.ndim == 2 else x_r[:, None]
+        xt_r  = jnp.concatenate([x_r2d, t_r[:, None]], axis=1)
+        res   = self.pde.residual(params, xt_r)
 
         if self.rba:
             # Residual-based adaptivity: weight each point by its relative

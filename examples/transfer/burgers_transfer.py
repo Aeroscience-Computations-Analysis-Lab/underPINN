@@ -183,7 +183,7 @@ def run_burgers_transfer(cfg) -> dict:
         fig2, axes2 = plt.subplots(1, 2, figsize=(12, 4))
         for ax, u, title in zip(axes2, [u_tf, u_sc],
                                  [f"Transfer  ν={tgt_nu}", f"Scratch  ν={tgt_nu}"]):
-            cf = ax.contourf(x_tf, t_tf, u, 50, cmap="RdBu_r", vmin=-1.0, vmax=1.0)
+            cf = ax.contourf(x_tf, t_tf, u.T, 50, cmap="RdBu_r", vmin=-1.0, vmax=1.0)
             plt.colorbar(cf, ax=ax)
             ax.set_title(title); ax.set_xlabel("x"); ax.set_ylabel("t")
         fig2.suptitle("Burgers: Parameter Transfer solution comparison")

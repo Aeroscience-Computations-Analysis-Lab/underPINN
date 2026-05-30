@@ -29,16 +29,21 @@ class DiffusionPDE(BasePDE):
     def u(self, params, x, t):
         return self.model.apply(params, jnp.stack([x, t], axis=1))[:, 0]
 
-    def residual(self, params, x, t, alpha=None):
-        """Compute u_t - α u_xx.  `alpha` overrides ``self.alpha`` when given."""
+    def residual(self, params, xt, alpha=None):
+        """Compute u_t − α·u_xx at collocation points.
+
+        Parameters
+        ----------
+        xt    : (N, 2) packed array — xt[:, 0] = x, xt[:, 1] = t.
+        alpha : Overrides ``self.alpha`` when given (inverse-problem use).
+        """
         a = self.alpha if alpha is None else alpha
-        xy = jnp.stack([x, t], axis=1)
 
         def u_single(xy_i):
             return self.model.apply(params, xy_i[None, :])[0, 0]
 
-        J = jax.vmap(jax.jacfwd(u_single))(xy)
-        H = jax.vmap(jax.hessian(u_single))(xy)
+        J = jax.vmap(jax.jacfwd(u_single))(xt)
+        H = jax.vmap(jax.hessian(u_single))(xt)
         u_t  = J[:, 1]
         u_xx = H[:, 0, 0]
         return u_t - a * u_xx

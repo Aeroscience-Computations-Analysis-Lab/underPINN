@@ -69,7 +69,8 @@ class SteadyNS3DPDE(BasePDE):
         mom_y = u * v_x + v * v_y + w * v_z + p_y - nu * lap_v
         mom_z = u * w_x + v * w_y + w * w_z + p_z - nu * lap_w
 
-        return cont, mom_x, mom_y, mom_z
+        # Return shape (N, 4): [cont, mom_x, mom_y, mom_z]
+        return jnp.stack([cont, mom_x, mom_y, mom_z], axis=-1)
 
     def exact_poiseuille(self, xyz, R: float = 0.5, U_max: float = 1.0,
                          L: float = 2.0):

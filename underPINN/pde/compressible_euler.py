@@ -175,7 +175,8 @@ class CompressibleEulerPDE(BasePDE):
         # 4. Energy (isentropic): u p_x + v p_y + γ p (u_x + v_y) = 0
         energy = u * p_x + v * p_y + gamma * p * (u_x + v_y)
 
-        return cont, mom_x, mom_y, energy
+        # Return shape (N, 4): [cont, mom_x, mom_y, energy]
+        return jnp.stack([cont, mom_x, mom_y, energy], axis=-1)
 
     # ------------------------------------------------------------------
     # Freestream conditions (non-dimensional)

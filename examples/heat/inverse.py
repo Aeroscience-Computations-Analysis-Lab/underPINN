@@ -123,7 +123,7 @@ def run_heat_inverse(cfg) -> dict:
     def step(params, state):
         def loss_fn(p):
             alpha  = jnp.exp(p["log_alpha"])
-            res    = pde.residual(p["nn"], x_r, t_r, alpha=alpha)
+            res    = pde.residual(p["nn"], jnp.stack([x_r, t_r], axis=1), alpha=alpha)
             pde_l  = jnp.mean(res ** 2)
             ic_l   = jnp.mean((pde.u(p["nn"], x_ic, jnp.zeros_like(x_ic)) - u_ic) ** 2)
             bc_l   = jnp.mean((pde.u(p["nn"], x_bc, t_bc) - u_bc) ** 2)

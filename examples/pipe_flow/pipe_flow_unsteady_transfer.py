@@ -94,7 +94,8 @@ def _run_training(pde, data, epochs: int, lr: float, R: float,
     @jax.jit
     def step(params, state, yz_r_b, t_r_b, yz_ic_b, yz_bc_b, t_bc_b):
         def loss_fn(p):
-            pde_l = jnp.mean(pde.residual(p, yz_r_b, t_r_b) ** 2)
+            pde_l = jnp.mean(pde.residual(
+                p, jnp.concatenate([yz_r_b, t_r_b[:, None]], axis=1)) ** 2)
             t_z   = jnp.zeros(yz_ic_b.shape[0])
             ic_l  = jnp.mean(pde.u(p, yz_ic_b, t_z) ** 2)
             bc_l  = jnp.mean(pde.u(p, yz_bc_b, t_bc_b) ** 2)

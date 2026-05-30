@@ -255,16 +255,6 @@ class ODESolver(BaseSolver):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _make_opt(lr, lr_schedule):
-        if lr_schedule is not None:
-            return optax.chain(
-                optax.scale_by_adam(),
-                optax.scale_by_schedule(lr_schedule),
-                optax.scale(-1.0),
-            )
-        return optax.adam(lr)
-
     def _build_step(self):
         loss_fn = self.loss
         opt = self.opt

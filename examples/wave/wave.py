@@ -86,7 +86,7 @@ def run_wave(cfg) -> dict:
     @jax.jit
     def step(params, state, x_r, t_r, x_ic, u_ic, x_bc, t_bc):
         def loss_fn(p):
-            res   = pde.residual(p, x_r, t_r)
+            res   = pde.residual(p, jnp.stack([x_r, t_r], axis=1))
             pde_l = jnp.mean(res ** 2)
             ic_l  = jnp.mean((pde.u(p, x_ic, jnp.zeros_like(x_ic)) - u_ic) ** 2)
             ut    = pde.u_t(p, x_ic, jnp.zeros_like(x_ic))

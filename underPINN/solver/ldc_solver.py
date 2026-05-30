@@ -54,8 +54,8 @@ class LDCSolver(BaseSolver):
     # ------------------------------------------------------------------
 
     def init(self, key) -> None:
-        self.params    = self.model.init(key, jnp.ones((1, 2)))
-        self.opt_state = self.opt.init(self.params)
+        self.params = self.model.init(key, jnp.ones((1, 2)))
+        self.state  = self.opt.init(self.params)
 
     def train(
         self,
@@ -80,19 +80,13 @@ class LDCSolver(BaseSolver):
             callbacks  = list(config.callbacks)
             self._attach_checkpoint_callbacks(callbacks)
             if config.lr_schedule is not None:
-                self.opt = optax.chain(
-                    optax.scale_by_adam(),
-                    optax.scale_by_schedule(config.lr_schedule),
-                    optax.scale(-1.0),
-                )
-                self._step     = self._build_step()
-                self.opt_state = self.opt.init(self.params)
+                self.opt   = self._make_opt(config.lr, config.lr_schedule)
+                self._step = self._build_step()
+                self.state = self.opt.init(self.params)
         else:
             callbacks = []
 
         # ── Restart / resume ──────────────────────────────────────────────────
-        # NOTE: LDCSolver uses self.opt_state (not self.state like FBPINNSolver).
-        # RestartManager must receive and return self.opt_state.
         _restart = None
         start_ep = 0
         if (config is not None
@@ -104,8 +98,8 @@ class LDCSolver(BaseSolver):
                 save_every=config.save_restart_every,
                 cfg=None,   # hash check done by 'resume' CLI; solver uses done-flag only
             )
-            start_ep, self.params, self.opt_state, _hists = \
-                _restart.maybe_restore(self.params, self.opt_state)
+            start_ep, self.params, self.state, _hists = \
+                _restart.maybe_restore(self.params, self.state)
             if start_ep > 0:
                 for _attr, _hk in (
                     ("loss_hist", "loss_hist"),
@@ -163,8 +157,8 @@ class LDCSolver(BaseSolver):
                     idx_in = jax.random.randint(k2, (batch_size,), 0, n_inlet)
                     idx_no = jax.random.randint(k3, (batch_size,), 0, n_noslip)
 
-                    self.params, self.opt_state, new_r, loss, aux = self._step(
-                        self.params, self.opt_state, r_batch,
+                    self.params, self.state, new_r, loss, aux = self._step(
+                        self.params, self.state, r_batch,
                         col_batch, inputs.inlet[idx_in], inputs.noslip[idx_no],
                         is_init,
                     )
@@ -193,7 +187,7 @@ class LDCSolver(BaseSolver):
                 if _restart is not None:
                     _restart.maybe_save(
                         ep,
-                        self.params, self.opt_state,
+                        self.params, self.state,
                         {"loss_hist": self.loss_hist,
                          "phys_hist": self.phys_hist,
                          "bc_hist":   self.bc_hist},

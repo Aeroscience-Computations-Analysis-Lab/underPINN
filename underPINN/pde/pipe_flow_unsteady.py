@@ -46,21 +46,19 @@ class UnsteadyPipeFlowPDE(BasePDE):
         yzt = jnp.concatenate([yz, t[:, None]], axis=1)   # (N, 3)
         return self.model.apply(params, yzt)[:, 0]
 
-    def residual(self, params, yz, t):
-        """Compute  u_t − ν(u_yy + u_zz) − G  at collocation points.
+    def residual(self, params, yzt):
+        """Compute u_t − ν(u_yy + u_zz) − G at collocation points.
 
         Parameters
         ----------
-        yz : (N, 2)  spatial coordinates inside the disk
-        t  : (N,)    times in [0, T]
+        yzt : (N, 3) packed array — yzt[:, 0:2] = (y, z), yzt[:, 2] = t.
 
         Returns
         -------
         (N,) residual array
         """
-        nu  = 1.0 / self.Re
-        G   = 4.0 * nu * self.U_max / self.R ** 2
-        yzt = jnp.concatenate([yz, t[:, None]], axis=1)   # (N, 3)
+        nu = 1.0 / self.Re
+        G  = 4.0 * nu * self.U_max / self.R ** 2
 
         def u_single(yzt_i):
             return self.model.apply(params, yzt_i[None, :])[0, 0]

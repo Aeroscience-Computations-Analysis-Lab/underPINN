@@ -118,7 +118,8 @@ def make_step_fn(model, pde, optimizer, alpha,
     @jax.jit
     def step(params, opt_state, xy_r_b, t_r_b):
         def loss_fn(p):
-            res   = pde.residual(p, xy_r_b, t_r_b, alpha=alpha)
+            res   = pde.residual(
+                p, jnp.concatenate([xy_r_b, t_r_b[:, None]], axis=1), alpha=alpha)
             pde_l = jnp.mean(res ** 2)
 
             u_ic  = pde.u(p, xy_i, jnp.zeros(len(xy_i)))
