@@ -1,9 +1,8 @@
 problem: burgers
 
 network:
-  type      : fbpinn
-  layers: [2, 64, 64, 64, 1]  
-  attention : simple_gate               # simple_gate | hybrid_attention
+  type      : mlp
+  layers: [2, 64, 64, 64, 1]
 
 physics:
   nu: 0.01

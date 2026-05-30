@@ -13,16 +13,21 @@ class EarlyStopping(Callback):
         Number of epochs with no improvement before stopping.
     min_delta : float
         Minimum change in loss to qualify as an improvement.
+    monitor : str
+        Key to watch in the ``logs`` dict passed by the solver.
+        Defaults to ``"loss"`` (total loss).  Other valid keys depend on
+        the solver: ``"pde"``, ``"ic"``, ``"bc"``, etc.
     """
 
-    def __init__(self, patience: int = 200, min_delta: float = 1e-7):
+    def __init__(self, patience: int = 200, min_delta: float = 1e-7, monitor: str = "loss"):
         self.patience = patience
         self.min_delta = min_delta
+        self.monitor = monitor
         self._best = float("inf")
         self._wait = 0
 
     def on_epoch_end(self, epoch: int, logs: dict) -> None:
-        loss = logs.get("loss", float("inf"))
+        loss = logs.get(self.monitor, float("inf"))
         if loss < self._best - self.min_delta:
             self._best = loss
             self._wait = 0

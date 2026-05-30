@@ -64,13 +64,22 @@ import numpy as np
 # ---------------------------------------------------------------------------
 
 def _hash_cfg(cfg) -> str:
-    """Return a stable MD5 hex-digest of *cfg* (SimpleNamespace or dict)."""
+    """Return a stable MD5 hex-digest of *cfg*.
+
+    Supports SimpleNamespace (YAML-loaded config used by the ``resume`` CLI),
+    plain dicts, and Python dataclasses.  The ``resume`` CLI is the canonical
+    caller; solvers should pass ``cfg=None`` to skip hash checking and rely
+    solely on the ``done`` flag.
+    """
     try:
         from underPINN.config.loader import _ns_to_dict
         d = _ns_to_dict(cfg)
     except Exception:
+        import dataclasses
         import types
-        if isinstance(cfg, types.SimpleNamespace):
+        if dataclasses.is_dataclass(cfg) and not isinstance(cfg, type):
+            d = dataclasses.asdict(cfg)
+        elif isinstance(cfg, types.SimpleNamespace):
             d = vars(cfg)
         elif isinstance(cfg, dict):
             d = cfg

@@ -4,10 +4,8 @@ network:
   type  : mlp
   layers: [2, 64, 64, 64, 1]
 
-physics:
-  alpha: 0.01     # thermal diffusivity
-
 data:
+  # Steady Poisson (∇²u = -source); no diffusivity parameter.
   T            : 1.0
   n_collocation: 5000
   n_ic         : 200

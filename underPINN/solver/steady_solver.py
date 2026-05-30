@@ -78,11 +78,35 @@ class SteadySolver(BaseSolver):
         else:
             callbacks = []
 
+        # ── Restart / resume ──────────────────────────────────────────────────
+        _restart = None
+        start_ep = 0
+        if (config is not None
+                and getattr(config, "out_dir", "")
+                and getattr(config, "save_restart_every", 0) > 0):
+            from underPINN.utils.restart import RestartManager
+            _restart = RestartManager(
+                config.out_dir,
+                save_every=config.save_restart_every,
+                cfg=None,   # hash check done by 'resume' CLI; solver uses done-flag only
+            )
+            start_ep, self.params, self.state, _hists = \
+                _restart.maybe_restore(self.params, self.state)
+            if start_ep > 0:
+                for _attr, _hk in (
+                    ("loss_hist", "loss_hist"),
+                    ("pde_hist",  "pde_hist"),
+                    ("bc_hist",   "bc_hist"),
+                ):
+                    _saved = _hists.get(_hk, [])
+                    if _saved:
+                        getattr(self, _attr).extend(_saved)
+
         key = jax.random.PRNGKey(seed)
         start = time.time()
 
         try:
-            for ep in range(epochs):
+            for ep in range(start_ep, epochs):
                 key, k1, k2 = jax.random.split(key, 3)
 
                 idx_r = safe_choice(k1, xy_r.shape[0], batch_r)
@@ -96,6 +120,16 @@ class SteadySolver(BaseSolver):
                 self.loss_hist.append(float(loss))
                 self.pde_hist.append(float(pde_l))
                 self.bc_hist.append(float(bc_l))
+
+                # ── Restart snapshot ──────────────────────────────────────────
+                if _restart is not None:
+                    _restart.maybe_save(
+                        ep,
+                        self.params, self.state,
+                        {"loss_hist": self.loss_hist,
+                         "pde_hist":  self.pde_hist,
+                         "bc_hist":   self.bc_hist},
+                    )
 
                 logs = {
                     "loss": float(loss),
@@ -126,6 +160,9 @@ class SteadySolver(BaseSolver):
             cb.on_train_end(final_logs)
         if not callbacks:
             print(f"Training complete — final loss {final_logs['loss']:.3e}")
+
+        if _restart is not None:
+            _restart.done()
 
     # ------------------------------------------------------------------
     # Internal helpers

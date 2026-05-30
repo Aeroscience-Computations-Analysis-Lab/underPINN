@@ -3,6 +3,7 @@ README.md
 pyproject.toml
 underPINN/__init__.py
 underPINN/__main__.py
+underPINN/_version.py
 underPINN.egg-info/PKG-INFO
 underPINN.egg-info/SOURCES.txt
 underPINN.egg-info/dependency_links.txt
@@ -15,6 +16,7 @@ underPINN/benchmark_utils/evaluators.py
 underPINN/benchmark_utils/report.py
 underPINN/callbacks/__init__.py
 underPINN/callbacks/base.py
+underPINN/callbacks/checkpoint.py
 underPINN/callbacks/early_stopping.py
 underPINN/callbacks/logging.py
 underPINN/config/__init__.py
@@ -28,6 +30,7 @@ underPINN/geometry/base.py
 underPINN/geometry/composite.py
 underPINN/geometry/interval.py
 underPINN/geometry/pipe.py
+underPINN/geometry/ramp.py
 underPINN/geometry/rectangle.py
 underPINN/geometry/sampler.py
 underPINN/geometry/shapely_geom.py
@@ -41,6 +44,7 @@ underPINN/nn/fbpinn.py
 underPINN/nn/mlp.py
 underPINN/nn/subdomain.py
 underPINN/pde/burgers.py
+underPINN/pde/compressible_euler.py
 underPINN/pde/diffusion.py
 underPINN/pde/heat.py
 underPINN/pde/heat2d_unsteady.py
@@ -52,10 +56,7 @@ underPINN/pde/ode.py
 underPINN/pde/pipe_flow_unsteady.py
 underPINN/pde/wave.py
 underPINN/runner/__init__.py
-underPINN/runner/burgers.py
 underPINN/runner/dispatch.py
-underPINN/runner/pipe_flow.py
-underPINN/runner/wave.py
 underPINN/solver/fbpinn.py
 underPINN/solver/ldc_solver.py
 underPINN/solver/ode_solver.py
@@ -63,7 +64,12 @@ underPINN/solver/rans_solver.py
 underPINN/solver/steady_solver.py
 underPINN/training/__init__.py
 underPINN/training/resample.py
+underPINN/utils/__init__.py
+underPINN/utils/checkpoint.py
 underPINN/utils/io.py
 underPINN/utils/metrics.py
 underPINN/utils/plotting.py
+underPINN/utils/restart.py
+underPINN/utils/sampling.py
+underPINN/utils/seed.py
 underPINN/utils/serialization.py

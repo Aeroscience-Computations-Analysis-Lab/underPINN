@@ -97,8 +97,12 @@ class BaseSolver(ABC):
             self.load_params(new_params)
         else:
             self.params = new_params
-            if hasattr(self, "opt") and hasattr(self, "state"):
-                self.state = self.opt.init(new_params)
+            if hasattr(self, "opt"):
+                # FBPINNSolver / ODESolver use self.state; LDCSolver uses self.opt_state
+                if hasattr(self, "state"):
+                    self.state = self.opt.init(new_params)
+                elif hasattr(self, "opt_state"):
+                    self.opt_state = self.opt.init(new_params)
 
     # ------------------------------------------------------------------
     # Internal: wire ModelCheckpoint callbacks to self

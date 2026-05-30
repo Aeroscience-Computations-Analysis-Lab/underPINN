@@ -14,7 +14,7 @@ data:
   n_bc         : 800    # total boundary points (all four walls)
 
 training:
-  epochs             : 50
+  epochs             : 3000
   lr                 : 1.0e-3
   lr_alpha           : 0.01
   batch_r            : 2048

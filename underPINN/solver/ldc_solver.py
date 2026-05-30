@@ -93,6 +93,32 @@ class LDCSolver(BaseSolver):
         else:
             callbacks = []
 
+        # ── Restart / resume ──────────────────────────────────────────────────
+        # NOTE: LDCSolver uses self.opt_state (not self.state like FBPINNSolver).
+        # RestartManager must receive and return self.opt_state.
+        _restart = None
+        start_ep = 0
+        if (config is not None
+                and getattr(config, "out_dir", "")
+                and getattr(config, "save_restart_every", 0) > 0):
+            from underPINN.utils.restart import RestartManager
+            _restart = RestartManager(
+                config.out_dir,
+                save_every=config.save_restart_every,
+                cfg=None,   # hash check done by 'resume' CLI; solver uses done-flag only
+            )
+            start_ep, self.params, self.opt_state, _hists = \
+                _restart.maybe_restore(self.params, self.opt_state)
+            if start_ep > 0:
+                for _attr, _hk in (
+                    ("loss_hist", "loss_hist"),
+                    ("phys_hist", "phys_hist"),
+                    ("bc_hist",   "bc_hist"),
+                ):
+                    _saved = _hists.get(_hk, [])
+                    if _saved:
+                        getattr(self, _attr).extend(_saved)
+
         n_col    = inputs.col.shape[0]
         n_inlet  = inputs.inlet.shape[0]
         n_noslip = inputs.noslip.shape[0]
@@ -113,8 +139,11 @@ class LDCSolver(BaseSolver):
         )
 
         try:
-            for ep in range(epochs):
-                is_init = ep == 0
+            for ep in range(start_ep, epochs):
+                # True for the first epoch of any run — fresh start or resumed.
+                # Ensures RBA running sums are properly seeded even after restart
+                # (rsum1/2/3 are zeroed above; is_init=True sets eta=1.0).
+                is_init = ep == start_ep
                 key, k1, k2, k3 = jax.random.split(key, 4)
 
                 perms = jax.random.permutation(k1, n_col)
@@ -156,6 +185,16 @@ class LDCSolver(BaseSolver):
                 self.phys_hist.append(float(phys_l))
                 self.bc_hist.append(bc_l)
 
+                # ── Restart snapshot ──────────────────────────────────────────
+                if _restart is not None:
+                    _restart.maybe_save(
+                        ep,
+                        self.params, self.opt_state,
+                        {"loss_hist": self.loss_hist,
+                         "phys_hist": self.phys_hist,
+                         "bc_hist":   self.bc_hist},
+                    )
+
                 logs = {"loss": avg_loss, "pde": float(phys_l), "bc": bc_l}
 
                 if not callbacks and ep % 100 == 0:
@@ -181,6 +220,10 @@ class LDCSolver(BaseSolver):
             cb.on_train_end(final_logs)
         if not callbacks:
             print(f"Training complete — final loss {final_logs['loss']:.3e}")
+
+        # Mark snapshot as done so the next identical run starts fresh.
+        if _restart is not None:
+            _restart.done()
 
     # ------------------------------------------------------------------
     # Internal helpers

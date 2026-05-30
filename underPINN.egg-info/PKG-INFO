@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: underPINN
-Version: 0.1.0
+Version: 2605
 Summary: Physics-Informed Neural Networks framework built on JAX/Flax
 Requires-Python: >=3.9
 License-File: LICENSE

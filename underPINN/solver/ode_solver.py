@@ -91,8 +91,11 @@ class ODESolver(BaseSolver):
                 and getattr(config, "out_dir", "")
                 and getattr(config, "save_restart_every", 0) > 0):
             from underPINN.utils.restart import RestartManager
-            _restart = RestartManager(config.out_dir,
-                                      save_every=config.save_restart_every)
+            _restart = RestartManager(
+                config.out_dir,
+                save_every=config.save_restart_every,
+                cfg=None,   # hash check done by 'resume' CLI; solver uses done-flag only
+            )
             _ep_resume, self.params, self.state, _hists = \
                 _restart.maybe_restore(self.params, self.state)
             if _ep_resume > 0:
@@ -132,6 +135,17 @@ class ODESolver(BaseSolver):
                     self.ic_hist.extend(ic_ls.tolist())
                     self.ic_dot_hist.extend(ic_dot_ls.tolist())
 
+                    # ── Restart snapshot (scan mode) ──────────────────────────
+                    if _restart is not None:
+                        _restart.maybe_save(
+                            len(self.loss_hist) - 1,
+                            self.params, self.state,
+                            {"loss_hist":   self.loss_hist,
+                             "pde_hist":    self.pde_hist,
+                             "ic_hist":     self.ic_hist,
+                             "ic_dot_hist": self.ic_dot_hist},
+                        )
+
                     ep = (outer + 1) * n_scan - 1
                     logs = {
                         "loss":   float(losses[-1]),
@@ -167,6 +181,8 @@ class ODESolver(BaseSolver):
                     cb.on_train_end(final_logs)
                 if not callbacks:
                     print(f"Training complete — final loss {final_logs['loss']:.3e}")
+                if _restart is not None:
+                    _restart.done()
                 return
 
         # ------------------------------------------------------------------ #

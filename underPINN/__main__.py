@@ -203,7 +203,7 @@ def _cmd_resume(args):
     meta        = json.loads(meta_path.read_text())
     saved_epoch = meta.get("epoch", -1)
     was_done    = meta.get("done", False)
-    old_hash    = meta.get("cfg_hash", "")
+    old_hash    = meta.get("cfg_hash") or None   # stored as null when cfg=None in solver
 
     # ── Recompute hash for the (possibly modified) config ─────────────────────
     try:
@@ -227,14 +227,15 @@ def _cmd_resume(args):
     except AttributeError:
         new_epochs = "?"
 
-    hash_changed = (old_hash != new_hash)
+    hash_changed = (old_hash is not None and old_hash != new_hash)
+    old_hash_str = f"{old_hash[:8]}…" if old_hash else "none"
     print()
     print("  ┌─ Restart snapshot unlocked ─────────────────────────────┐")
     print(f"  │  Snapshot dir     : {restart_dir}/")
     print(f"  │  Last saved epoch : {saved_epoch}")
     print(f"  │  Was marked done  : {was_done}")
     if hash_changed:
-        print(f"  │  Config hash      : {old_hash[:8]}… → {new_hash[:8]}…  (config changed)")
+        print(f"  │  Config hash      : {old_hash_str} → {new_hash[:8]}…  (config changed)")
     else:
         print(f"  │  Config hash      : {new_hash[:8]}…  (unchanged)")
     print(f"  │  Will resume from : epoch {saved_epoch + 1}")
@@ -271,7 +272,7 @@ def _cmd_status(args):
     meta        = json.loads(meta_path.read_text())
     saved_epoch = meta.get("epoch", -1)
     done        = meta.get("done", False)
-    cfg_hash    = meta.get("cfg_hash", "n/a")
+    cfg_hash    = meta.get("cfg_hash") or "n/a"
 
     files = {
         "params.msgpack":   (restart_dir / "params.msgpack").exists(),

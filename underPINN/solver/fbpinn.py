@@ -147,7 +147,7 @@ class FBPINNSolver(BaseSolver):
             _restart = RestartManager(
                 config.out_dir,
                 save_every=config.save_restart_every,
-                cfg=config,
+                cfg=None,   # hash check done by 'resume' CLI; solver uses done-flag only
             )
             _ep_resume, self.params, self.state, hists = \
                 _restart.maybe_restore(self.params, self.state)

@@ -171,8 +171,10 @@ class RANSSolver:
         start_time = time.time()
 
         for ep in range(start_ep, epochs):
-            # Flag for the special initialization step in your code (init==2)
-            is_init_step = (ep == 0)
+            # True only for the first epoch of any run (fresh or resumed).
+            # After a restart, rsum arrays are zeroed so we need eta=1.0 again
+            # to re-seed the RBA running sums with a proper initial magnitude.
+            is_init_step = (ep == start_ep)
             
             # Shuffle indices
             key, subkey = jax.random.split(key)
