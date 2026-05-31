@@ -16,7 +16,7 @@ from __future__ import annotations
 import random
 
 import jax
-import jax.numpy as jnp
+#import jax.numpy as jnp
 import numpy as np
 
 
