@@ -1,6 +1,6 @@
 # Contributing to underPINN
 
-Thank you for your interest in contributing to underPINN. 
+Thank you for your interest in contributing to underPINN.
 
 ---
 
