@@ -398,10 +398,12 @@ class TestExampleAirfoil:
                 "training.epochs": 3,
                 "training.save_restart_every": 0,
                 "training.resample_period": 0,   # disable RAR-D for speed
-                "data.n_exterior":      100,
-                "data.n_near_surface":   50,
-                "data.n_body_bc":        20,
-                "data.n_farfield_bc":    20,
+                "data.n_fixed_uniform": 50,
+                "data.n_fixed_sdf":     30,
+                "data.n_dynamic":       20,
+                "data.n_body_bc":       20,
+                "data.n_farfield_bc":   20,
+                "data.n_sym_bc":        20,
             },
             tmp_path,
         )

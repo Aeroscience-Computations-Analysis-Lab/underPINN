@@ -73,13 +73,17 @@ class SteadyNS3DPDE(BasePDE):
         return jnp.stack([cont, mom_x, mom_y, mom_z], axis=-1)
 
     def exact_poiseuille(self, xyz, R: float = 0.5, U_max: float = 1.0,
-                         L: float = 2.0):
+                         L: float = 2.0, x_lo: float = 0.0):
         """Hagen-Poiseuille exact solution.
 
-        Assumes x is the pipe axis (x ∈ [0, L]), radial distance
-        r² = y² + z².  Pressure is anchored to zero at the outlet x = L.
-        Valid for any Re since the nonlinear term vanishes (∂u/∂x = 0).
+        The pipe axis is x, radial distance r² = y² + z².
+        The inlet is at ``x = x_lo`` and the outlet at ``x = x_lo + L``.
+        Pressure is anchored to zero at the outlet.
+
+        Valid for any Re since the nonlinear convective term vanishes
+        (∂u/∂x = 0 for a fully-developed parabolic profile).
         """
+        x_hi = x_lo + L
         x, y, z = xyz[:, 0], xyz[:, 1], xyz[:, 2]
         r2   = y ** 2 + z ** 2
         u    = U_max * (1.0 - r2 / R ** 2)
@@ -87,5 +91,5 @@ class SteadyNS3DPDE(BasePDE):
         w    = jnp.zeros_like(u)
         nu   = 1.0 / self.Re
         dpdx = -4.0 * nu * U_max / R ** 2   # negative pressure gradient
-        p    = dpdx * (x - L)               # p = 0 at x = L
+        p    = dpdx * (x - x_hi)            # p = 0 at the outlet x = x_hi
         return u, v, w, p

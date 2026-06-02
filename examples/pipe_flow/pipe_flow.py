@@ -24,7 +24,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from underPINN.config.loader import cfg_get, save_config
-from underPINN.nn.mlp import MLP
+from underPINN.nn.mlp import MLP, GatedMLP
 from underPINN.pde.navier_stokes_3d import SteadyNS3DPDE
 from underPINN.geometry.pipe import Pipe
 from underPINN.callbacks.logging import ConsoleLogger
@@ -46,7 +46,13 @@ def run_pipe_flow(cfg) -> dict:
     out_dir = cfg_get(out, "dir",  default="outputs/pipe_flow") if out else "outputs/pipe_flow"
     os.makedirs(out_dir, exist_ok=True)
 
-    Re, R, L, U_max = ph.Re, ph.R, ph.L, ph.U_max
+    Re    = float(ph.Re)
+    R     = float(ph.R)
+    L     = float(ph.L)
+    U_max = float(ph.U_max)
+    x_lo  = float(cfg_get(ph, "x_lo", default=0.0))
+    x_hi  = x_lo + L
+    x_mid = 0.5 * (x_lo + x_hi)   # midpoint for cross-section plots
     W_PDE    = cfg_get(lw, "w_pde",    default=1.0)
     W_WALL   = cfg_get(lw, "w_wall",   default=100.0)
     W_INLET  = cfg_get(lw, "w_inlet",  default=50.0)
@@ -61,7 +67,9 @@ def run_pipe_flow(cfg) -> dict:
     batch_bc  = cfg_get(tr, "batch_bc",  default=128)
 
     # ── Geometry + data ───────────────────────────────────────────────────────
-    pipe  = Pipe(R=R, L=L)
+    pipe  = Pipe(R=R, L=L, x_lo=x_lo)
+    print(f"Pipe flow: Re={Re},  R={R} (D={2*R}),  "
+          f"x ∈ [{x_lo}, {x_hi}],  U_max={U_max}")
     d     = cfg.data
     xyz_r   = jnp.array(pipe.sample_interior(cfg_get(d, "n_interior", default=5000), seed=seed))
     xyz_w   = jnp.array(pipe.sample_wall(    cfg_get(d, "n_wall",     default=1500), seed=seed+1))
@@ -73,7 +81,12 @@ def run_pipe_flow(cfg) -> dict:
         return U_max * (1.0 - r2 / R ** 2)
 
     # ── Model + PDE ───────────────────────────────────────────────────────────
-    model = MLP(layers=cfg.network.layers)
+    net_type = str(cfg_get(cfg.network, "type", default="mlp")).lower()
+    _net_cls = {"mlp": MLP, "gated_mlp": GatedMLP}.get(net_type)
+    if _net_cls is None:
+        raise ValueError(f"Unknown network type '{net_type}'. Choose 'mlp' or 'gated_mlp'.")
+    model = _net_cls(layers=list(cfg.network.layers))
+    print(f"  Network: {_net_cls.__name__}  layers={list(cfg.network.layers)}")
     pde   = SteadyNS3DPDE(model, Re=Re)
 
     key    = jax.random.PRNGKey(seed)
@@ -157,7 +170,7 @@ def run_pipe_flow(cfg) -> dict:
 
     # Predictions at interior collocation points + Hagen-Poiseuille exact
     uvwp_pred = model.apply(params, xyz_r)
-    u_ex, v_ex, w_ex, p_ex = pde.exact_poiseuille(xyz_r, R=R, U_max=U_max, L=L)
+    u_ex, v_ex, w_ex, p_ex = pde.exact_poiseuille(xyz_r, R=R, U_max=U_max, L=L, x_lo=x_lo)
     save_predictions(
         out_dir,
         coords  = {"x": np.array(xyz_r[:, 0]),
@@ -175,7 +188,7 @@ def run_pipe_flow(cfg) -> dict:
 
     # Relative L² vs Poiseuille exact
     xyz_val = jnp.array(pipe.sample_interior(3000, seed=99))
-    u_p, v_p, w_p, p_p = pde.exact_poiseuille(xyz_val, R=R, U_max=U_max, L=L)
+    u_p, v_p, w_p, p_p = pde.exact_poiseuille(xyz_val, R=R, U_max=U_max, L=L, x_lo=x_lo)
     out_val = model.apply(params, xyz_val)
     def rel_l2(pred, exact):
         return float(jnp.linalg.norm(pred - exact) / (jnp.linalg.norm(exact) + 1e-10))
@@ -184,13 +197,13 @@ def run_pipe_flow(cfg) -> dict:
     print("\nRel-L² vs Hagen-Poiseuille exact:", errs)
 
     # ── Solution visualization ────────────────────────────────────────────────
-    # 1. Cross-section contourf of u(y, z) at x = L/2
+    # 1. Cross-section contourf of u(y, z) at x = x_mid (pipe centreline)
     N_cs = 80
     y_cs = np.linspace(-float(R), float(R), N_cs, dtype=np.float32)
     z_cs = np.linspace(-float(R), float(R), N_cs, dtype=np.float32)
     YY_cs, ZZ_cs = np.meshgrid(y_cs, z_cs)          # shape (N_cs, N_cs)
-    x_mid  = np.full(N_cs * N_cs, float(L) / 2.0, dtype=np.float32)
-    xyz_cs = jnp.array(np.stack([x_mid, YY_cs.ravel(), ZZ_cs.ravel()], axis=1))
+    x_cs   = np.full(N_cs * N_cs, float(x_mid), dtype=np.float32)
+    xyz_cs = jnp.array(np.stack([x_cs, YY_cs.ravel(), ZZ_cs.ravel()], axis=1))
 
     pred_cs = np.array(model.apply(params, xyz_cs))
     u_cs    = pred_cs[:, 0].reshape(N_cs, N_cs)
@@ -214,17 +227,17 @@ def run_pipe_flow(cfg) -> dict:
         ax_s.set_title(title_s)
         ax_s.set_xlabel("y"); ax_s.set_ylabel("z")
         ax_s.set_aspect("equal")
-    fig_s.suptitle(f"Axial velocity u — cross-section at x=L/2  (Re={Re})")
+    fig_s.suptitle(f"Axial velocity u — cross-section at x={x_mid:.2f}  (Re={Re})")
     fig_s.tight_layout()
     fig_s.savefig(os.path.join(out_dir, "solution_crosssection.png"),
                   dpi=150, bbox_inches="tight")
     plt.close(fig_s)
 
-    # 2. Radial velocity profile u(r) at x = L/2, z = 0
+    # 2. Radial velocity profile u(r) at x = x_mid, z = 0
     Nr    = 100
     r_arr = np.linspace(0.0, float(R), Nr, dtype=np.float32)
     xyz_rp = jnp.array(np.stack(
-        [np.full(Nr, float(L) / 2.0, dtype=np.float32),
+        [np.full(Nr, float(x_mid), dtype=np.float32),
          r_arr,
          np.zeros(Nr, dtype=np.float32)], axis=1))
     u_prof_pinn  = np.array(model.apply(params, xyz_rp)[:, 0])
@@ -234,7 +247,7 @@ def run_pipe_flow(cfg) -> dict:
     ax_r.plot(r_arr, u_prof_exact, "k-",  lw=2.0, label="Exact (Hagen-Poiseuille)")
     ax_r.plot(r_arr, u_prof_pinn,  "b--", lw=1.8, label="PINN")
     ax_r.set_xlabel("r"); ax_r.set_ylabel("u")
-    ax_r.set_title(f"Radial velocity profile  Re={Re},  x=L/2")
+    ax_r.set_title(f"Radial velocity profile  Re={Re},  x={x_mid:.2f}")
     ax_r.legend(); fig_r.tight_layout()
     fig_r.savefig(os.path.join(out_dir, "solution_radial.png"),
                   dpi=150, bbox_inches="tight")
@@ -252,8 +265,8 @@ def run_pipe_flow(cfg) -> dict:
     # ── Model checkpoint ──────────────────────────────────────────────────────
     save_checkpoint(params, out_dir, metadata={
         "problem": "pipe_flow",
-        "network": {"type": "mlp", "layers": list(cfg.network.layers)},
-        "physics": {"Re": float(Re), "R": float(R), "L": float(L)},
+        "network": {"type": net_type, "layers": list(cfg.network.layers)},
+        "physics": {"Re": Re, "R": R, "L": L, "x_lo": x_lo, "U_max": U_max},
     })
 
     print(f"\nOutputs saved to: {out_dir}/")

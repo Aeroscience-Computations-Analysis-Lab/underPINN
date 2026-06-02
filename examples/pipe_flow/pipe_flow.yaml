@@ -1,13 +1,15 @@
 problem: pipe_flow
 
 network:
+  type  : gated_mlp                     # 'mlp' or 'gated_mlp'
   layers: [3, 64, 64, 64, 64, 4]   # (x,y,z) → (u,v,w,p)
 
 physics:
-  Re   : 10.0
-  R    : 0.5
-  L    : 2.0
-  U_max: 1.0
+  Re   : 40.0
+  R    : 0.5      # radius — diameter = 2R = 1.0
+  L    : 7.0      # total length  (x_lo to x_lo + L)
+  x_lo : -3.5     # inlet x-coordinate → pipe spans x ∈ [-3.5, 3.5]
+  U_max: 2.0      # parabolic inflow peak velocity  u(r) = U_max·(1 − r²/R²)
 
 data:
   n_interior: 5000

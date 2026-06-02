@@ -148,6 +148,98 @@ class NACAAirfoil:
             pts.extend(batch[~self.is_inside(batch)].tolist())
         return np.array(pts[:n], dtype=np.float32)
 
+    def sdf(self, xy: np.ndarray, chunk_size: int = 2000) -> np.ndarray:
+        """Unsigned distance from each point to the nearest airfoil surface segment.
+
+        Computed in chunks to keep peak memory under control (≈ 12 MB / chunk
+        for chunk_size=2000 with a 400-segment profile).
+
+        Parameters
+        ----------
+        xy         : (M, 2) float array of query points
+        chunk_size : rows processed at once (trade memory ↔ speed)
+
+        Returns
+        -------
+        dist : (M,) float32  — distance to nearest surface point
+        """
+        xy = np.asarray(xy, dtype=np.float64)
+        profile = self._coords.astype(np.float64)
+
+        # Build closed segment list: each consecutive pair + closing edge
+        seg_a = np.concatenate([profile[:-1], profile[-1:]], axis=0)
+        seg_b = np.concatenate([profile[1:],  profile[:1]],  axis=0)
+
+        ab   = seg_b - seg_a                              # (S, 2)
+        ab2  = np.sum(ab * ab, axis=1)                    # (S,)  squared lengths
+
+        dist = np.empty(len(xy), dtype=np.float32)
+        for i in range(0, len(xy), chunk_size):
+            chunk = xy[i : i + chunk_size]                # (C, 2)
+            ap  = chunk[:, None, :] - seg_a[None, :, :]  # (C, S, 2)
+            t   = (np.einsum("csi,si->cs", ap, ab)
+                   / np.maximum(ab2[None], 1e-14))        # (C, S)
+            t   = np.clip(t, 0.0, 1.0)
+            foot = seg_a[None] + t[:, :, None] * ab[None]     # (C, S, 2)
+            d2   = np.sum((chunk[:, None, :] - foot) ** 2, axis=2)  # (C, S)
+            dist[i : i + chunk_size] = np.sqrt(d2.min(axis=1)).astype(np.float32)
+
+        return dist
+
+    def sample_sdf_weighted(
+        self,
+        n: int,
+        xmin: float = -5.0,
+        xmax: float = 15.0,
+        ymin: float = -8.0,
+        ymax: float =  8.0,
+        sdf_scale: float = 0.1,
+        seed: int = 2,
+    ) -> np.ndarray:
+        """Sample *n* exterior points with density proportional to exp(−sdf / sdf_scale).
+
+        Points very close to the airfoil surface (small SDF) are sampled much
+        more frequently than far-field points, concentrating collocation nodes in
+        the boundary layer and near wake without discarding global coverage.
+
+        Parameters
+        ----------
+        n         : number of points to return
+        sdf_scale : characteristic length scale σ in exp(−d/σ).
+                    Smaller → sharper concentration near the surface.
+        seed      : numpy RNG seed
+
+        Returns
+        -------
+        xy : (n, 2) float32
+        """
+        rng       = np.random.default_rng(seed)
+        pool_size = max(n * 15, 30_000)
+
+        # Build an exterior candidate pool via rejection sampling
+        pool: list[np.ndarray] = []
+        collected = 0
+        while collected < pool_size:
+            batch = rng.uniform(
+                [xmin, ymin], [xmax, ymax],
+                size=(max(pool_size * 2, 50_000), 2),
+            ).astype(np.float32)
+            exterior = batch[~self.is_inside(batch)]
+            pool.append(exterior)
+            collected += len(exterior)
+        xy_pool = np.concatenate(pool)[:pool_size]
+
+        # Importance weights: exp(−sdf / σ)
+        d = self.sdf(xy_pool)
+        w = np.exp(-d / (sdf_scale + 1e-12)).astype(np.float64)
+        w /= w.sum()
+
+        # Always sample with replacement — this is intentional: high-weight
+        # near-surface candidates should appear many times in the output,
+        # creating the desired density peak close to the airfoil.
+        idx = rng.choice(len(xy_pool), size=n, replace=True, p=w)
+        return xy_pool[idx].astype(np.float32)
+
     def farfield_boundary(
         self,
         n_per_edge: int = 300,
