@@ -1,5 +1,4 @@
 import jax.numpy as jnp
-import numpy as np
 
 
 def relative_l2_error(u_pred, u_exact, eps: float = 1e-12):

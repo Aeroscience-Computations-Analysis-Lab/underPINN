@@ -56,7 +56,6 @@ def _cmd_run(args):
 
 
 def _cmd_sweep(args):
-    import copy
     from underPINN.config import generate_sweep_configs, cfg_get
     from underPINN.runner import get_runner
 
@@ -160,7 +159,10 @@ def _cmd_resume(args):
         # 3. Run normally — picks up from the last saved epoch
         python -m underPINN run    examples/wave/config.yaml
     """
-    import hashlib, json, pathlib, types
+    import hashlib
+    import json
+    import pathlib
+    import types
     from underPINN.config.loader import load_config, cfg_get
 
     cfg = load_config(args.config)
@@ -248,7 +250,8 @@ def _cmd_resume(args):
 
 def _cmd_status(args):
     """Show the current state of the restart snapshot for a config."""
-    import json, pathlib
+    import json
+    import pathlib
     from underPINN.config.loader import load_config, cfg_get
 
     cfg = load_config(args.config)
@@ -286,7 +289,7 @@ def _cmd_status(args):
         new_epochs = "?"
 
     print()
-    print(f"  ┌─ Restart snapshot status ───────────────────────────────┐")
+    print("  ┌─ Restart snapshot status ───────────────────────────────┐")
     print(f"  │  Directory  : {restart_dir}/")
     print(f"  │  Saved at   : epoch {saved_epoch}  (resume would start at {saved_epoch + 1})")
     print(f"  │  Done flag  : {done}  {'← completed run; use resume to extend' if done else '← interrupted run; re-run to continue'}")
@@ -296,7 +299,7 @@ def _cmd_status(args):
     missing = [k for k,v in files.items() if not v]
     if missing:
         print(f"  │  Missing    : {', '.join(missing)}")
-    print(f"  └─────────────────────────────────────────────────────────┘")
+    print("  └─────────────────────────────────────────────────────────┘")
 
     if done:
         print()
@@ -306,7 +309,7 @@ def _cmd_status(args):
         print(f"    3. python -m underPINN run    {args.config}")
     else:
         print()
-        print(f"  To continue interrupted training (same config):")
+        print("  To continue interrupted training (same config):")
         print(f"    python -m underPINN run {args.config}")
     print()
 

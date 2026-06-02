@@ -1,4 +1,3 @@
-import jax.numpy as jnp
 from .loss import l2_loss, l1_loss, weight_l2
 from underPINN.core.base import BaseLoss
 

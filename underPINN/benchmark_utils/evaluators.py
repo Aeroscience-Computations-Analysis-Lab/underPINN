@@ -603,13 +603,16 @@ class ODEExpEvaluator(BaseBenchmarkEvaluator):
         # Panel 1: solution
         axes[0].plot(t_np, u_exact, "k-",  lw=2,   label="Exact")
         axes[0].plot(t_np, u_pred,  "r--", lw=1.8, label="PINN")
-        axes[0].set_xlabel("t"); axes[0].set_ylabel("u(t)")
+        axes[0].set_xlabel("t")
+        axes[0].set_ylabel("u(t)")
         axes[0].set_title(f"Exp Decay  u'=−{self._lam}u")
-        axes[0].legend(); axes[0].grid(True, alpha=0.3)
+        axes[0].legend()
+        axes[0].grid(True, alpha=0.3)
 
         # Panel 2: point-wise error
         axes[1].plot(t_np, err, "b-", lw=1.5)
-        axes[1].set_xlabel("t"); axes[1].set_ylabel("|PINN − Exact|")
+        axes[1].set_xlabel("t")
+        axes[1].set_ylabel("|PINN − Exact|")
         axes[1].set_title("Absolute Error")
         axes[1].grid(True, alpha=0.3)
 
@@ -688,12 +691,15 @@ class ODEHarmonicEvaluator(BaseBenchmarkEvaluator):
 
         axes[0].plot(t_np, u_exact, "k-",  lw=2,   label="Exact")
         axes[0].plot(t_np, u_pred,  "r--", lw=1.8, label="PINN")
-        axes[0].set_xlabel("t"); axes[0].set_ylabel("u(t)")
+        axes[0].set_xlabel("t")
+        axes[0].set_ylabel("u(t)")
         axes[0].set_title(f"Harmonic  u''+{self._omega}²u=0")
-        axes[0].legend(); axes[0].grid(True, alpha=0.3)
+        axes[0].legend()
+        axes[0].grid(True, alpha=0.3)
 
         axes[1].plot(t_np, err, "b-", lw=1.5)
-        axes[1].set_xlabel("t"); axes[1].set_ylabel("|PINN − Exact|")
+        axes[1].set_xlabel("t")
+        axes[1].set_ylabel("|PINN − Exact|")
         axes[1].set_title("Absolute Error")
         axes[1].grid(True, alpha=0.3)
 
@@ -833,25 +839,31 @@ class PipeFlowEvaluator(BaseBenchmarkEvaluator):
         # Cross-section: PINN
         im0 = axes[0].pcolormesh(y_plt, z_plt, u_pred.T,
                                   cmap=_CMAP_SOLN, shading="auto")
-        fig.colorbar(im0, ax=axes[0]); axes[0].set_aspect("equal")
+        fig.colorbar(im0, ax=axes[0])
+        axes[0].set_aspect("equal")
         axes[0].set_title("PINN  u(y,z) @ x=L/2")
-        axes[0].set_xlabel("y"); axes[0].set_ylabel("z")
+        axes[0].set_xlabel("y")
+        axes[0].set_ylabel("z")
 
         # Cross-section: exact
         im1 = axes[1].pcolormesh(y_plt, z_plt, u_exact.T,
                                   cmap=_CMAP_SOLN, shading="auto",
                                   vmin=float(np.nanmin(u_exact)),
                                   vmax=float(np.nanmax(u_exact)))
-        fig.colorbar(im1, ax=axes[1]); axes[1].set_aspect("equal")
+        fig.colorbar(im1, ax=axes[1])
+        axes[1].set_aspect("equal")
         axes[1].set_title("Exact  (Hagen-Poiseuille)")
-        axes[1].set_xlabel("y"); axes[1].set_ylabel("z")
+        axes[1].set_xlabel("y")
+        axes[1].set_ylabel("z")
 
         # Radial profile
         axes[2].plot(r_line, u_r_exact,  "k-",  lw=2,   label="Exact")
         axes[2].plot(r_line, np.array(u_r_pred), "r--", lw=1.8, label="PINN")
-        axes[2].set_xlabel("r"); axes[2].set_ylabel("u")
+        axes[2].set_xlabel("r")
+        axes[2].set_ylabel("u")
         axes[2].set_title("Radial Profile u(r)")
-        axes[2].legend(); axes[2].grid(True, alpha=0.3)
+        axes[2].legend()
+        axes[2].grid(True, alpha=0.3)
 
         # Loss
         _loss_ax(axes[3], self._loss_hist, self._pde_hist)

@@ -1,6 +1,5 @@
-import jax.numpy as jnp
 from flax import linen as nn
-from .attention import HybridAttention, SimpleGate
+from .attention import HybridAttention
 
 
 class SubdomainNetwork(nn.Module):

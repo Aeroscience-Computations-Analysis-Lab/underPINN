@@ -69,7 +69,8 @@ class KEpsilonPDE(BasePDE):
         s_e   = self.sigma_e
 
         # Per-point function for jacfwd/hessian
-        u_fn = lambda x_i: self.u(params, x_i[None, :])[0]   # (2,) → (5,)
+        def u_fn(x_i):  # (2,) → (5,)
+            return self.u(params, x_i[None, :])[0]
 
         # Jacobian (N, 5, 2)  and  Hessian (N, 5, 2, 2)
         J = jax.vmap(jax.jacfwd(u_fn))(x)
@@ -77,7 +78,7 @@ class KEpsilonPDE(BasePDE):
 
         # Raw field values
         out = self.u(params, x)
-        u_val, v_val, p_val = out[:, 0], out[:, 1], out[:, 2]
+        u_val, v_val, _ = out[:, 0], out[:, 1], out[:, 2]
         k_val, e_val        = out[:, 3], out[:, 4]
 
         # First derivatives  (spatial index: 0=x, 1=y)

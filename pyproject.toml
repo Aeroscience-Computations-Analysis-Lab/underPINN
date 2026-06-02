@@ -32,3 +32,7 @@ underpinn = "underPINN.__main__:main"
 [tool.setuptools.packages.find]
 where   = ["."]
 include = ["underPINN*"]
+
+[tool.ruff.lint]
+# Star imports in the top-level __init__ are intentional public-API re-exports.
+per-file-ignores = {"underPINN/__init__.py" = ["F403", "F405"]}

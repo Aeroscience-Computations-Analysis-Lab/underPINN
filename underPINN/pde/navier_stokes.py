@@ -13,7 +13,8 @@ class NavierStokesPDE(BasePDE):
 
     def residual(self, params, x):
         # u_fn returns (u, v, p)
-        u_fn = lambda x_i: self.u(params, x_i[None, :])[0]
+        def u_fn(x_i):
+            return self.u(params, x_i[None, :])[0]
         
         # Jacobian (1st derivatives)
         J = jax.vmap(jax.jacfwd(u_fn))(x)
@@ -22,7 +23,7 @@ class NavierStokesPDE(BasePDE):
 
         # Extract values
         out = self.u(params, x)
-        u, v, p = out[:, 0], out[:, 1], out[:, 2]
+        u, v, _ = out[:, 0], out[:, 1], out[:, 2]
 
         # First derivatives [0:x, 1:y]
         u_x, u_y = J[:, 0, 0], J[:, 0, 1]

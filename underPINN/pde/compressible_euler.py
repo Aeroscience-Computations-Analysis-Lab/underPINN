@@ -161,7 +161,10 @@ class CompressibleEulerPDE(BasePDE):
 
         # Physical values at collocation points
         pv  = self.apply(params, xy)
-        rho = pv[:, 0];  u = pv[:, 1];  v = pv[:, 2];  p = pv[:, 3]
+        rho = pv[:, 0]
+        u   = pv[:, 1]
+        v   = pv[:, 2]
+        p   = pv[:, 3]
 
         # 1. Continuity: (ρu)_x + (ρv)_y = 0
         cont  = rho_x * u + rho * u_x + rho_y * v + rho * v_y

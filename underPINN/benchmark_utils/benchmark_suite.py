@@ -254,7 +254,8 @@ class BenchmarkRunner:
                 self.results.append(result)
 
                 if self.verbose:
-                    _fmt = lambda v: f"{v:.3e}" if not math.isnan(v) else "  N/A  "
+                    def _fmt(v):
+                        return f"{v:.3e}" if not math.isnan(v) else "  N/A  "
                     print(
                         f"  rel-L2={_fmt(rel_l2)}  "
                         f"loss={_fmt(loss_final)}  "

@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 from flax import linen as nn
 from .subdomain import SubdomainNetwork
-from .attention import HybridAttention, SimpleGate
+from .attention import SimpleGate
 
 
 def window_1d(x, xmin, xmax, smin, smax):
