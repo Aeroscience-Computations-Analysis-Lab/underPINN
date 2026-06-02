@@ -2,7 +2,7 @@ problem: pipe_flow
 
 network:
   type  : gated_mlp                     # 'mlp' or 'gated_mlp'
-  layers: [3, 64, 64, 64, 64, 4]   # (x,y,z) → (u,v,w,p)
+  layers: [3, 192, 192, 192, 192, 4]   # (x,y,z) → (u,v,w,p)
 
 physics:
   Re   : 40.0
@@ -12,17 +12,17 @@ physics:
   U_max: 2.0      # parabolic inflow peak velocity  u(r) = U_max·(1 − r²/R²)
 
 data:
-  n_interior: 5000
-  n_wall    : 1500
-  n_inlet   : 400
-  n_outlet  : 400
+  n_interior: 100000
+  n_wall    : 15000
+  n_inlet   : 2000
+  n_outlet  : 2000
 
 training:
-  epochs              : 5000
+  epochs              : 70000
   lr                  : 1.0e-3
   lr_alpha            : 0.01
-  batch_r             : 256
-  batch_bc            : 128
+  batch_r             : 2048
+  batch_bc            : 1024
   log_every           : 500
   seed                : 0
   save_restart_every  : 500   # save restart snapshot every N epochs (0 = off)

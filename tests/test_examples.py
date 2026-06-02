@@ -410,3 +410,25 @@ class TestExampleAirfoil:
         result = mod.run_airfoil(cfg)
         assert "loss_hist" in result
         assert _has_nonempty_loss(result)
+
+
+# ---------------------------------------------------------------------------
+# 14. Aneurysm Flow (3-D steady axisymmetric bulge)
+# ---------------------------------------------------------------------------
+
+class TestExampleAneurysmFlow:
+    def test_runs_and_returns_loss_hist(self, tmp_path):
+        mod = _load_module("aneurysm_flow", "aneurysm/aneurysm_flow.py")
+        cfg = _cfg(
+            "aneurysm/config.yaml",
+            {"training.epochs": 3,
+             "training.save_restart_every": 0,
+             "data.n_interior": 100,
+             "data.n_wall": 20,
+             "data.n_inlet": 20,
+             "data.n_outlet": 20},
+            tmp_path,
+        )
+        result = mod.run_aneurysm_flow(cfg)
+        assert "loss_hist" in result
+        assert _has_nonempty_loss(result)

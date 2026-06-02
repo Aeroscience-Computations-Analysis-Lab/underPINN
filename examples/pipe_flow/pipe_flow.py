@@ -137,7 +137,7 @@ def run_pipe_flow(cfg) -> dict:
     N_in = xyz_in.shape[0]; N_out = xyz_out.shape[0]
 
     logger  = ConsoleLogger(log_every=log_every)
-    stopper = EarlyStopping(patience=patience)
+#    stopper = EarlyStopping(patience=patience)
     key = jax.random.PRNGKey(seed + 99)
 
     try:
@@ -156,7 +156,7 @@ def run_pipe_flow(cfg) -> dict:
             logs = {"loss": float(total), "pde": float(pl),
                     "wall": float(wl), "inlet": float(il)}
             logger.on_epoch_end(ep, logs)
-            stopper.on_epoch_end(ep, logs)
+#           stopper.on_epoch_end(ep, logs)
             restart.maybe_save(ep, params, opt_state, {"loss_hist": loss_hist})
     except StopIteration:
         pass

@@ -1,0 +1,40 @@
+problem: aneurysm_flow
+
+network:
+  type  : gated_mlp                      # 'mlp' or 'gated_mlp'
+  layers: [3, 192, 192, 192, 192, 4]    # (x,y,z) → (u,v,w,p)
+
+physics:
+  Re         : 40.0
+  R_vessel   : 0.5      # straight-vessel radius
+  R_aneurysm : 1.0      # peak bulge radius
+  L          : 7.0      # total domain length  (x_lo to x_lo + L)
+  x_lo       : -3.5     # inlet x-coordinate → pipe spans x ∈ [-3.5, 3.5]
+  x0         : 1.5      # axial centre of the bulge
+  L_aneurysm : 1.5      # full axial width of the bulge region
+  V_max      : 1.5      # parabolic inflow peak  u(r) = V_max·(1 − r²/R_vessel²)
+
+data:
+  n_interior : 100000
+  n_wall     : 15000
+  n_inlet    : 2000
+  n_outlet   : 2000
+
+training:
+  epochs             : 70000
+  lr                 : 1.0e-3
+  lr_alpha           : 0.01
+  batch_r            : 2048
+  batch_bc           : 1024
+  log_every          : 500
+  seed               : 0
+  save_restart_every : 500    # 0 = off
+
+loss:
+  w_pde    : 1.0
+  w_wall   : 100.0
+  w_inlet  : 50.0
+  w_outlet : 20.0
+
+output:
+  dir: outputs/aneurysm_flow
