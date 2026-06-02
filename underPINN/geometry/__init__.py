@@ -1,2 +1,2 @@
-from underPINN.geometry.aneurysm import BulgeGeometry
-from underPINN.geometry.pipe import Pipe
+from underPINN.geometry.aneurysm import BulgeGeometry as BulgeGeometry
+from underPINN.geometry.pipe import Pipe as Pipe
