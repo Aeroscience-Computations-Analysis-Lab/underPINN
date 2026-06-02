@@ -97,7 +97,7 @@ def _estimate_CL(xy_s, Cp):
     x_s, y_s = xy_s[:, 0], xy_s[:, 1]
     top  = y_s >= 0
     bot  = y_s <  0
-    _trapz = getattr(np, "trapezoid", getattr(np, "trapz"))
+    _trapz = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
     CL_top = -_trapz(Cp[top], x_s[top]) if top.any() else 0.0
     CL_bot =  _trapz(Cp[bot], x_s[bot]) if bot.any() else 0.0
     return float(CL_top + CL_bot)
