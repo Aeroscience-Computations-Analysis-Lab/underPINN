@@ -1,4 +1,8 @@
-"""Steady flow over a NACA airfoil — incompressible NS PINN.
+"""Pure PINN — 2-D Steady Flow over a NACA Airfoil.
+
+Ported from the reference notebook *PINN_Re40_pure.ipynb* (steady flow over a
+cylinder at Re=40) and adapted to a NACA airfoil.  No training data is used —
+only Navier–Stokes PDE residuals + boundary conditions.
 
 Run directly or via the CLI:
 
@@ -6,47 +10,29 @@ Run directly or via the CLI:
     python examples/airfoil/airfoil_flow.py myconfig.yaml
     python -m underPINN run examples/airfoil/config.yaml
 
-PDE: ∇·u = 0,  (u·∇)u + ∇p − (1/Re)∇²u = 0
+PDE  (steady incompressible Navier–Stokes, ν = 1/Re):
 
-BCs:
-  • Farfield (left/right edges): u = U∞ cos α,  v = U∞ sin α
-  • Symmetry (top/bottom edges): v = 0,  ∂u/∂y = 0
-  • Airfoil  : u = v = 0  (no-slip)
-  • Pressure : p = 0 at one upstream reference point (gauge)
+    ∇·u = 0
+    (u·∇)u + ∇p − ν ∇²u = 0
 
-At AoA=0 the flow is symmetric about y=0, so the top and bottom domain
-boundaries act as symmetry planes: zero normal velocity (v=0, Dirichlet)
-and zero wall-normal shear (∂u/∂y=0, Neumann via JAX autodiff).
+Boundary conditions (exactly as in the reference notebook):
 
-Collocation strategy
----------------------
-Points are split into three groups:
+    • Inlet   (left edge,  x = xmin):  u = U∞ cos α,  v = U∞ sin α
+    • Outlet  (right edge, x = xmax):  p = 0
+    • Airfoil (no-slip)             :  u = v = 0
+    • Top / bottom walls (symmetry) :  v = 0
 
-  1. **Fixed uniform** (n_fixed_uniform): drawn once from the exterior domain,
-     uniform distribution — provide global background coverage throughout
-     the far field.  Never resampled.
+Collocation strategy (notebook recipe):
 
-  2. **Fixed SDF** (n_fixed_sdf): drawn once with importance weights
-     exp(−sdf / sdf_scale) so that point density is highest near the
-     airfoil surface (boundary layer, leading/trailing edges, near wake).
-     Never resampled.
+    A fixed uniform interior pool (exterior to the airfoil, with a small buffer)
+    plus a denser wake pool downstream.  Both pools are re-sampled together
+    every ``resample_period`` epochs so the network keeps seeing fresh points
+    in the recirculation zone.  Training is full-batch (every epoch uses every
+    collocation point), like the reference notebook.
 
-  3. **Dynamic** (n_dynamic): drawn with a Gaussian spread about the wake
-     centerline (a ray from the trailing edge in the free-stream direction).
-     Points cluster densely along the wake axis and thin out laterally as
-     N(0, σ²) in the perpendicular direction; the distribution is clipped
-     to the wake bounding box.  Replaced every ``resample_period`` epochs
-     using residual-based adaptive sampling (RAR-D, Lu et al. 2021).
-
-Loss function
--------------
-Simple MSE on each physical term::
-
-    L = L_pde  +  w_body · L_body  +  w_ff · L_ff
-      + w_pref · L_pref  +  w_sym · L_sym
-
-Each term is a plain mean-squared residual.
-Weights can be tuned in config.yaml.
+Network : plain tanh MLP, (x, y) → (u, v, p).
+Schedule: Adam + StepLR (halve the LR every ``lr_step`` epochs).
+Loss    : L = w_pde · L_pde + w_bc · L_bc      (L_bc = inlet+outlet+body+wall)
 """
 from __future__ import annotations
 
@@ -65,205 +51,66 @@ from underPINN.nn.mlp import MLP, GatedMLP
 from underPINN.pde.navier_stokes import NavierStokesPDE
 from underPINN.geometry.airfoil import NACAAirfoil
 from underPINN.callbacks.logging import ConsoleLogger
-from underPINN.callbacks.early_stopping import EarlyStopping
 from underPINN.utils.io import save_predictions
 from underPINN.utils.checkpoint import save_checkpoint
-from underPINN.utils.sampling import safe_choice
 from underPINN.utils.restart import RestartManager
 
 
 # ---------------------------------------------------------------------------
-# Aerodynamic post-processing helpers
+# Collocation sampling helpers  (notebook style)
 # ---------------------------------------------------------------------------
 
-def _compute_Cp(model, params, af, U_inf=1.0, x_ref=-2.0):
-    """Surface pressure coefficient  Cp = (p − p∞) / (0.5 U∞²).
-
-    Parameters
-    ----------
-    x_ref : x-coordinate of the upstream reference point for p=0 gauge.
-            Must lie inside the domain (default -2.0 for xmin=-2.5).
-    """
-    xy_s  = jnp.array(af.surface_points(n=600))
-    p_s   = model.apply(params, xy_s)[:, 2]
-    p_ref = float(model.apply(params, jnp.array([[x_ref, 0.0]]))[0, 2])
-    q_inf = 0.5 * U_inf ** 2
-    Cp    = np.array((p_s - p_ref) / (q_inf + 1e-14))
-    return np.array(xy_s), Cp
-
-
-def _estimate_CL(xy_s, Cp):
-    """Approximate lift coefficient via trapezoidal integration of Cp(x)."""
-    x_s, y_s = xy_s[:, 0], xy_s[:, 1]
-    top  = y_s >= 0
-    bot  = y_s <  0
-    _trapz = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
-    CL_top = -_trapz(Cp[top], x_s[top]) if top.any() else 0.0
-    CL_bot =  _trapz(Cp[bot], x_s[bot]) if bot.any() else 0.0
-    return float(CL_top + CL_bot)
-
-
-# ---------------------------------------------------------------------------
-# Wake Gaussian sampling
-# ---------------------------------------------------------------------------
-
-def _sample_wake_gaussian(
+def _sample_box_exterior(
     af: NACAAirfoil,
     n: int,
-    wake_xmin: float,
-    wake_xmax: float,
-    wake_ymin: float,
-    wake_ymax: float,
-    sigma: float,
-    aoa_deg: float = 0.0,
-    chord: float = 1.0,
-    seed: int = 0,
+    xlo: float, xhi: float, ylo: float, yhi: float,
+    buffer: float,
+    seed: int,
 ) -> np.ndarray:
-    """Sample *n* wake points with 2-D isotropic Gaussian spread from the wake line.
+    """Uniform points in a box, rejecting the airfoil interior + a buffer shell.
 
-    A seed position ``t`` is drawn uniformly along the wake centerline, and
-    then independent Gaussian noise is added in **both** the along-wake and
-    perpendicular directions::
-
-        t  ~ Uniform(t_lo, t_hi)   — seed along the wake axis
-        dt ~ Normal(0, sigma²)     — Gaussian spread along the wake axis
-        s  ~ Normal(0, sigma²)     — Gaussian spread perpendicular to axis
-        xy = TE  +  (t + dt)·d̂  +  s·n̂
-
-    This produces a smooth 2-D Gaussian cloud around every point on the
-    centerline: density peaks on the axis and decays isotropically in all
-    directions with no hard cutoffs.  The ends of the wake region fade
-    naturally instead of terminating abruptly.
-
-    The bounding box ``[wake_xmin, wake_xmax] × [wake_ymin, wake_ymax]``
-    still acts as a hard clip for outliers (set ymin/ymax ≈ ±4σ and
-    xmax sufficiently past the last feature of interest).
-
-    Parameters
-    ----------
-    sigma     : standard deviation in **both** along-axis and perpendicular
-                directions (same units as chord).
-    aoa_deg   : angle of attack in degrees (determines wake direction).
-    chord     : chord length (trailing-edge x-coordinate for symmetric NACA).
-
-    Returns
-    -------
-    xy : (n, 2) float32
+    Mirrors the notebook's ``sqrt(x²+y²) > R + 0.05`` test (cylinder radius plus
+    a small buffer), generalised to an arbitrary body via the signed-distance
+    field: a point is kept iff it is outside the airfoil *and* at least
+    ``buffer`` away from the surface.
     """
-    rng   = np.random.default_rng(seed)
-    alpha = np.radians(aoa_deg)
-
-    # Unit vectors along and perpendicular to the wake centerline
-    d    = np.array([ np.cos(alpha),  np.sin(alpha)], dtype=np.float64)
-    perp = np.array([-np.sin(alpha),  np.cos(alpha)], dtype=np.float64)
-    te   = np.array([chord, 0.0],                     dtype=np.float64)
-
-    # t range: project wake box corners onto d̂ to span the full box
-    corners = np.array([
-        [wake_xmin, wake_ymin], [wake_xmin, wake_ymax],
-        [wake_xmax, wake_ymin], [wake_xmax, wake_ymax],
-    ], dtype=np.float64)
-    t_proj = (corners - te) @ d
-    t_lo, t_hi = float(t_proj.min()), float(t_proj.max())
-
+    rng = np.random.default_rng(seed)
     pts: list = []
     while len(pts) < n:
-        batch = max(n * 6, 20_000)
-        t  = rng.uniform(t_lo, t_hi, size=batch)   # seed along centerline
-        dt = rng.normal(0.0, sigma,  size=batch)   # Gaussian spread along axis
-        s  = rng.normal(0.0, sigma,  size=batch)   # Gaussian spread perpendicular
-        xy = (te + (t + dt)[:, None] * d
-                 + s[:, None]        * perp).astype(np.float32)
-
-        # Hard clip to wake bounding box
-        in_box = (
-            (xy[:, 0] >= wake_xmin) & (xy[:, 0] <= wake_xmax) &
-            (xy[:, 1] >= wake_ymin) & (xy[:, 1] <= wake_ymax)
-        )
-        xy = xy[in_box]
-        if len(xy) == 0:
-            continue
-
-        # Discard points inside the airfoil body
-        xy = xy[~af.is_inside(xy)]
-        pts.extend(xy.tolist())
-
+        batch = rng.uniform([xlo, ylo], [xhi, yhi],
+                            size=(max(n * 4, 20_000), 2)).astype(np.float32)
+        batch = batch[~af.is_inside(batch)]
+        if buffer > 0.0 and len(batch):
+            batch = batch[af.sdf(batch) > buffer]
+        pts.extend(batch.tolist())
     return np.array(pts[:n], dtype=np.float32)
 
 
-# ---------------------------------------------------------------------------
-# Dynamic (residual-adaptive) collocation resampling
-# ---------------------------------------------------------------------------
+def _build_collocation(
+    af, n_interior, n_wake, dom, wake_box, buffer, seed,
+) -> np.ndarray:
+    """Interior background pool + denser downstream wake pool, concatenated."""
+    xmin, xmax, ymin, ymax = dom
+    wxmin, wxmax, wymin, wymax = wake_box
+    interior = _sample_box_exterior(af, n_interior, xmin, xmax, ymin, ymax,
+                                    buffer, seed)
+    if n_wake > 0:
+        wake = _sample_box_exterior(af, n_wake, wxmin, wxmax, wymin, wymax,
+                                    buffer, seed + 1)
+        return np.concatenate([interior, wake], axis=0)
+    return interior
 
-def _resample_dynamic(
-    pde,
-    params,
-    af: NACAAirfoil,
-    n_dynamic: int,
-    n_candidates: int,
-    k: float,
-    wake_xmin: float,
-    wake_xmax: float,
-    wake_ymin: float,
-    wake_ymax: float,
-    wake_sigma: float,
-    aoa_deg: float,
-    chord: float,
-    key: jax.Array,
-) -> tuple[jnp.ndarray, jax.Array]:
-    """Replace the dynamic collocation pool using residual-based (RAR-D) sampling.
 
-    Candidates are drawn from the wake subdomain using :func:`_sample_wake_gaussian`
-    (Gaussian spread about the centerline), so the candidate density peaks along
-    the wake axis where NS errors are typically largest.
+def _edge_vertical(xval, ymin, ymax, n):
+    """n points along a vertical edge at x = xval."""
+    y = np.linspace(ymin, ymax, n, dtype=np.float32)
+    return np.stack([np.full(n, xval, np.float32), y], axis=1)
 
-    Then ``n_dynamic`` replacement points are chosen proportional to
-    ``|NS residual|^k``.
 
-    Parameters
-    ----------
-    pde                         : NavierStokesPDE — ``residual(params, xy) → (N, 3)``
-    params                      : current network parameters
-    af                          : NACAAirfoil geometry
-    n_dynamic                   : size of the pool to return
-    n_candidates                : total candidate pool (≥ 5 × n_dynamic)
-    k                           : RAR-D weighting exponent (1.0 = standard)
-    wake_xmin/xmax/ymin/ymax    : bounding box of the wake subdomain
-    wake_sigma                  : Gaussian σ perpendicular to the wake centerline
-    aoa_deg                     : angle of attack (degrees)
-    chord                       : chord length
-    key                         : JAX PRNG key (consumed); updated key also returned
-
-    Returns
-    -------
-    xy_new : (n_dynamic, 2) jnp.ndarray
-    key    : updated PRNG key
-    """
-    key, k1, k2 = jax.random.split(key, 3)
-    np_seed = int(jax.random.randint(k1, (), 0, 2 ** 31 - 1))
-
-    # Candidate pool: Gaussian-wake exterior points inside the subdomain
-    xy_u    = _sample_wake_gaussian(
-        af, n_candidates,
-        wake_xmin, wake_xmax, wake_ymin, wake_ymax,
-        sigma=wake_sigma, aoa_deg=aoa_deg, chord=chord,
-        seed=np_seed,
-    )
-    xy_cand = jnp.array(xy_u)
-
-    # NS residual magnitude at every candidate
-    res     = pde.residual(params, xy_cand)          # (N_cand, 3)
-    res_mag = jnp.sqrt(jnp.sum(res ** 2, axis=-1))  # (N_cand,)
-
-    # Weights: p ∝ |r|^k  (uniform fallback when all residuals are zero)
-    w     = res_mag ** k
-    total = w.sum()
-    w     = jnp.where(total > 0.0, w / total,
-                      jnp.ones_like(w) / n_candidates)
-
-    idx = jax.random.choice(k2, n_candidates, shape=(n_dynamic,),
-                            replace=True, p=w)
-    return xy_cand[idx], key
+def _edge_horizontal(yval, xmin, xmax, n):
+    """n points along a horizontal edge at y = yval."""
+    x = np.linspace(xmin, xmax, n, dtype=np.float32)
+    return np.stack([x, np.full(n, yval, np.float32)], axis=1)
 
 
 # ---------------------------------------------------------------------------
@@ -271,149 +118,85 @@ def _resample_dynamic(
 # ---------------------------------------------------------------------------
 
 def run_airfoil(cfg) -> dict:
-    """Train a PINN on steady incompressible NS around a NACA airfoil."""
+    """Train a pure PINN on steady incompressible NS around a NACA airfoil."""
     # ── Unpack config ─────────────────────────────────────────────────────────
     ph      = cfg.physics
     tr      = cfg.training
     lw      = cfg.loss
-    dom     = cfg_get(cfg, "domain", default=None)
+    dom_c   = cfg_get(cfg, "domain", default=None)
     out     = cfg_get(cfg, "output", default=None)
     out_dir = cfg_get(out, "dir", default="outputs/airfoil") if out else "outputs/airfoil"
     os.makedirs(out_dir, exist_ok=True)
 
-    Re    = float(ph.Re)
-    aoa   = float(cfg_get(ph, "aoa",   default=5.0))
-    naca  = str(cfg_get(ph,  "naca",   default="0012"))
-    chord = float(cfg_get(ph, "chord", default=1.0))
+    Re     = float(ph.Re)
+    aoa    = float(cfg_get(ph, "aoa",   default=0.0))
+    naca   = str(cfg_get(ph,  "naca",   default="0012"))
+    chord  = float(cfg_get(ph, "chord", default=1.0))
+    U_inf  = float(cfg_get(ph, "U_inf", default=1.0))
 
-    xmin = float(cfg_get(dom, "xmin", default=-5.0))  if dom else -5.0
-    xmax = float(cfg_get(dom, "xmax", default=15.0))  if dom else 15.0
-    ymin = float(cfg_get(dom, "ymin", default=-8.0))  if dom else -8.0
-    ymax = float(cfg_get(dom, "ymax", default= 8.0))  if dom else  8.0
+    xmin = float(cfg_get(dom_c, "xmin", default=-5.0)) if dom_c else -5.0
+    xmax = float(cfg_get(dom_c, "xmax", default=15.0)) if dom_c else 15.0
+    ymin = float(cfg_get(dom_c, "ymin", default=-5.0)) if dom_c else -5.0
+    ymax = float(cfg_get(dom_c, "ymax", default= 5.0)) if dom_c else  5.0
 
-    # ── Collocation split ─────────────────────────────────────────────────────
+    # ── Collocation / BC point counts ─────────────────────────────────────────
     d = cfg.data
-    n_fixed_unif = int(cfg_get(d, "n_fixed_uniform",  default=10000))
-    n_fixed_sdf  = int(cfg_get(d, "n_fixed_sdf",      default=8000))
-    n_dynamic    = int(cfg_get(d, "n_dynamic",         default=5000))
-    sdf_scale    = float(cfg_get(d, "sdf_scale",       default=0.05))
-    n_body       = int(cfg_get(d, "n_body_bc",         default=2000))
-    n_ff         = int(cfg_get(d, "n_farfield_bc",     default=1600))
-    n_sym        = int(cfg_get(d, "n_sym_bc",          default=400))
+    n_interior = int(cfg_get(d, "n_interior", default=10000))
+    n_wake     = int(cfg_get(d, "n_wake",     default=3000))
+    n_inlet    = int(cfg_get(d, "n_inlet",    default=300))
+    n_outlet   = int(cfg_get(d, "n_outlet",   default=300))
+    n_body     = int(cfg_get(d, "n_body",     default=300))
+    n_wall     = int(cfg_get(d, "n_wall",     default=300))
+    buffer     = float(cfg_get(d, "buffer",   default=0.02))
 
-    # Wake subdomain for dynamic points
-    wake_xmin  = float(cfg_get(d, "wake_xmin",  default=chord))
-    wake_xmax  = float(cfg_get(d, "wake_xmax",  default=xmax))
-    wake_ymin  = float(cfg_get(d, "wake_ymin",  default=-0.5))
-    wake_ymax  = float(cfg_get(d, "wake_ymax",  default= 0.5))
-    # Gaussian σ perpendicular to the wake centerline (in chord units)
-    wake_sigma = float(cfg_get(d, "wake_sigma", default=0.15))
+    wake_xmin = float(cfg_get(d, "wake_xmin", default=0.5))
+    wake_xmax = float(cfg_get(d, "wake_xmax", default=5.0))
+    wake_ymin = float(cfg_get(d, "wake_ymin", default=-2.0))
+    wake_ymax = float(cfg_get(d, "wake_ymax", default= 2.0))
 
     # ── Training hyper-parameters ─────────────────────────────────────────────
     epochs    = int(tr.epochs)
     lr        = float(tr.lr)
-    lr_alpha  = float(cfg_get(tr, "lr_alpha",   default=0.01))
-    batch_r   = int(cfg_get(tr, "batch_r",      default=2048))
-    batch_bc  = int(cfg_get(tr, "batch_bc",     default=512))
-    log_every = int(cfg_get(tr, "log_every",    default=1000))
-    patience  = int(cfg_get(tr, "early_stopping_patience", default=1000))
-    seed      = int(cfg_get(tr, "seed",         default=0))
-
-    resample_period     = int(cfg_get(tr, "resample_period",     default=100))
-    resample_candidates = int(cfg_get(tr, "resample_candidates", default=5))
-    resample_k          = float(cfg_get(tr, "resample_k",        default=1.0))
+    lr_step   = int(cfg_get(tr, "lr_step",  default=5000))
+    lr_gamma  = float(cfg_get(tr, "lr_gamma", default=0.5))
+    log_every = int(cfg_get(tr, "log_every", default=500))
+    seed      = int(cfg_get(tr, "seed",      default=0))
+    resample_period = int(cfg_get(tr, "resample_period", default=500))
 
     # ── Loss weights ──────────────────────────────────────────────────────────
-    W_BODY = float(cfg_get(lw, "w_body",  default=1.0))
-    W_FF   = float(cfg_get(lw, "w_ff",   default=1.0))
-    W_PREF = float(cfg_get(lw, "w_pref", default=1.0))
-    W_SYM  = float(cfg_get(lw, "w_sym",  default=5.0))
+    W_PDE = float(cfg_get(lw, "w_pde", default=10.0))
+    W_BC  = float(cfg_get(lw, "w_bc",  default=1.0))
 
-    U_INF     = 1.0
     alpha_rad = np.radians(aoa)
-    u_ff_val  = U_INF * np.cos(alpha_rad)
-    v_ff_val  = U_INF * np.sin(alpha_rad)
+    u_in_val  = U_inf * np.cos(alpha_rad)
+    v_in_val  = U_inf * np.sin(alpha_rad)
 
-    n_col_total = n_fixed_unif + n_fixed_sdf + n_dynamic
-    print(f"Airfoil: NACA {naca},  Re={Re},  AoA={aoa}°,  epochs={epochs}")
-    print(f"  Collocation: {n_fixed_unif} uniform (fixed)"
-          f"  +  {n_fixed_sdf} SDF-weighted (fixed)"
-          f"  +  {n_dynamic} dynamic (wake)  =  {n_col_total} total")
-    print(f"  Wake box: x=[{wake_xmin}, {wake_xmax}]  y=[{wake_ymin}, {wake_ymax}]"
-          f"  σ={wake_sigma}")
-    print(f"  BCs: {n_body} no-slip | {n_ff} farfield (left+right) "
-          f"| {n_sym} symmetry (top+bottom)")
+    n_col = n_interior + n_wake
+    print(f"Airfoil (pure PINN): NACA {naca},  Re={Re},  AoA={aoa}°,  epochs={epochs}")
+    print(f"  Domain: x∈[{xmin}, {xmax}]  y∈[{ymin}, {ymax}]")
+    print(f"  Collocation: {n_interior} interior + {n_wake} wake = {n_col} (full-batch)")
+    print(f"  Wake box: x∈[{wake_xmin}, {wake_xmax}]  y∈[{wake_ymin}, {wake_ymax}]"
+          f"  buffer={buffer}")
+    print(f"  BCs: {n_inlet} inlet (u,v) | {n_outlet} outlet (p=0) "
+          f"| {n_body} no-slip | 2×{n_wall} symmetry walls (v=0)")
     if resample_period > 0:
-        print(f"  Dynamic pool refreshed every {resample_period} epochs "
-              f"(pool={resample_candidates}×n_dyn, k={resample_k})")
-    else:
-        print("  Dynamic resampling disabled (resample_period=0)")
+        print(f"  Collocation re-sampled every {resample_period} epochs")
 
     # ── Geometry ──────────────────────────────────────────────────────────────
-    af = NACAAirfoil(naca=naca, chord=chord)
+    af  = NACAAirfoil(naca=naca, chord=chord)
+    dom      = (xmin, xmax, ymin, ymax)
+    wake_box = (wake_xmin, wake_xmax, wake_ymin, wake_ymax)
 
-    # --- Fixed pool 1: uniform far-field background ---
-    print("  Sampling fixed uniform collocation points …")
-    xy_fixed_unif = jnp.array(
-        af.sample_exterior(n_fixed_unif, xmin, xmax, ymin, ymax, seed=seed))
+    print("  Sampling collocation points …")
+    xy_col_j = jnp.array(_build_collocation(
+        af, n_interior, n_wake, dom, wake_box, buffer, seed))
 
-    # --- Fixed pool 2: SDF-weighted near-airfoil ---
-    print(f"  Sampling fixed SDF-weighted points (sdf_scale={sdf_scale}) …")
-    xy_fixed_sdf = jnp.array(
-        af.sample_sdf_weighted(n_fixed_sdf, xmin, xmax, ymin, ymax,
-                               sdf_scale=sdf_scale, seed=seed + 1))
-
-    # --- Dynamic pool: uniform over the wake box initially ---
-    # Uniform coverage ensures the network sees the full wake region from the
-    # start.  After the first resample_period epochs the pool is replaced by
-    # Gaussian-wake RAR-D points that concentrate on high-residual locations.
-    print(f"  Sampling initial dynamic points (uniform in wake box) …")
-    xy_dynamic = jnp.array(
-        af.sample_exterior(n_dynamic,
-                           wake_xmin, wake_xmax,
-                           wake_ymin, wake_ymax,
-                           seed=seed + 2)
-    )
-
-    # Full collocation pool = fixed_unif ‖ fixed_sdf ‖ dynamic
-    # (Rebuilt after each resample — the fixed part never changes.)
-    def _build_col():
-        return jnp.concatenate([xy_fixed_unif, xy_fixed_sdf, xy_dynamic], axis=0)
-
-    xy_col_j = _build_col()
-
-    # --- Boundary condition points ---
-    print("  Sampling airfoil surface (no-slip) …")
-    xy_body_j = jnp.array(af.surface_points(n=n_body), dtype=jnp.float32)
-
-    # ── Farfield BCs: left (inlet, x=xmin) and right (outlet, x=xmax) only ───
-    # Top and bottom are treated as symmetry planes — see below.
-    print("  Sampling farfield boundary (left + right edges only) …")
-    n_per_ff = max(1, n_ff // 2)
-    t_y_ff   = np.linspace(ymin, ymax, n_per_ff, dtype=np.float32)
-    xy_left  = np.stack([np.full(n_per_ff, xmin, np.float32), t_y_ff], axis=1)
-    xy_right = np.stack([np.full(n_per_ff, xmax, np.float32), t_y_ff], axis=1)
-    xy_ff    = np.concatenate([xy_left, xy_right], axis=0)
-    u_ff_arr = np.full(len(xy_ff), u_ff_val, dtype=np.float32)
-    v_ff_arr = np.full(len(xy_ff), v_ff_val, dtype=np.float32)
-    xy_ff_j  = jnp.array(xy_ff)
-    u_ff_j   = jnp.array(u_ff_arr)
-    v_ff_j   = jnp.array(v_ff_arr)
-
-    # ── Symmetry BCs: top (y=ymax) and bottom (y=ymin) edges ─────────────────
-    # At AoA=0 both horizontal boundaries are symmetry planes:
-    #   v = 0           (zero normal velocity — Dirichlet)
-    #   ∂u/∂y = 0       (zero wall-normal shear — Neumann via JAX grad)
-    print("  Sampling symmetry boundary (top + bottom edges) …")
-    n_per_sym = max(1, n_sym // 2)
-    t_x_sym   = np.linspace(xmin, xmax, n_per_sym, dtype=np.float32)
-    xy_top    = np.stack([t_x_sym, np.full(n_per_sym, ymax, np.float32)], axis=1)
-    xy_bot    = np.stack([t_x_sym, np.full(n_per_sym, ymin, np.float32)], axis=1)
-    xy_sym    = np.concatenate([xy_top, xy_bot], axis=0)
-    xy_sym_j  = jnp.array(xy_sym)
-
-    # Pressure gauge: a single upstream reference point (inside domain, x > xmin)
-    xy_pref_j = jnp.array([[-2.0, 0.0]], dtype=jnp.float32)
+    # Boundary-condition point sets (fixed throughout training)
+    xy_inlet_j  = jnp.array(_edge_vertical(xmin, ymin, ymax, n_inlet))
+    xy_outlet_j = jnp.array(_edge_vertical(xmax, ymin, ymax, n_outlet))
+    xy_top_j    = jnp.array(_edge_horizontal(ymax, xmin, xmax, n_wall))
+    xy_bot_j    = jnp.array(_edge_horizontal(ymin, xmin, xmax, n_wall))
+    xy_body_j   = jnp.array(af.surface_points(n=n_body), dtype=jnp.float32)
 
     # ── Model + PDE ───────────────────────────────────────────────────────────
     net_type = str(cfg_get(cfg.network, "type", default="mlp")).lower()
@@ -427,8 +210,13 @@ def run_airfoil(cfg) -> dict:
 
     key    = jax.random.PRNGKey(seed)
     params = model.init(key, jnp.ones((1, 2)))
+    n_params = sum(x.size for x in jax.tree_util.tree_leaves(params))
+    print(f"  Model parameters: {n_params:,}")
 
-    lr_sched  = optax.cosine_decay_schedule(lr, decay_steps=epochs, alpha=lr_alpha)
+    # StepLR: lr · gamma^(epoch // lr_step)
+    lr_sched  = optax.exponential_decay(
+        init_value=lr, transition_steps=lr_step,
+        decay_rate=lr_gamma, staircase=True)
     optimizer = optax.chain(
         optax.scale_by_adam(),
         optax.scale_by_schedule(lr_sched),
@@ -436,113 +224,68 @@ def run_airfoil(cfg) -> dict:
     )
     opt_state = optimizer.init(params)
 
-    # ── Loss function ─────────────────────────────────────────────────────────
-    # Five MSE terms (weights from config.yaml).
-    # xy_body_j, xy_pref_j are fixed BCs captured in closure.
-    # Symmetry Neumann term uses JAX grad inside vmap — JIT-compiled cleanly.
+    # ── Loss / step  (full-batch; BC sets captured in closure) ────────────────
     @jax.jit
-    def step(params, state, col_b, ff_b, uff_b, vff_b, sym_b):
+    def step(params, state, col):
         def loss_fn(p):
-            # 1. PDE residual — NS continuity + x/y momentum (N_b, 3)
-            res      = pde.residual(p, col_b)
-            pde_loss = jnp.mean(jnp.sum(res ** 2, axis=1))
+            # PDE residual: mean(cont²) + mean(momx²) + mean(momy²)
+            res   = pde.residual(p, col)                       # (N, 3)
+            l_pde = jnp.sum(jnp.mean(res ** 2, axis=0))
 
-            # 2. No-slip: u=0, v=0 on the airfoil body
-            out_body  = model.apply(p, xy_body_j)
-            body_loss = jnp.mean(out_body[:, 0] ** 2 + out_body[:, 1] ** 2)
+            # Inlet: u = U∞cosα, v = U∞sinα
+            out_in = model.apply(p, xy_inlet_j)
+            l_in   = (jnp.mean((out_in[:, 0] - u_in_val) ** 2)
+                      + jnp.mean((out_in[:, 1] - v_in_val) ** 2))
 
-            # 3. Farfield (left/right edges): match free-stream velocity
-            out_ff  = model.apply(p, ff_b)
-            ff_loss = jnp.mean((out_ff[:, 0] - uff_b) ** 2
-                               + (out_ff[:, 1] - vff_b) ** 2)
+            # Outlet: p = 0  (sets the pressure gauge)
+            out_out = model.apply(p, xy_outlet_j)
+            l_out   = jnp.mean(out_out[:, 2] ** 2)
 
-            # 4. Pressure gauge: p=0 at one upstream reference point
-            pref_loss = model.apply(p, xy_pref_j)[0, 2] ** 2
+            # Airfoil: no-slip u = v = 0
+            out_b  = model.apply(p, xy_body_j)
+            l_body = jnp.mean(out_b[:, 0] ** 2) + jnp.mean(out_b[:, 1] ** 2)
 
-            # 5. Symmetry (top/bottom edges):
-            #    (a) v = 0            — zero normal velocity (Dirichlet)
-            #    (b) ∂u/∂y = 0        — zero wall-normal shear (Neumann)
-            out_sym   = model.apply(p, sym_b)
-            sym_v     = jnp.mean(out_sym[:, 1] ** 2)
+            # Top / bottom symmetry: v = 0
+            out_t   = model.apply(p, xy_top_j)
+            out_bo  = model.apply(p, xy_bot_j)
+            l_wall  = jnp.mean(out_t[:, 1] ** 2) + jnp.mean(out_bo[:, 1] ** 2)
 
-            def _u_single(xy):
-                """u at a single point xy (shape (2,))."""
-                return model.apply(p, xy[None])[0, 0]
-
-            dudy = jax.vmap(lambda xy: jax.grad(_u_single)(xy)[1])(sym_b)
-            sym_dudy  = jnp.mean(dudy ** 2)
-            sym_loss  = sym_v + sym_dudy
-
-            total = (pde_loss
-                     + W_BODY * body_loss
-                     + W_FF   * ff_loss
-                     + W_PREF * pref_loss
-                     + W_SYM  * sym_loss)
-            return total, (pde_loss, body_loss, ff_loss, sym_loss)
+            l_bc  = l_in + l_out + l_body + l_wall
+            total = W_PDE * l_pde + W_BC * l_bc
+            return total, (l_pde, l_bc)
 
         (loss, aux), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)
         updates, state = optimizer.update(grads, state)
         params = optax.apply_updates(params, updates)
         return params, state, loss, aux
 
-    # ── Training loop ─────────────────────────────────────────────────────────
-    save_restart = int(cfg_get(tr, "save_restart_every", default=500))
+    # ── Restart ───────────────────────────────────────────────────────────────
+    save_restart = int(cfg_get(tr, "save_restart_every", default=1000))
     restart = RestartManager(out_dir, save_every=save_restart, cfg=cfg)
     start_ep, params, opt_state, hists = restart.maybe_restore(params, opt_state)
     loss_hist = hists.get("loss_hist", [])
     pde_hist  = hists.get("pde_hist",  [])
     bc_hist   = hists.get("bc_hist",   [])
 
-    key     = jax.random.PRNGKey(seed + 99)
-    logger  = ConsoleLogger(log_every=log_every)
-#    stopper = EarlyStopping(patience=patience)
+    logger = ConsoleLogger(log_every=log_every)
 
-    n_col_pts = xy_col_j.shape[0]
-    n_ff_pts  = xy_ff_j.shape[0]
-    n_sym_pts = xy_sym_j.shape[0]
-
+    # ── Training loop ─────────────────────────────────────────────────────────
     try:
         for ep in range(start_ep, epochs):
-
-            # ── Refresh dynamic pool (skip ep=0 — residuals are random) ──────
+            # Re-sample collocation (interior + wake) periodically
             if resample_period > 0 and ep > 0 and ep % resample_period == 0:
-                n_cand    = resample_candidates * n_dynamic
-                xy_dynamic, key = _resample_dynamic(
-                    pde, params, af,
-                    n_dynamic=n_dynamic,
-                    n_candidates=n_cand,
-                    k=resample_k,
-                    wake_xmin=wake_xmin, wake_xmax=wake_xmax,
-                    wake_ymin=wake_ymin, wake_ymax=wake_ymax,
-                    wake_sigma=wake_sigma, aoa_deg=aoa, chord=chord,
-                    key=key,
-                )
-                # Rebuild full pool: fixed parts are unchanged
-                xy_col_j  = _build_col()
-                n_col_pts = xy_col_j.shape[0]
-                print(f"  [ep {ep:5d}] Dynamic pool refreshed "
-                      f"({n_dynamic} pts, pool={n_cand})")
+                xy_col_j = jnp.array(_build_collocation(
+                    af, n_interior, n_wake, dom, wake_box, buffer,
+                    seed + ep))   # fresh seed → new points; shape unchanged
 
-            # ── Gradient step ─────────────────────────────────────────────────
-            key, k1, k2, k3 = jax.random.split(key, 4)
-            idx_col = safe_choice(k1, n_col_pts, batch_r)
-            idx_ff  = safe_choice(k2, n_ff_pts,  batch_bc)
-            idx_sym = safe_choice(k3, n_sym_pts, batch_bc)
-
-            params, opt_state, loss, (pde_l, body_l, ff_l, sym_l) = step(
-                params, opt_state,
-                xy_col_j[idx_col],
-                xy_ff_j[idx_ff], u_ff_j[idx_ff], v_ff_j[idx_ff],
-                xy_sym_j[idx_sym],
-            )
+            params, opt_state, loss, (l_pde, l_bc) = step(
+                params, opt_state, xy_col_j)
             loss_hist.append(float(loss))
-            pde_hist.append(float(pde_l))
-            bc_hist.append(float(body_l + ff_l + sym_l))
+            pde_hist.append(float(l_pde))
+            bc_hist.append(float(l_bc))
 
-            logs = {"loss": float(loss), "pde": float(pde_l),
-                    "bc": float(body_l + ff_l + sym_l)}
+            logs = {"loss": float(loss), "pde": float(l_pde), "bc": float(l_bc)}
             logger.on_epoch_end(ep, logs)
- #           stopper.on_epoch_end(ep, logs)
             restart.maybe_save(ep, params, opt_state,
                                {"loss_hist": loss_hist,
                                 "pde_hist":  pde_hist,
@@ -553,114 +296,120 @@ def run_airfoil(cfg) -> dict:
     restart.done()
     logger.on_train_end({"loss": loss_hist[-1] if loss_hist else float("nan")})
 
-    # ── Post-processing ───────────────────────────────────────────────────────
+    # ── Visualisation (notebook style) ────────────────────────────────────────
     print("\nEvaluating on prediction grid …")
-    Nx, Ny = 350, 180
-    xg = np.linspace(xmin, xmax, Nx, dtype=np.float32)
-    yg = np.linspace(ymin, ymax, Ny, dtype=np.float32)
+    nx, ny = 400, 200
+    xg = np.linspace(xmin, xmax, nx)          # float64 → equally spaced for streamplot
+    yg = np.linspace(ymin, ymax, ny)
     XX, YY = np.meshgrid(xg, yg)
-    grid_j  = jnp.stack([jnp.array(XX.ravel()), jnp.array(YY.ravel())], axis=1)
-    pred_g  = np.array(model.apply(params, grid_j))
-    u_grid  = pred_g[:, 0].reshape(Ny, Nx)
-    v_grid  = pred_g[:, 1].reshape(Ny, Nx)
-    p_grid  = pred_g[:, 2].reshape(Ny, Nx)
+    grid_j = jnp.array(np.stack([XX.ravel(), YY.ravel()], axis=1), dtype=jnp.float32)
+    pred_g = np.array(model.apply(params, grid_j))
+    U = pred_g[:, 0].reshape(ny, nx)
+    V = pred_g[:, 1].reshape(ny, nx)
+    P = pred_g[:, 2].reshape(ny, nx)
 
-    inside = af.is_inside(np.stack([XX.ravel(), YY.ravel()], axis=1)).reshape(Ny, Nx)
-    u_plot = np.where(inside, np.nan, u_grid)
-    v_plot = np.where(inside, np.nan, v_grid)
-    p_plot = np.where(inside, np.nan, p_grid)
+    # Mask the airfoil interior
+    inside = af.is_inside(np.stack([XX.ravel(), YY.ravel()], axis=1)).reshape(ny, nx)
+    for arr in (U, V, P):
+        arr[inside] = np.nan
 
-    # Fields plot
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    # 3-panel stacked figure: u, v, p
+    fig, axes = plt.subplots(3, 1, figsize=(18, 12))
     for ax, field, cmap, title in zip(
         axes,
-        [u_plot, v_plot, p_plot],
-        ["jet", "jet", "seismic"],
-        ["Streamwise velocity  u", "Normal velocity  v", "Pressure  p"],
+        (U, V, P),
+        ("jet", "jet", "coolwarm"),
+        ("Streamwise velocity  u", "Transverse velocity  v", "Pressure  p"),
     ):
         lim = np.nanmax(np.abs(field)) or 1.0
-        cf  = ax.contourf(xg, yg, field, 60, cmap=cmap, vmin=-lim, vmax=lim)
-        plt.colorbar(cf, ax=ax, shrink=0.75)
-        ax.fill(af.profile[:, 0], af.profile[:, 1], "k", zorder=5)
-        ax.set_xlim(xmin, xmax); ax.set_ylim(ymin, ymax)
-        ax.set_aspect("equal"); ax.set_title(title)
-        ax.set_xlabel("x / c"); ax.set_ylabel("y / c")
-    fig.suptitle(f"NACA {naca} | Re={Re} | AoA={aoa}°", fontsize=13)
+        cf  = ax.contourf(XX, YY, field, levels=60, cmap=cmap, vmin=-lim, vmax=lim)
+        ax.fill(af.profile[:, 0], af.profile[:, 1], color="gray", zorder=5)
+        ax.set_title(title, fontsize=13)
+        plt.colorbar(cf, ax=ax)
+        ax.set_xlim(xmin, xmax)
+        ax.set_ylim(ymin, ymax)
+        ax.set_aspect("equal")
+        ax.set_xlabel("x / c")
+        ax.set_ylabel("y / c")
+    fig.suptitle(f"NACA {naca} | Re={Re} | AoA={aoa}°", fontsize=14)
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, "airfoil_fields.png"), dpi=150, bbox_inches="tight")
+    fig.savefig(os.path.join(out_dir, "airfoil_fields.png"),
+                dpi=150, bbox_inches="tight")
     plt.close(fig)
 
-    # Collocation point visualisation
-    xy_col_np = np.array(xy_col_j)
-    fig2, ax2 = plt.subplots(figsize=(12, 6))
-    # Fixed uniform
-    ax2.scatter(np.array(xy_fixed_unif)[:, 0],
-                np.array(xy_fixed_unif)[:, 1],
-                s=0.5, c="steelblue", alpha=0.3, label=f"Fixed uniform ({n_fixed_unif})")
-    # Fixed SDF
-    ax2.scatter(np.array(xy_fixed_sdf)[:, 0],
-                np.array(xy_fixed_sdf)[:, 1],
-                s=0.8, c="orange", alpha=0.5, label=f"Fixed SDF ({n_fixed_sdf})")
-    # Dynamic (wake-confined)
-    ax2.scatter(np.array(xy_dynamic)[:, 0],
-                np.array(xy_dynamic)[:, 1],
-                s=0.8, c="green", alpha=0.5,
-                label=f"Dynamic / wake ({n_dynamic})")
-    # Draw wake subdomain outline
-    from matplotlib.patches import Rectangle
-    wake_rect = Rectangle(
-        (wake_xmin, wake_ymin),
-        wake_xmax - wake_xmin, wake_ymax - wake_ymin,
-        linewidth=1.2, edgecolor="green", facecolor="none",
-        linestyle="--", zorder=6, label="Wake subdomain",
-    )
-    ax2.add_patch(wake_rect)
-    ax2.fill(af.profile[:, 0], af.profile[:, 1], "k", zorder=5)
-    ax2.set_xlim(xmin, xmax); ax2.set_ylim(ymin, ymax)
-    ax2.set_aspect("equal")
-    ax2.set_title(f"Collocation points — NACA {naca}")
-    ax2.set_xlabel("x / c"); ax2.set_ylabel("y / c")
-    ax2.legend(markerscale=8, fontsize=9)
+    # ── Surface pressure on the airfoil ───────────────────────────────────────
+    # Pressure is sampled on the surface; the outlet BC (p=0) sets the gauge,
+    # so the pressure coefficient is  Cp = p / (½ U∞²)  with p∞ ≈ 0.
+    xy_surf = af.surface_points(n=400)
+    p_surf  = np.array(model.apply(params, jnp.array(xy_surf, dtype=jnp.float32))[:, 2])
+    q_inf   = 0.5 * U_inf ** 2
+    Cp_surf = p_surf / (q_inf + 1e-14)
+    x_surf, y_surf = xy_surf[:, 0], xy_surf[:, 1]
+    upper = y_surf >= 0.0
+    lower = y_surf <  0.0
+
+    fig_s, (axp, axc) = plt.subplots(1, 2, figsize=(14, 5))
+    # Raw surface pressure p(x)
+    axp.plot(x_surf[upper], p_surf[upper], "b-o", ms=2.5, lw=1.2, label="Upper")
+    axp.plot(x_surf[lower], p_surf[lower], "r-o", ms=2.5, lw=1.2, label="Lower")
+    axp.axhline(0.0, color="k", lw=0.6, ls="--")
+    axp.set_xlabel("x / c")
+    axp.set_ylabel("p")
+    axp.set_title("Surface pressure  p(x)")
+    axp.legend()
+    axp.grid(True, alpha=0.4)
+    # Pressure coefficient Cp(x) — inverted y-axis (aerodynamics convention)
+    axc.plot(x_surf[upper], Cp_surf[upper], "b-o", ms=2.5, lw=1.2, label="Upper")
+    axc.plot(x_surf[lower], Cp_surf[lower], "r-o", ms=2.5, lw=1.2, label="Lower")
+    axc.axhline(0.0, color="k", lw=0.6, ls="--")
+    axc.invert_yaxis()
+    axc.set_xlabel("x / c")
+    axc.set_ylabel("Cp")
+    axc.set_title("Pressure coefficient  Cp = p / (½ U∞²)")
+    axc.legend()
+    axc.grid(True, alpha=0.4)
+    fig_s.suptitle(f"Airfoil surface pressure — NACA {naca} | Re={Re} | AoA={aoa}°",
+                   fontsize=13)
+    fig_s.tight_layout()
+    fig_s.savefig(os.path.join(out_dir, "airfoil_surface_pressure.png"),
+                  dpi=150, bbox_inches="tight")
+    plt.close(fig_s)
+
+    # Loss convergence
+    fig2, ax2 = plt.subplots(figsize=(10, 4))
+    ax2.semilogy(loss_hist, lw=0.8, label="Total")
+    ax2.semilogy(pde_hist,  lw=0.8, alpha=0.7, label="PDE")
+    ax2.semilogy(bc_hist,   lw=0.8, alpha=0.7, label="BC")
+    ax2.set_xlabel("Epoch")
+    ax2.set_ylabel("Loss (log scale)")
+    ax2.set_title(f"PINN Training Loss Convergence — Re={Re}")
+    ax2.grid(True, which="both", alpha=0.4)
+    ax2.legend()
     fig2.tight_layout()
-    fig2.savefig(os.path.join(out_dir, "collocation_points.png"),
+    fig2.savefig(os.path.join(out_dir, "loss_curve.png"),
                  dpi=150, bbox_inches="tight")
     plt.close(fig2)
 
-    # Pressure coefficient + CL  (x_ref must lie inside the domain)
-    xy_s, Cp = _compute_Cp(model, params, af, U_INF, x_ref=max(xmin + 0.5, -2.0))
-    CL       = _estimate_CL(xy_s, Cp)
-    print(f"\nEstimated CL ≈ {CL:.4f}  (pressure-only)")
-    x_s, y_s = xy_s[:, 0], xy_s[:, 1]
-    top_mask, bot_mask = y_s >= 0, y_s < 0
-    fig3, ax3 = plt.subplots(figsize=(9, 5))
-    ax3.plot(x_s[top_mask], Cp[top_mask], "b-o", ms=2.5, lw=1.2, label="Upper surface")
-    ax3.plot(x_s[bot_mask], Cp[bot_mask], "r-o", ms=2.5, lw=1.2, label="Lower surface")
-    ax3.axhline(0, color="k", lw=0.6, ls="--")
-    ax3.invert_yaxis()
-    ax3.set_xlabel("x / c"); ax3.set_ylabel("Cp")
-    ax3.set_title(f"Pressure coefficient — NACA {naca} | Re={Re} | AoA={aoa}°"
-                  f"\nEst. CL ≈ {CL:.3f}")
-    ax3.legend(); fig3.tight_layout()
-    fig3.savefig(os.path.join(out_dir, "airfoil_Cp.png"), dpi=150, bbox_inches="tight")
+    # Velocity profile on a vertical line 2 chords downstream of the TE
+    x_probe = float(chord + 2.0)
+    y_line  = np.linspace(ymin, ymax, 500, dtype=np.float32)
+    xy_line = jnp.array(np.stack([np.full(500, x_probe, np.float32), y_line], axis=1))
+    u_line  = np.array(model.apply(params, xy_line)[:, 0])
+
+    fig3, ax3 = plt.subplots(figsize=(6, 8))
+    ax3.plot(u_line, y_line, "b-", label="PINN u-velocity")
+    ax3.axvline(x=U_inf, color="r", ls="--", label=f"U∞={U_inf}")
+    ax3.set_xlabel("u")
+    ax3.set_ylabel("y")
+    ax3.set_title(f"Velocity Profile at x={x_probe:.1f} (downstream)")
+    ax3.legend()
+    ax3.grid(True, alpha=0.4)
+    fig3.tight_layout()
+    fig3.savefig(os.path.join(out_dir, "velocity_profile.png"),
+                 dpi=150, bbox_inches="tight")
     plt.close(fig3)
 
-    # Loss history
-    fig4, ax4 = plt.subplots(figsize=(8, 4))
-    ax4.semilogy(loss_hist, label="Total",  alpha=0.9)
-    ax4.semilogy(pde_hist,  label="PDE",    alpha=0.75)
-    ax4.semilogy(bc_hist,   label="BC",     alpha=0.75)
-    if resample_period > 0:
-        for rep_ep in range(resample_period, len(loss_hist), resample_period):
-            ax4.axvline(rep_ep, color="grey", lw=0.8, ls="--", alpha=0.4)
-        ax4.axvline(resample_period, color="grey", lw=0.8, ls="--",
-                    alpha=0.4, label="Dynamic resample")
-    ax4.set_xlabel("Epoch"); ax4.set_ylabel("Loss")
-    ax4.set_title(f"Airfoil PINN — Re={Re},  NACA {naca}")
-    ax4.legend(); fig4.tight_layout()
-    fig4.savefig(os.path.join(out_dir, "loss.png"), dpi=150, bbox_inches="tight")
-    plt.close(fig4)
-
-    # ── Save predictions ──────────────────────────────────────────────────────
+    # ── Save predictions + checkpoint ─────────────────────────────────────────
     pred_col = np.array(model.apply(params, xy_col_j))
     save_predictions(
         out_dir,
@@ -672,23 +421,26 @@ def run_airfoil(cfg) -> dict:
     )
     np.save(os.path.join(out_dir, "loss_hist.npy"), np.array(loss_hist))
 
-    # ── Model checkpoint ──────────────────────────────────────────────────────
     save_checkpoint(params, out_dir, metadata={
         "problem": "airfoil",
         "network": {"type": net_type, "layers": list(cfg.network.layers)},
-        "physics": {"Re": Re, "aoa": aoa, "naca": naca, "chord": chord},
-        "results": {"CL": CL, "n_epochs": len(loss_hist)},
+        "physics": {"Re": Re, "aoa": aoa, "naca": naca,
+                    "chord": chord, "U_inf": U_inf},
+        "results": {"final_loss": loss_hist[-1] if loss_hist else float("nan"),
+                    "n_epochs": len(loss_hist)},
     })
 
     save_config(cfg, os.path.join(out_dir, "config.yaml"))
-    print(f"\nOutputs saved to: {out_dir}/")
+    print(f"\nFinal loss: {loss_hist[-1]:.4e}" if loss_hist else "\nNo epochs run.")
+    print(f"Outputs saved to: {out_dir}/")
 
     return {"params": params, "loss_hist": loss_hist,
-            "CL": CL, "n_epochs": len(loss_hist)}
+            "n_epochs": len(loss_hist)}
 
 
 if __name__ == "__main__":
-    import sys, pathlib
+    import sys
+    import pathlib
     _HERE = pathlib.Path(__file__).parent
     cfg_path = str(pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else _HERE / "config.yaml")
     from underPINN.config.loader import load_config

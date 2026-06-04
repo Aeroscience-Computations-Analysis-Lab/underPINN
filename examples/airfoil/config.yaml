@@ -1,53 +1,62 @@
 problem: airfoil
+
+# ── Network ───────────────────────────────────────────────────────────────────
+# Reference notebook: plain tanh MLP, hidden=128, depth=6  →  (u, v, p)
 network:
-  type: gated_mlp
-  layers:
-  - 2
-  - 128
-  - 128
-  - 128
-  - 128
-  - 3
+  type  : mlp                                       # 'mlp' or 'gated_mlp'
+  layers: [2, 128, 128, 128, 128, 128, 128, 3]      # (x, y) → (u, v, p)
+
+# ── Physics ───────────────────────────────────────────────────────────────────
 physics:
-  Re: 100.0
-  aoa: 0.0
-  naca: '0012'
-  chord: 1.0
+  Re   : 100.0     # Reynolds number  (ν = 1/Re = 0.025)
+  aoa  : 0.0      # angle of attack in degrees  (0 = symmetric)
+  naca : '0012'   # NACA 4-digit profile
+  chord: 1.0      # chord length  (LE at x=0, TE at x=chord)
+  U_inf: 1.0      # free-stream speed
+
+# ── Computational domain ──────────────────────────────────────────────────────
+#   Inlet   left edge  x = xmin  →  velocity Dirichlet  (u, v) = U∞(cosα, sinα)
+#   Outlet  right edge x = xmax  →  pressure Dirichlet   p = 0
+#   Top/bot y = ±ymax            →  symmetry  v = 0
 domain:
-  xmin: -2.5
-  xmax: 8.0
-  ymin: -2.5
-  ymax: 2.5
+  xmin: -5.0
+  xmax: 15.0
+  ymin: -5.0
+  ymax:  5.0
+
+# ── Collocation & boundary-condition points ───────────────────────────────────
 data:
-  n_fixed_uniform: 40000
-  n_fixed_sdf: 20000
-  n_dynamic: 10000
-  sdf_scale: 0.02
-  n_body_bc: 5000
-  n_farfield_bc: 1600
-  n_sym_bc: 400
-  wake_xmin: 1.5
-  wake_xmax: 4.0
-  wake_ymin: -0.6
-  wake_ymax: 0.6
-  wake_sigma: 0.15
+  n_interior: 10000   # uniform background pool (exterior to airfoil)
+  n_wake    : 3000    # denser downstream wake pool
+  buffer    : 0.02    # reject points within this distance of the surface
+  n_inlet   : 300     # inlet edge  (velocity BC)
+  n_outlet  : 300     # outlet edge (pressure BC)
+  n_body    : 300     # airfoil surface (no-slip)
+  n_wall    : 300     # per symmetry wall (top, bottom)
+
+  # Wake subdomain for the dense pool
+  wake_xmin :  0.5
+  wake_xmax :  5.0
+  wake_ymin : -2.0
+  wake_ymax :  2.0
+
+# ── Training ──────────────────────────────────────────────────────────────────
 training:
-  epochs: 80000
-  lr: 0.001
-  lr_alpha: 0.02
-  batch_r: 2048
-  batch_bc: 512
-  log_every: 500
-  seed: 0
-  save_restart_every: 500
-  resample_period: 500
-  resample_candidates: 5
-  resample_k: 1.0
+  epochs            : 40000
+  lr                : 1.0e-3
+  lr_step           : 5000     # StepLR period  (epochs between LR decays)
+  lr_gamma          : 0.5      # StepLR multiplier  (lr ← lr × gamma)
+  resample_period   : 500      # re-sample collocation every N epochs (0 = off)
+  log_every         : 500
+  seed              : 0
+  save_restart_every: 1000     # checkpoint frequency  (0 = off)
+
+# ── Loss weights ──────────────────────────────────────────────────────────────
 loss:
-  w_body: 40.0
-  w_ff: 4.0
-  w_pref: 1.0
-  w_sym: 5.0
+  w_pde: 10.0   # PDE residual  (continuity + x/y momentum)
+  w_bc :  1.0   # boundary conditions  (inlet + outlet + no-slip + symmetry)
+
+# ── Output ────────────────────────────────────────────────────────────────────
 output:
-  dir: outputs/airfoil
+  dir        : outputs/airfoil
   save_params: true

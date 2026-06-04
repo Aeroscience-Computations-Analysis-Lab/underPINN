@@ -397,13 +397,13 @@ class TestExampleAirfoil:
             {
                 "training.epochs": 3,
                 "training.save_restart_every": 0,
-                "training.resample_period": 0,   # disable RAR-D for speed
-                "data.n_fixed_uniform": 50,
-                "data.n_fixed_sdf":     30,
-                "data.n_dynamic":       20,
-                "data.n_body_bc":       20,
-                "data.n_farfield_bc":   20,
-                "data.n_sym_bc":        20,
+                "training.resample_period": 0,   # disable resampling for speed
+                "data.n_interior": 80,
+                "data.n_wake":     20,
+                "data.n_inlet":    20,
+                "data.n_outlet":   20,
+                "data.n_body":     20,
+                "data.n_wall":     20,
             },
             tmp_path,
         )
@@ -432,3 +432,38 @@ class TestExampleAneurysmFlow:
         result = mod.run_aneurysm_flow(cfg)
         assert "loss_hist" in result
         assert _has_nonempty_loss(result)
+
+
+# ---------------------------------------------------------------------------
+# 15. Pulsatile Pipe Flow Transfer Learning
+# ---------------------------------------------------------------------------
+
+class TestExamplePipeFlowPulsatileTransfer:
+    def _small_cfg(self, tmp_path):
+        return _cfg(
+            "pipe_flow/pipe_flow_pulsatile_transfer.yaml",
+            {
+                "cycle_transfer.n_phase1_epochs":   3,
+                "cycle_transfer.n_transfer_epochs": 3,
+                "cycle_transfer.n_scratch_epochs":  3,
+                "amplitude_transfer.n_source_epochs":   3,
+                "amplitude_transfer.n_transfer_epochs": 3,
+                "amplitude_transfer.n_scratch_epochs":  3,
+                "data.n_collocation": 100,
+                "data.n_ic": 20,
+                "data.n_bc": 20,
+            },
+            tmp_path,
+        )
+
+    def test_cycle_transfer_key_in_result(self, tmp_path):
+        mod = _load_module("pulsatile_ct", "pipe_flow/pipe_flow_pulsatile_transfer.py")
+        cfg = self._small_cfg(tmp_path)
+        result = mod.run_pipe_flow_pulsatile_transfer(cfg)
+        assert "cycle_transfer" in result
+
+    def test_amplitude_transfer_key_in_result(self, tmp_path):
+        mod = _load_module("pulsatile_at", "pipe_flow/pipe_flow_pulsatile_transfer.py")
+        cfg = self._small_cfg(tmp_path)
+        result = mod.run_pipe_flow_pulsatile_transfer(cfg)
+        assert "amplitude_transfer" in result
