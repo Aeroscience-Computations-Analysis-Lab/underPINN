@@ -15,12 +15,17 @@ PDE  (steady incompressible Navier–Stokes, ν = 1/Re):
     ∇·u = 0
     (u·∇)u + ∇p − ν ∇²u = 0
 
-Boundary conditions (exactly as in the reference notebook):
+Angle of attack is imposed by **rotating the airfoil** (pitch by α about the
+quarter-chord); the free-stream stays horizontal.  This avoids tilting the
+inflow and keeps the inlet/outlet aligned with the domain edges.
 
-    • Inlet   (left edge,  x = xmin):  u = U∞ cos α,  v = U∞ sin α
+Boundary conditions:
+
+    • Inlet   (left edge,  x = xmin):  u = U∞,  v = 0   (horizontal free-stream)
     • Outlet  (right edge, x = xmax):  p = 0
     • Airfoil (no-slip)             :  u = v = 0
-    • Top / bottom walls (symmetry) :  v = 0
+    • Top / bottom walls            :  v = 0 (symmetry, symmetric airfoil @ α=0)
+                                       or (u, v) = (U∞, 0) (free-stream, else)
 
 Collocation strategy (notebook recipe):
 
@@ -167,25 +172,42 @@ def run_airfoil(cfg) -> dict:
     W_PDE = float(cfg_get(lw, "w_pde", default=10.0))
     W_BC  = float(cfg_get(lw, "w_bc",  default=1.0))
 
-    alpha_rad = np.radians(aoa)
-    u_in_val  = U_inf * np.cos(alpha_rad)
-    v_in_val  = U_inf * np.sin(alpha_rad)
+    # Angle of attack is realised by ROTATING THE AIRFOIL (see NACAAirfoil),
+    # so the free-stream stays horizontal:  (u, v)_∞ = (U_inf, 0).
+    u_in_val = U_inf
+    v_in_val = 0.0
+
+    # ── Geometry (airfoil pitched by the angle of attack) ─────────────────────
+    af  = NACAAirfoil(naca=naca, chord=chord, aoa_deg=aoa)
+    dom      = (xmin, xmax, ymin, ymax)
+    wake_box = (wake_xmin, wake_xmax, wake_ymin, wake_ymax)
+
+    # ── Top/bottom wall BC ────────────────────────────────────────────────────
+    # A true symmetry plane (v=0) is only physical for a *symmetric* airfoil at
+    # zero AoA.  For a cambered airfoil — or any non-zero AoA (rotated body) —
+    # the flow carries lift and is not symmetric about y=0, so the far-field
+    # top/bottom edges instead impose the free-stream velocity (u, v) = (U∞, 0).
+    # ``wall_bc`` can be forced in config ('symmetry' | 'freestream').
+    sym_ok      = af.is_symmetric and abs(aoa) < 1e-9
+    wall_bc     = str(cfg_get(d, "wall_bc",
+                              default="symmetry" if sym_ok else "freestream")).lower()
+    if wall_bc not in ("symmetry", "freestream"):
+        raise ValueError(f"wall_bc must be 'symmetry' or 'freestream', got '{wall_bc}'.")
+    wall_symmetry = (wall_bc == "symmetry")
 
     n_col = n_interior + n_wake
-    print(f"Airfoil (pure PINN): NACA {naca},  Re={Re},  AoA={aoa}°,  epochs={epochs}")
+    print(f"Airfoil (pure PINN): NACA {naca}"
+          f"  ({'symmetric' if af.is_symmetric else 'cambered'}),"
+          f"  Re={Re},  AoA={aoa}°,  epochs={epochs}")
     print(f"  Domain: x∈[{xmin}, {xmax}]  y∈[{ymin}, {ymax}]")
     print(f"  Collocation: {n_interior} interior + {n_wake} wake = {n_col} (full-batch)")
     print(f"  Wake box: x∈[{wake_xmin}, {wake_xmax}]  y∈[{wake_ymin}, {wake_ymax}]"
           f"  buffer={buffer}")
+    _wall_desc = "v=0 symmetry" if wall_symmetry else "free-stream (u,v)"
     print(f"  BCs: {n_inlet} inlet (u,v) | {n_outlet} outlet (p=0) "
-          f"| {n_body} no-slip | 2×{n_wall} symmetry walls (v=0)")
+          f"| {n_body} no-slip | 2×{n_wall} top/bottom [{_wall_desc}]")
     if resample_period > 0:
         print(f"  Collocation re-sampled every {resample_period} epochs")
-
-    # ── Geometry ──────────────────────────────────────────────────────────────
-    af  = NACAAirfoil(naca=naca, chord=chord)
-    dom      = (xmin, xmax, ymin, ymax)
-    wake_box = (wake_xmin, wake_xmax, wake_ymin, wake_ymax)
 
     print("  Sampling collocation points …")
     xy_col_j = jnp.array(_build_collocation(
@@ -245,10 +267,18 @@ def run_airfoil(cfg) -> dict:
             out_b  = model.apply(p, xy_body_j)
             l_body = jnp.mean(out_b[:, 0] ** 2) + jnp.mean(out_b[:, 1] ** 2)
 
-            # Top / bottom symmetry: v = 0
-            out_t   = model.apply(p, xy_top_j)
-            out_bo  = model.apply(p, xy_bot_j)
-            l_wall  = jnp.mean(out_t[:, 1] ** 2) + jnp.mean(out_bo[:, 1] ** 2)
+            # Top / bottom far-field walls
+            out_t  = model.apply(p, xy_top_j)
+            out_bo = model.apply(p, xy_bot_j)
+            if wall_symmetry:
+                # Symmetry plane: zero normal velocity v = 0
+                l_wall = jnp.mean(out_t[:, 1] ** 2) + jnp.mean(out_bo[:, 1] ** 2)
+            else:
+                # Free-stream Dirichlet: (u, v) = U∞(cosα, sinα)
+                l_wall = (jnp.mean((out_t[:, 0]  - u_in_val) ** 2)
+                          + jnp.mean((out_t[:, 1]  - v_in_val) ** 2)
+                          + jnp.mean((out_bo[:, 0] - u_in_val) ** 2)
+                          + jnp.mean((out_bo[:, 1] - v_in_val) ** 2))
 
             l_bc  = l_in + l_out + l_body + l_wall
             total = W_PDE * l_pde + W_BC * l_bc
@@ -340,13 +370,12 @@ def run_airfoil(cfg) -> dict:
     # ── Surface pressure on the airfoil ───────────────────────────────────────
     # Pressure is sampled on the surface; the outlet BC (p=0) sets the gauge,
     # so the pressure coefficient is  Cp = p / (½ U∞²)  with p∞ ≈ 0.
-    xy_surf = af.surface_points(n=400)
+    xy_surf, upper = af.surface_points(n=400, return_side=True)
     p_surf  = np.array(model.apply(params, jnp.array(xy_surf, dtype=jnp.float32))[:, 2])
     q_inf   = 0.5 * U_inf ** 2
     Cp_surf = p_surf / (q_inf + 1e-14)
-    x_surf, y_surf = xy_surf[:, 0], xy_surf[:, 1]
-    upper = y_surf >= 0.0
-    lower = y_surf <  0.0
+    x_surf  = xy_surf[:, 0]    # physical x-coordinate of each surface point
+    lower   = ~upper
 
     fig_s, (axp, axc) = plt.subplots(1, 2, figsize=(14, 5))
     # Raw surface pressure p(x)

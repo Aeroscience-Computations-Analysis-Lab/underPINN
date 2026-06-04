@@ -1,0 +1,58 @@
+problem: pipe_flow_pulsatile_transfer
+# Run via:
+#   python examples/pipe_flow/pipe_flow_pulsatile_transfer.py
+#   python -m underPINN run examples/pipe_flow/pipe_flow_pulsatile_transfer.yaml
+#
+# Full 3-D unsteady pulsatile pipe flow.  Geometry and inflow profile are the
+# SAME as the steady pipe-flow case (x ∈ [-3.5, 3.5], D = 1, parabolic inlet
+# with peak V_max); the inlet peak is now modulated sinusoidally in time.
+# Long-time integration is performed by TIME-MARCHING TRANSFER LEARNING:
+# the horizon is split into windows of length dT, each window is warm-started
+# from the previous one, and the previous window's end-state is used as the
+# initial condition for the next.
+
+network:
+  type  : gated_mlp                       # 'mlp' or 'gated_mlp'
+  layers: [4, 128, 128, 128, 128, 4]      # (x, y, z, t) → (u, v, w, p)
+
+physics:
+  Re      : 40.0     # Reynolds number  (ν = 1/Re)
+  R       : 0.5      # pipe radius — diameter D = 1.0   (same as steady case)
+  L       : 7.0      # pipe length   (x_lo to x_lo + L) (same as steady case)
+  x_lo    : -3.5     # inlet x-coordinate → pipe spans x ∈ [-3.5, 3.5]
+  V_max   : 2.0      # mean centreline peak  (steady Poiseuille profile)
+  V_amp   : 1.0      # pulsation amplitude on the peak  →  peak(t)=V_max+V_amp·sin(ωt)
+  T_period: 1.0      # pulse period
+
+# ── Time-marching transfer learning ───────────────────────────────────────────
+time_marching:
+  T_total          : 4.0    # integrate to long time  (= 4 pulse cycles)
+  dT               : 0.5    # window length  →  n_windows = T_total / dT = 8
+  n_first_epochs   : 12000  # epochs for window 0  (cold start)
+  n_warm_epochs    : 4000   # epochs per subsequent window  (warm start → fast)
+  n_cold_epochs    : 12000  # epochs per window for the no-transfer baseline
+  compare_no_transfer: true # also run a cold-start chain for comparison
+  first_lr         : 1.0e-3
+  warm_lr          : 5.0e-4
+  cold_lr          : 1.0e-3
+  lr_alpha         : 0.01   # cosine-decay floor
+
+# ── Collocation data (per window) ─────────────────────────────────────────────
+data:
+  n_interior: 20000
+  n_wall    : 4000
+  n_inlet   : 1000
+  n_outlet  : 1000
+  n_ic      : 2000     # interior points where the initial condition is enforced
+  batch_r   : 2048
+  batch_bc  : 512
+
+loss:
+  w_pde   : 1.0
+  w_wall  : 100.0
+  w_inlet : 50.0
+  w_outlet: 20.0
+  w_ic    : 100.0      # initial-condition match (window-to-window continuity)
+
+output:
+  dir: outputs/pipe_flow_pulsatile_transfer

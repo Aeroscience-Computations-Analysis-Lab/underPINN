@@ -93,3 +93,73 @@ class SteadyNS3DPDE(BasePDE):
         dpdx = -4.0 * nu * U_max / R ** 2   # negative pressure gradient
         p    = dpdx * (x - x_hi)            # p = 0 at the outlet x = x_hi
         return u, v, w, p
+
+
+class UnsteadyNS3DPDE(BasePDE):
+    """3-D unsteady incompressible Navier-Stokes equations.
+
+    Network maps (x, y, z, t) → (u, v, w, p).
+    Build model with ``layers[0] = 4``, ``layers[-1] = 4``.
+
+    Non-dimensional PDE system (ρ = 1, ν = 1/Re):
+        ∇·u = 0
+        u_t + (u·∇)u = −∇p + ν Δu
+
+    Parameters
+    ----------
+    model : Flax module — input (N, 4) → output (N, 4)
+    Re    : Reynolds number
+    """
+
+    def __init__(self, model, Re: float = 100.0):
+        self.model = model
+        self.Re = Re
+
+    def uvwp(self, params, xyzt):
+        """Return (u, v, w, p) arrays at points xyzt (N, 4)."""
+        out = self.model.apply(params, xyzt)  # (N, 4)
+        return out[:, 0], out[:, 1], out[:, 2], out[:, 3]
+
+    def residual(self, params, xyzt):
+        """Compute 4 PDE residuals at collocation points xyzt (N, 4).
+
+        ``xyzt[:, 0:3]`` are spatial coordinates, ``xyzt[:, 3]`` is time.
+
+        Returns
+        -------
+        (N, 4) array — [cont, mom_x, mom_y, mom_z].
+        """
+        nu = 1.0 / self.Re
+
+        def net_single(p_in):
+            return self.model.apply(params, p_in[None, :])[0, :]  # (4,)
+
+        def jac_single(p_in):
+            # J[i, j] = d f_i / d {x, y, z, t}_j,  shape (4, 4)
+            return jax.jacfwd(net_single)(p_in)
+
+        def compute(p_in):
+            f = net_single(p_in)                      # (4,)
+            J = jac_single(p_in)                      # (4, 4)
+            H = jax.jacfwd(jac_single)(p_in)          # (4, 4, 4)
+            return f, J, H
+
+        f, J, H = jax.vmap(compute)(xyzt)             # (N,4),(N,4,4),(N,4,4,4)
+
+        u, v, w = f[:, 0], f[:, 1], f[:, 2]
+        u_x, u_y, u_z, u_t = J[:, 0, 0], J[:, 0, 1], J[:, 0, 2], J[:, 0, 3]
+        v_x, v_y, v_z, v_t = J[:, 1, 0], J[:, 1, 1], J[:, 1, 2], J[:, 1, 3]
+        w_x, w_y, w_z, w_t = J[:, 2, 0], J[:, 2, 1], J[:, 2, 2], J[:, 2, 3]
+        p_x, p_y, p_z      = J[:, 3, 0], J[:, 3, 1], J[:, 3, 2]
+
+        # Spatial Laplacian (exclude the time index 3)
+        lap_u = H[:, 0, 0, 0] + H[:, 0, 1, 1] + H[:, 0, 2, 2]
+        lap_v = H[:, 1, 0, 0] + H[:, 1, 1, 1] + H[:, 1, 2, 2]
+        lap_w = H[:, 2, 0, 0] + H[:, 2, 1, 1] + H[:, 2, 2, 2]
+
+        cont  = u_x + v_y + w_z
+        mom_x = u_t + u * u_x + v * u_y + w * u_z + p_x - nu * lap_u
+        mom_y = v_t + u * v_x + v * v_y + w * v_z + p_y - nu * lap_v
+        mom_z = w_t + u * w_x + v * w_y + w * w_z + p_z - nu * lap_w
+
+        return jnp.stack([cont, mom_x, mom_y, mom_z], axis=-1)

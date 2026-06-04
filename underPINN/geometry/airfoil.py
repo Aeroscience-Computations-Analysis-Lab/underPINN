@@ -21,7 +21,8 @@ class NACAAirfoil:
     >>> xy_ff      = af.farfield_boundary(300)   # (1200, 2) far-field pts
     """
 
-    def __init__(self, naca: str = "0012", chord: float = 1.0):
+    def __init__(self, naca: str = "0012", chord: float = 1.0,
+                 aoa_deg: float = 0.0, pivot=None):
         if len(naca) != 4 or not naca.isdigit():
             raise ValueError("naca must be a 4-digit string, e.g. '0012'")
         self.naca  = naca
@@ -29,7 +30,39 @@ class NACAAirfoil:
         self.m = int(naca[0]) / 100   # max camber fraction
         self.p = int(naca[1]) / 10    # chordwise location of max camber
         self.t = int(naca[2:]) / 100  # max thickness fraction
-        self._coords = self._generate(200)   # closed surface polygon
+        # A cambered airfoil (1st digit ≠ 0) needs a valid max-camber position
+        # (2nd digit ≠ 0); otherwise the camber equations divide by p = 0.
+        if self.m > 0.0 and self.p == 0.0:
+            raise ValueError(
+                f"NACA '{naca}': a cambered airfoil (first digit {naca[0]}≠0) "
+                f"requires a nonzero second digit (max-camber position). "
+                f"Use e.g. '2412', or a symmetric code like '0012'."
+            )
+
+        # Angle of attack is realised by *rotating the airfoil*, keeping the
+        # free-stream horizontal.  A positive AoA pitches the airfoil nose-up,
+        # which is a clockwise rotation by α (θ = −α) of the body coordinates.
+        self.aoa_deg = float(aoa_deg)
+        self.pivot   = (0.25 * chord, 0.0) if pivot is None else tuple(pivot)
+        self._theta  = -np.radians(self.aoa_deg)
+
+        self._coords_body = self._generate(200)          # body frame (unrotated)
+        self._coords      = self._rotate(self._coords_body)   # physical frame
+
+    # ------------------------------------------------------------------
+    # Rigid rotation about the pivot  (body → physical / flow frame)
+    # ------------------------------------------------------------------
+
+    def _rotate(self, pts: np.ndarray) -> np.ndarray:
+        """Rotate (N, 2) points by θ = −AoA about the pivot."""
+        if self._theta == 0.0:
+            return np.asarray(pts, dtype=np.float64).copy()
+        c, s   = np.cos(self._theta), np.sin(self._theta)
+        px, py = self.pivot
+        pts = np.asarray(pts, dtype=np.float64)
+        dx, dy = pts[:, 0] - px, pts[:, 1] - py
+        return np.stack([c * dx - s * dy + px,
+                         s * dx + c * dy + py], axis=1)
 
     # ------------------------------------------------------------------
     # Profile geometry (NACA 4-digit equations)
@@ -85,15 +118,44 @@ class NACAAirfoil:
         """(N_profile, 2) closed surface polygon (counterclockwise from LE)."""
         return self._coords.copy()
 
-    def surface_points(self, n: int = 500) -> np.ndarray:
-        """Arc-length-uniformly resampled surface points → (n, 2) float32."""
-        p  = self._coords
-        ds = np.sqrt(np.sum(np.diff(p, axis=0) ** 2, axis=1))
+    @property
+    def is_symmetric(self) -> bool:
+        """True for a symmetric airfoil (zero camber, e.g. NACA 00xx)."""
+        return self.m == 0.0
+
+    def camber_line(self, x) -> np.ndarray:
+        """Camber-line y-coordinate at **body-frame** x ∈ [0, chord].
+
+        Returns 0 everywhere for a symmetric airfoil.  This is the unrotated
+        (body-frame) camber; for the upper/lower split of surface points use
+        :meth:`surface_points` with ``return_side=True`` instead, which works
+        correctly for both cambered *and* rotated airfoils.
+        """
+        xc = np.clip(np.asarray(x, dtype=np.float64) / self.chord, 0.0, 1.0)
+        yc, _ = self._camber_slope(xc)
+        return (yc * self.chord).astype(np.float32)
+
+    def surface_points(self, n: int = 500, return_side: bool = False):
+        """Arc-length-uniformly resampled surface points → (n, 2) float32.
+
+        Points are returned in the **physical (rotated) frame**.  When
+        ``return_side=True`` also returns a boolean mask ``upper`` (True for
+        upper-surface points), computed in the body frame against the camber
+        line so it is correct for cambered and/or rotated airfoils.
+        """
+        # Resample uniformly by arc length in the body (unrotated) frame
+        pb = self._coords_body
+        ds = np.sqrt(np.sum(np.diff(pb, axis=0) ** 2, axis=1))
         s  = np.concatenate([[0.0], np.cumsum(ds)])
         sq = np.linspace(0.0, s[-1], n)
-        x  = np.interp(sq, s, p[:, 0])
-        y  = np.interp(sq, s, p[:, 1])
-        return np.stack([x, y], axis=1).astype(np.float32)
+        xb = np.interp(sq, s, pb[:, 0])
+        yb = np.interp(sq, s, pb[:, 1])
+
+        pts = self._rotate(np.stack([xb, yb], axis=1)).astype(np.float32)
+        if not return_side:
+            return pts
+        upper = yb >= self.camber_line(xb)        # classify in the body frame
+        return pts, upper
 
     def is_inside(self, xy: np.ndarray) -> np.ndarray:
         """Boolean mask: True if a point lies strictly inside the airfoil.

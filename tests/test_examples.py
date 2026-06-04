@@ -443,27 +443,33 @@ class TestExamplePipeFlowPulsatileTransfer:
         return _cfg(
             "pipe_flow/pipe_flow_pulsatile_transfer.yaml",
             {
-                "cycle_transfer.n_phase1_epochs":   3,
-                "cycle_transfer.n_transfer_epochs": 3,
-                "cycle_transfer.n_scratch_epochs":  3,
-                "amplitude_transfer.n_source_epochs":   3,
-                "amplitude_transfer.n_transfer_epochs": 3,
-                "amplitude_transfer.n_scratch_epochs":  3,
-                "data.n_collocation": 100,
+                "time_marching.T_total": 1.0,
+                "time_marching.dT": 0.5,            # → 2 windows
+                "time_marching.n_first_epochs": 3,
+                "time_marching.n_warm_epochs": 3,
+                "time_marching.n_cold_epochs": 3,
+                "data.n_interior": 100,
+                "data.n_wall": 20,
+                "data.n_inlet": 20,
+                "data.n_outlet": 20,
                 "data.n_ic": 20,
-                "data.n_bc": 20,
+                "data.batch_r": 64,
+                "data.batch_bc": 16,
             },
             tmp_path,
         )
 
-    def test_cycle_transfer_key_in_result(self, tmp_path):
-        mod = _load_module("pulsatile_ct", "pipe_flow/pipe_flow_pulsatile_transfer.py")
+    def test_time_marching_runs_and_returns_loss(self, tmp_path):
+        mod = _load_module("pulsatile_tm", "pipe_flow/pipe_flow_pulsatile_transfer.py")
         cfg = self._small_cfg(tmp_path)
         result = mod.run_pipe_flow_pulsatile_transfer(cfg)
-        assert "cycle_transfer" in result
+        assert "loss_hist" in result
+        assert _has_nonempty_loss(result)
+        assert result["n_windows"] == 2
 
-    def test_amplitude_transfer_key_in_result(self, tmp_path):
-        mod = _load_module("pulsatile_at", "pipe_flow/pipe_flow_pulsatile_transfer.py")
+    def test_transfer_vs_cold_keys_present(self, tmp_path):
+        mod = _load_module("pulsatile_tm2", "pipe_flow/pipe_flow_pulsatile_transfer.py")
         cfg = self._small_cfg(tmp_path)
         result = mod.run_pipe_flow_pulsatile_transfer(cfg)
-        assert "amplitude_transfer" in result
+        assert "transfer_window_final" in result
+        assert "cold_window_final" in result
