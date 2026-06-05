@@ -413,6 +413,33 @@ class TestExampleAirfoil:
 
 
 # ---------------------------------------------------------------------------
+# 13b. Cylinder Flow (2-D steady NS over a circular cylinder)
+# ---------------------------------------------------------------------------
+
+class TestExampleCylinderFlow:
+    def test_runs_and_returns_loss_hist(self, tmp_path):
+        mod = _load_module("cylinder", "cylinder/cylinder_flow.py")
+        cfg = _cfg(
+            "cylinder/config.yaml",
+            {
+                "training.epochs": 3,
+                "training.save_restart_every": 0,
+                "training.resample_period": 0,   # disable resampling for speed
+                "data.n_interior": 80,
+                "data.n_wake":     20,
+                "data.n_inlet":    20,
+                "data.n_outlet":   20,
+                "data.n_body":     20,
+                "data.n_wall":     20,
+            },
+            tmp_path,
+        )
+        result = mod.run_cylinder(cfg)
+        assert "loss_hist" in result
+        assert _has_nonempty_loss(result)
+
+
+# ---------------------------------------------------------------------------
 # 14. Aneurysm Flow (3-D steady axisymmetric bulge)
 # ---------------------------------------------------------------------------
 

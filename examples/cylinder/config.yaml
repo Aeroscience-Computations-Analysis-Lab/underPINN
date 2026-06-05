@@ -1,0 +1,62 @@
+problem: cylinder
+
+# ── Network ───────────────────────────────────────────────────────────────────
+# Reference notebook: plain tanh MLP, hidden=128, depth=6  →  (u, v, p)
+network:
+  type  : mlp                                       # 'mlp' or 'gated_mlp'
+  layers: [2, 128, 128, 128, 128, 128, 128, 3]      # (x, y) → (u, v, p)
+
+# ── Physics ───────────────────────────────────────────────────────────────────
+physics:
+  Re   : 40.0     # Reynolds number  (ν = 1/Re = 0.025)
+  R    : 0.5      # cylinder radius — diameter D = 1.0
+  U_inf: 1.0      # free-stream speed
+  cx   : 0.0      # cylinder centre x
+  cy   : 0.0      # cylinder centre y
+
+# ── Computational domain ──────────────────────────────────────────────────────
+#   Inlet   left edge  x = xmin  →  velocity Dirichlet  (u, v) = (U∞, 0)
+#   Outlet  right edge x = xmax  →  pressure Dirichlet   p = 0
+#   Top/bot y = ±ymax            →  symmetry  v = 0
+domain:
+  xmin: -5.0
+  xmax: 15.0
+  ymin: -5.0
+  ymax:  5.0
+
+# ── Collocation & boundary-condition points ───────────────────────────────────
+data:
+  n_interior: 10000   # uniform background pool (exterior to cylinder)
+  n_wake    : 3000    # denser downstream wake pool
+  buffer    : 0.05    # reject points within this distance of the surface
+  n_inlet   : 300     # inlet edge  (velocity BC)
+  n_outlet  : 300     # outlet edge (pressure BC)
+  n_body    : 300     # cylinder surface (no-slip)
+  n_wall    : 300     # per symmetry wall (top, bottom)
+
+  # Wake subdomain for the dense pool
+  wake_xmin :  0.5
+  wake_xmax :  5.0
+  wake_ymin : -2.0
+  wake_ymax :  2.0
+
+# ── Training ──────────────────────────────────────────────────────────────────
+training:
+  epochs            : 40000
+  lr                : 1.0e-3
+  lr_step           : 5000     # StepLR period  (epochs between LR decays)
+  lr_gamma          : 0.5      # StepLR multiplier  (lr ← lr × gamma)
+  resample_period   : 500      # re-sample collocation every N epochs (0 = off)
+  log_every         : 500
+  seed              : 0
+  save_restart_every: 1000     # checkpoint frequency  (0 = off)
+
+# ── Loss weights ──────────────────────────────────────────────────────────────
+loss:
+  w_pde: 10.0   # PDE residual  (continuity + x/y momentum)
+  w_bc :  1.0   # boundary conditions  (inlet + outlet + no-slip + symmetry)
+
+# ── Output ────────────────────────────────────────────────────────────────────
+output:
+  dir        : outputs/cylinder
+  save_params: true
