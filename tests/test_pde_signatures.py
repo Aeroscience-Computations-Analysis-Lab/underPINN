@@ -223,38 +223,46 @@ class TestCompressibleEulerReturnType:
         res = self.pde.residual(self.params, self.xy)
         assert res.shape == (6, 4), f"expected (6,4), got {res.shape}"
 
-    def test_columns_match_legacy_tuple(self):
-        """Each column of the stacked result equals the corresponding legacy scalar."""
+    def test_columns_match_conservative_form(self):
+        """Each column equals the conservative flux divergence ∂F/∂x + ∂G/∂y."""
         res = self.pde.residual(self.params, self.xy)
 
-        # Replicate the legacy per-component computation to check columns
-        import math
-        from underPINN.pde.compressible_euler import CompressibleEulerPDE as _PDE
-
-        # Re-run with a fresh PDE that exposes the old tuple logic
         gamma = 1.4
         eps   = 1e-6
 
+        # Reference: conservative form, U = (ρ, ρu, ρv, E),
+        # F = (ρu, ρu²+p, ρuv, (E+p)u),  G = (ρv, ρuv, ρv²+p, (E+p)v).
+        def _flux(xy_i):
+            raw = self.model.apply(self.params, xy_i[None, :])[0]
+            rho = jax.nn.softplus(raw[0]) + eps
+            u   = raw[1]
+            v   = raw[2]
+            p   = jax.nn.softplus(raw[3]) + eps
+            E   = p / (gamma - 1.0) + 0.5 * rho * (u ** 2 + v ** 2)
+            F = jnp.stack([rho * u, rho * u * u + p, rho * u * v, (E + p) * u])
+            G = jnp.stack([rho * v, rho * u * v, rho * v * v + p, (E + p) * v])
+            return jnp.stack([F, G], axis=1)            # (4, 2)
+
+        J   = jax.vmap(jax.jacfwd(_flux))(self.xy)      # (N, 4, 2, 2)
+        ref = J[:, :, 0, 0] + J[:, :, 1, 1]             # ∂F_k/∂x + ∂G_k/∂y
+
+        assert jnp.allclose(res, ref, atol=1e-5)
+
+    def test_mass_column_equals_primitive_divergence(self):
+        """The mass equation is identical in primitive and conservative form."""
+        res = self.pde.residual(self.params, self.xy)
+        eps = 1e-6
+
         def _phys(xy_i):
             raw = self.model.apply(self.params, xy_i[None, :])[0]
-            return jnp.stack([
-                jax.nn.softplus(raw[0]) + eps,
-                raw[1], raw[2],
-                jax.nn.softplus(raw[3]) + eps,
-            ])
+            return jnp.stack([jax.nn.softplus(raw[0]) + eps, raw[1], raw[2],
+                              jax.nn.softplus(raw[3]) + eps])
 
         J   = jax.vmap(jax.jacfwd(_phys))(self.xy)
         pv  = self.pde.apply(self.params, self.xy)
-        rho = pv[:, 0]; u = pv[:, 1]; v = pv[:, 2]; p = pv[:, 3]
-        cont   = J[:,0,0]*u + rho*J[:,1,0] + J[:,0,1]*v + rho*J[:,2,1]
-        mom_x  = rho*(u*J[:,1,0] + v*J[:,1,1]) + J[:,3,0]
-        mom_y  = rho*(u*J[:,2,0] + v*J[:,2,1]) + J[:,3,1]
-        energy = u*J[:,3,0] + v*J[:,3,1] + gamma*p*(J[:,1,0]+J[:,2,1])
-
-        assert jnp.allclose(res[:, 0], cont,   atol=1e-5)
-        assert jnp.allclose(res[:, 1], mom_x,  atol=1e-5)
-        assert jnp.allclose(res[:, 2], mom_y,  atol=1e-5)
-        assert jnp.allclose(res[:, 3], energy, atol=1e-5)
+        rho, u, v = pv[:, 0], pv[:, 1], pv[:, 2]
+        cont = J[:, 0, 0] * u + rho * J[:, 1, 0] + J[:, 0, 1] * v + rho * J[:, 2, 1]
+        assert jnp.allclose(res[:, 0], cont, atol=1e-5)
 
 
 # ---------------------------------------------------------------------------
