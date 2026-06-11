@@ -314,6 +314,38 @@ class TestExampleRamp:
 
 
 # ---------------------------------------------------------------------------
+# 10b. Sod Shock Tube (1-D unsteady Euler, learnable artificial viscosity)
+# ---------------------------------------------------------------------------
+
+class TestExampleSodShock:
+    def test_runs_and_returns_loss_hist(self, tmp_path):
+        mod = _load_module("sod_shock", "sod_shock/sod_shock.py")
+        cfg = _cfg("sod_shock/config.yaml",
+                   {"training.epochs": 3,
+                    "training.save_restart_every": 0,
+                    "data.n_interior": 100,
+                    "data.n_ic": 30,
+                    "data.n_bc": 20},
+                   tmp_path)
+        result = mod.run_sod_shock(cfg)
+        assert "loss_hist" in result
+        assert _has_nonempty_loss(result)
+
+    def test_learns_viscosity_and_error_keys(self, tmp_path):
+        mod = _load_module("sod_shock2", "sod_shock/sod_shock.py")
+        cfg = _cfg("sod_shock/config.yaml",
+                   {"training.epochs": 3,
+                    "training.save_restart_every": 0,
+                    "data.n_interior": 100,
+                    "data.n_ic": 30,
+                    "data.n_bc": 20},
+                   tmp_path)
+        result = mod.run_sod_shock(cfg)
+        assert "eps_final" in result and result["eps_final"] > 0.0
+        assert "rel_l2" in result
+
+
+# ---------------------------------------------------------------------------
 # 11. Burgers Transfer Learning
 # ---------------------------------------------------------------------------
 

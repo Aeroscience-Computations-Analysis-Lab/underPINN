@@ -1,0 +1,54 @@
+# ── Sod Shock Tube — 1-D unsteady Euler with learnable artificial viscosity ──
+#
+#   python examples/sod_shock/sod_shock.py
+#   python -m underPINN run examples/sod_shock/config.yaml
+#
+# Classic Riemann problem (Sod 1978), γ = 1.4, evolved to t = 0.2:
+#   Left  (x<0.5):  ρ=1.000, u=0, p=1.0
+#   Right (x>0.5):  ρ=0.125, u=0, p=0.1
+# ─────────────────────────────────────────────────────────────────────────────
+
+problem: sod_shock
+
+network:
+  type  : mlp                         # 'mlp' or 'gated_mlp'
+  layers: [2, 80, 80, 80, 80, 80, 3]  # (x, t) → (ρ, u, p)
+
+physics:
+  gamma         : 1.4
+  x_min         : 0.0
+  x_max         : 1.0
+  x0            : 0.5         # diaphragm location
+  t_final       : 0.2        # evolve to this time
+  left          : [1.0,   0.0, 1.0]    # (ρ, u, p) for x < x0
+  right         : [0.125, 0.0, 0.1]    # (ρ, u, p) for x > x0
+  art_visc      : 0.001       # artificial viscosity ε — initial value if trainable
+  trainable_visc: false       # learn ε = softplus(log_av)
+
+data:
+  n_interior: 20000
+  n_ic      : 2000
+  n_bc      : 1000
+
+training:
+  epochs            : 30000
+  lr                : 1.0e-3
+  lr_alpha          : 0.01
+  batch_r           : 4096
+  batch_bc          : 512
+  log_every         : 500
+  seed              : 0
+  save_restart_every: 500
+  rar_period        : 2000   # RAR: resample interior pool every N epochs (0 = off)
+  rar_candidates    : 5      # candidate pool = N × n_interior
+  rar_k             : 1.0    # RAD residual exponent
+  rar_c             : 1.0    # RAD uniform-coverage constant
+
+loss:
+  w_pde: 1.0
+  w_ic : 20.0    # Riemann initial data — weight strongly
+  w_bc : 10.0    # fixed left/right states
+
+output:
+  dir        : outputs/sod_shock
+  save_params: true

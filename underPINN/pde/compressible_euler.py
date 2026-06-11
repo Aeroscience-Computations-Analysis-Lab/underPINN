@@ -1,13 +1,21 @@
-"""2-D Steady Compressible Euler PDE (primitive-variable form).
+"""2-D Steady Compressible Euler PDE (conservative flux-divergence form).
 
-State vector:  (ρ, u, v, p)  — density, x-velocity, y-velocity, pressure.
+The network outputs primitive variables (ρ, u, v, p), but the PDE residual is
+evaluated in **conservative form** on the conserved variables
+U = (ρ, ρu, ρv, E), which is the physically correct shock-capturing form:
 
-Governing equations (steady, inviscid, calorically perfect gas):
-  1. Continuity:  (ρ u)_x + (ρ v)_y = 0
-  2. Momentum-x:  ρ(u u_x + v u_y) + p_x = 0
-  3. Momentum-y:  ρ(u v_x + v v_y) + p_y = 0
-  4. Energy:      u p_x + v p_y + γ p (u_x + v_y) = 0
-     (isentropic form: entropy is constant along streamlines for smooth flow)
+  ∂F/∂x + ∂G/∂y = 0
+    F = (ρu,  ρu²+p,  ρuv,    (E+p)u)        x-flux
+    G = (ρv,  ρuv,    ρv²+p,  (E+p)v)        y-flux
+    E = p/(γ−1) + ½ρ(u²+v²)                  total energy (perfect gas)
+
+  1. Mass:      (ρu)_x + (ρv)_y = 0
+  2. Momentum-x:(ρu²+p)_x + (ρuv)_y = 0
+  3. Momentum-y:(ρuv)_x + (ρv²+p)_y = 0
+  4. Energy:    ((E+p)u)_x + ((E+p)v)_y = 0
+
+Optional global artificial viscosity subtracts ε ∇²U (Laplacian of the
+conserved variables) from each equation to smooth shocks.
 
 Non-dimensionalisation used throughout:
   ρ_∞ = 1,  a_∞ = 1  →  p_∞ = 1/γ,  u_∞ = M_∞ · a_∞
@@ -103,12 +111,53 @@ class CompressibleEulerPDE(BasePDE):
         Ratio of specific heats (default 1.4, air).
     eps : float
         Small constant added after softplus for numerical safety.
+    art_visc : float
+        Global artificial-viscosity coefficient ε (default 0.0 = pure Euler).
+        When > 0 a Laplacian dissipation term ``−ε ∇²q`` is added to every
+        equation (q = ρ, u, v, p respectively).  This smooths discontinuities
+        (shocks) and stabilises training, at the cost of slightly smeared
+        shock fronts — the standard artificial-viscosity regularisation.
     """
 
-    def __init__(self, model, gamma: float = 1.4, eps: float = 1e-6):
-        self.model = model
-        self.gamma = float(gamma)
-        self.eps   = float(eps)
+    def __init__(self, model, gamma: float = 1.4, eps: float = 1e-6,
+                 art_visc: float = 0.0):
+        self.model    = model
+        self.gamma    = float(gamma)
+        self.eps      = float(eps)
+        self.art_visc = float(art_visc)
+
+    # ------------------------------------------------------------------
+    # Trainable-viscosity support
+    # ------------------------------------------------------------------
+    # The optimisable state may be either the plain network params, or a
+    # combined pytree  {"net": net_params, "log_av": raw_scalar}  in which the
+    # artificial viscosity is *learned* as  ε = softplus(log_av) ≥ 0.
+
+    @staticmethod
+    def _is_combined(params) -> bool:
+        try:
+            return ("net" in params) and ("log_av" in params)
+        except TypeError:
+            return False
+
+    def _net(self, params):
+        """Extract the network parameters from *params* (combined or plain)."""
+        return params["net"] if self._is_combined(params) else params
+
+    def viscosity(self, params=None):
+        """Current artificial-viscosity coefficient ε.
+
+        Returns the learned ``softplus(log_av)`` if *params* is the combined
+        trainable pytree, otherwise the fixed ``art_visc`` float.
+        """
+        if params is not None and self._is_combined(params):
+            return float(jax.nn.softplus(params["log_av"]))
+        return self.art_visc
+
+    @staticmethod
+    def inverse_softplus(y: float) -> float:
+        """Raw value x such that softplus(x) ≈ y  (for initialising log_av)."""
+        return float(math.log(math.expm1(max(y, 1e-12))))
 
     # ------------------------------------------------------------------
     # Physical forward pass (applies positivity transform)
@@ -116,7 +165,7 @@ class CompressibleEulerPDE(BasePDE):
 
     def apply(self, params, xy):
         """Return physical state (ρ, u, v, p) as an (N, 4) array."""
-        raw = self.model.apply(params, xy)          # (N, 4)
+        raw = self.model.apply(self._net(params), xy)   # (N, 4)
         rho = jax.nn.softplus(raw[:, 0]) + self.eps
         u   = raw[:, 1]
         v   = raw[:, 2]
@@ -128,7 +177,21 @@ class CompressibleEulerPDE(BasePDE):
     # ------------------------------------------------------------------
 
     def residual(self, params, xy):
-        """Compute PDE residuals at collocation points.
+        """Compute PDE residuals in **conservative form** at collocation points.
+
+        The steady 2-D Euler system is written as a flux divergence of the
+        conserved variables  U = (ρ, ρu, ρv, E):
+
+            ∂F/∂x + ∂G/∂y = 0
+
+          F = (ρu,  ρu²+p,  ρuv,      (E+p)u)        x-flux
+          G = (ρv,  ρuv,    ρv²+p,    (E+p)v)        y-flux
+          E = p/(γ−1) + ½ρ(u²+v²)                    total energy
+
+        This is the correct shock-capturing form (entropy may rise across a
+        shock, unlike the isentropic primitive form).  Global artificial
+        viscosity, when enabled, subtracts ε ∇²U from each equation — i.e. the
+        Laplacian of the **conserved** variables.
 
         Parameters
         ----------
@@ -137,49 +200,54 @@ class CompressibleEulerPDE(BasePDE):
 
         Returns
         -------
-        cont, mom_x, mom_y, energy — each of shape (N,)
+        (N, 4) residual array — [mass, mom_x, mom_y, energy].
         """
         gamma = self.gamma
         eps   = self.eps
+        net   = self._net(params)
 
-        # Per-point function for jacfwd: (2,) → (4,) physical vars
-        def _phys(xy_i):
-            raw = self.model.apply(params, xy_i[None, :])[0]   # (4,)
+        # Primitive variables (ρ, u, v, p) at a single point.
+        def _prim(xy_i):
+            raw = self.model.apply(net, xy_i[None, :])[0]   # (4,)
             rho = jax.nn.softplus(raw[0]) + eps
             u   = raw[1]
             v   = raw[2]
             p   = jax.nn.softplus(raw[3]) + eps
-            return jnp.stack([rho, u, v, p])
+            return rho, u, v, p
 
-        # Jacobian of physical vars w.r.t. (x, y): shape (N, 4, 2)
-        J = jax.vmap(jax.jacfwd(_phys))(xy)
+        # Conserved variables  U = (ρ, ρu, ρv, E)  at a single point.
+        def _cons(xy_i):
+            rho, u, v, p = _prim(xy_i)
+            E = p / (gamma - 1.0) + 0.5 * rho * (u ** 2 + v ** 2)
+            return jnp.stack([rho, rho * u, rho * v, E])
 
-        rho_x, rho_y = J[:, 0, 0], J[:, 0, 1]
-        u_x,   u_y   = J[:, 1, 0], J[:, 1, 1]
-        v_x,   v_y   = J[:, 2, 0], J[:, 2, 1]
-        p_x,   p_y   = J[:, 3, 0], J[:, 3, 1]
+        # Flux pair stacked as (4, 2):  column 0 = F (x-flux), column 1 = G.
+        def _flux(xy_i):
+            rho, u, v, p = _prim(xy_i)
+            E = p / (gamma - 1.0) + 0.5 * rho * (u ** 2 + v ** 2)
+            F = jnp.stack([rho * u, rho * u * u + p, rho * u * v, (E + p) * u])
+            G = jnp.stack([rho * v, rho * u * v, rho * v * v + p, (E + p) * v])
+            return jnp.stack([F, G], axis=1)               # (4, 2)
 
-        # Physical values at collocation points
-        pv  = self.apply(params, xy)
-        rho = pv[:, 0]
-        u   = pv[:, 1]
-        v   = pv[:, 2]
-        p   = pv[:, 3]
+        # d(F,G)/d(x,y): shape (N, 4, 2, 2).  ∂F_k/∂x = J[k,0,0], ∂G_k/∂y = J[k,1,1].
+        J    = jax.vmap(jax.jacfwd(_flux))(xy)
+        res  = J[:, :, 0, 0] + J[:, :, 1, 1]               # (N, 4) flux divergence
 
-        # 1. Continuity: (ρu)_x + (ρv)_y = 0
-        cont  = rho_x * u + rho * u_x + rho_y * v + rho * v_y
+        # ── Global artificial viscosity:  − ε ∇²U  (Laplacian of conserved U) ──
+        # ε is either a learned softplus(log_av) (combined params, always on)
+        # or the fixed float ``art_visc`` (only computed when > 0).
+        if self._is_combined(params):
+            av  = jax.nn.softplus(params["log_av"])        # learned ε ≥ 0
+            Hc  = jax.vmap(jax.jacfwd(jax.jacfwd(_cons)))(xy)
+            lap = Hc[:, :, 0, 0] + Hc[:, :, 1, 1]
+            res = res - av * lap
+        elif self.art_visc > 0.0:
+            Hc  = jax.vmap(jax.jacfwd(jax.jacfwd(_cons)))(xy)
+            lap = Hc[:, :, 0, 0] + Hc[:, :, 1, 1]
+            res = res - self.art_visc * lap
 
-        # 2. Momentum-x: ρ(u u_x + v u_y) + p_x = 0
-        mom_x = rho * (u * u_x + v * u_y) + p_x
-
-        # 3. Momentum-y: ρ(u v_x + v v_y) + p_y = 0
-        mom_y = rho * (u * v_x + v * v_y) + p_y
-
-        # 4. Energy (isentropic): u p_x + v p_y + γ p (u_x + v_y) = 0
-        energy = u * p_x + v * p_y + gamma * p * (u_x + v_y)
-
-        # Return shape (N, 4): [cont, mom_x, mom_y, energy]
-        return jnp.stack([cont, mom_x, mom_y, energy], axis=-1)
+        # Return shape (N, 4): [mass, mom_x, mom_y, energy]
+        return res
 
     # ------------------------------------------------------------------
     # Freestream conditions (non-dimensional)

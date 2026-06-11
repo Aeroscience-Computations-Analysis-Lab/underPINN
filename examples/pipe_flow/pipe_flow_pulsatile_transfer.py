@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import os
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
+import json
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -59,7 +60,11 @@ from underPINN.config.loader import cfg_get, save_config
 from underPINN.nn.mlp import MLP, GatedMLP
 from underPINN.pde.navier_stokes_3d import UnsteadyNS3DPDE
 from underPINN.geometry.pipe import Pipe
-from underPINN.utils.checkpoint import save_checkpoint
+from underPINN.utils.checkpoint import (
+    load_checkpoint,
+    read_metadata,
+    save_checkpoint,
+)
 from underPINN.utils.sampling import safe_choice
 
 
@@ -302,10 +307,83 @@ def run_pipe_flow_pulsatile_transfer(cfg) -> dict:
     print("Transfer chain — warm-started time marching")
     print("=" * 60)
 
+    # Per-window checkpoints are written INCREMENTALLY (right after each window
+    # finishes), so completed windows are on disk even if a long run is stopped
+    # early.  Each window k owns absolute time t ∈ [k·dT, (k+1)·dT].
+    ckpt_dir = os.path.join(out_dir, "windows")
+    os.makedirs(ckpt_dir, exist_ok=True)
+    base_meta = {
+        "problem": "pipe_flow_pulsatile_transfer",
+        "method":  "time_marching_transfer",
+        "network": {"type": net_type, "layers": layers},
+        "physics": {"Re": Re, "R": R, "L": L, "x_lo": x_lo,
+                    "V_max": V_max, "V_amp": V_amp, "T_period": T_period},
+        "time_marching": {"T_total": T_total, "dT": dT, "n_windows": n_windows},
+    }
+
+    # Write the time→window index UP FRONT — it depends only on the config, not
+    # on training, so prediction works even if the run is interrupted later.
+    with open(os.path.join(out_dir, "windows_index.json"), "w") as f:
+        json.dump({
+            "n_windows": n_windows, "dT": dT, "T_total": T_total,
+            "network": {"type": net_type, "layers": layers},
+            "physics": base_meta["physics"],
+            "windows": [
+                {"index": k, "t0": k * dT, "t1": (k + 1) * dT,
+                 "checkpoint": f"windows/params_window_{k:03d}.msgpack",
+                 "note": "evaluate at local time tau = t_abs - t0, input (x,y,z,tau)"}
+                for k in range(n_windows)
+            ],
+        }, f, indent=2)
+
     tf_params_list = []
     tf_loss_all    = []
     prev_params    = None
-    for k in range(n_windows):
+
+    # ── Window-level restart ──────────────────────────────────────────────────
+    # Each finished window leaves a checkpoint in <out_dir>/windows/.  On resume
+    # we reload the contiguous run of completed windows and continue from the
+    # first missing one, so a long interrupted run never retrains finished work.
+    restart_enabled = bool(cfg_get(tm, "restart", default=True))
+    resume_from = 0
+    if restart_enabled:
+        completed = []
+        for k in range(n_windows):
+            mp = os.path.join(ckpt_dir, f"params_window_{k:03d}.msgpack")
+            if os.path.exists(mp):
+                completed.append(k)
+            else:
+                break
+        # Validate the saved run matches the current config (dT, n_windows)
+        ok = True
+        idx_path = os.path.join(out_dir, "windows_index.json")
+        if completed and os.path.exists(idx_path):
+            try:
+                with open(idx_path) as f:
+                    prev_idx = json.load(f)
+                if (abs(float(prev_idx.get("dT", dT)) - dT) > 1e-12
+                        or int(prev_idx.get("n_windows", n_windows)) != n_windows):
+                    ok = False
+            except Exception:
+                ok = False
+        if completed and ok:
+            for k in completed:
+                mp = os.path.join(ckpt_dir, f"params_window_{k:03d}.msgpack")
+                tf_params_list.append(load_checkpoint(model, mp))
+                meta = read_metadata(mp) or {}
+                fl   = meta.get("window", {}).get("final_loss")
+                tf_loss_all.append([float(fl)] if fl is not None else [float("nan")])
+            prev_params = tf_params_list[-1]
+            resume_from = len(completed)
+            print(f"\n  [Restart] Found {resume_from}/{n_windows} completed "
+                  f"window(s) → resuming at window {resume_from + 1}.")
+            if resume_from > 0:
+                cmp_cold = False   # skip the comparison baseline on a resume
+        elif completed and not ok:
+            print("\n  [Restart] Saved windows don't match current config "
+                  "(dT / n_windows changed) — retraining from window 1.")
+
+    for k in range(resume_from, n_windows):
         t0   = k * dT
         data = _window_data(pipe, dT, d, seed=1000 + k)
         # Initial condition for this window
@@ -327,6 +405,15 @@ def run_pipe_flow_pulsatile_transfer(cfg) -> dict:
         tf_params_list.append(params)
         tf_loss_all.append(lh)
         prev_params = params
+
+        # ── Save this window immediately ──────────────────────────────────────
+        save_checkpoint(
+            params, ckpt_dir, stem=f"params_window_{k:03d}",
+            metadata={**base_meta,
+                      "window": {"index": k, "t0": t0, "t1": t0 + dT,
+                                 "local_time_range": [0.0, dT],
+                                 "final_loss": lh[-1] if lh else None}},
+        )
 
     # =====================================================================
     #  No-transfer baseline  (each window cold-started)
@@ -474,18 +561,14 @@ def run_pipe_flow_pulsatile_transfer(cfg) -> dict:
                 dpi=150, bbox_inches="tight")
     plt.close(fig)
 
-    # ── Save final-window checkpoint + config ─────────────────────────────────
+    # ── Final-window alias (per-window ckpts + index already written) ─────────
     save_checkpoint(tf_params_list[-1], out_dir, stem="params_final_window",
-                    metadata={
-                        "problem": "pipe_flow_pulsatile_transfer",
-                        "method":  "time_marching_transfer",
-                        "network": {"type": net_type, "layers": layers},
-                        "physics": {"Re": Re, "R": R, "L": L, "x_lo": x_lo,
-                                    "V_max": V_max, "V_amp": V_amp,
-                                    "T_period": T_period},
-                        "time_marching": {"T_total": T_total, "dT": dT,
-                                          "n_windows": n_windows},
-                    })
+                    metadata={**base_meta,
+                              "window": {"index": n_windows - 1,
+                                         "t0": (n_windows - 1) * dT,
+                                         "t1": n_windows * dT}})
+    print(f"Per-window checkpoints in {ckpt_dir}/  ·  index: windows_index.json")
+
     save_config(cfg, os.path.join(out_dir, "config.yaml"))
 
     flat_loss = [v for lh in tf_loss_all for v in lh]

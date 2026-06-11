@@ -13,7 +13,7 @@ problem: pipe_flow_pulsatile_transfer
 
 network:
   type  : gated_mlp                       # 'mlp' or 'gated_mlp'
-  layers: [4, 128, 128, 128, 128, 4]      # (x, y, z, t) → (u, v, w, p)
+  layers: [4, 256, 256, 256, 256, 256, 4]      # (x, y, z, t) → (u, v, w, p)
 
 physics:
   Re      : 40.0     # Reynolds number  (ν = 1/Re)
@@ -27,11 +27,12 @@ physics:
 # ── Time-marching transfer learning ───────────────────────────────────────────
 time_marching:
   T_total          : 4.0    # integrate to long time  (= 4 pulse cycles)
-  dT               : 0.5    # window length  →  n_windows = T_total / dT = 8
-  n_first_epochs   : 12000  # epochs for window 0  (cold start)
-  n_warm_epochs    : 4000   # epochs per subsequent window  (warm start → fast)
-  n_cold_epochs    : 12000  # epochs per window for the no-transfer baseline
+  dT               : 0.1    # window length  →  n_windows = T_total / dT = 8
+  n_first_epochs   : 200000  # epochs for window 0  (cold start)
+  n_warm_epochs    : 100000   # epochs per subsequent window  (warm start → fast)
+  n_cold_epochs    : 40000  # epochs per window for the no-transfer baseline
   compare_no_transfer: true # also run a cold-start chain for comparison
+  restart            : true # resume from completed per-window checkpoints
   first_lr         : 1.0e-3
   warm_lr          : 5.0e-4
   cold_lr          : 1.0e-3
@@ -39,7 +40,7 @@ time_marching:
 
 # ── Collocation data (per window) ─────────────────────────────────────────────
 data:
-  n_interior: 20000
+  n_interior: 200000
   n_wall    : 4000
   n_inlet   : 1000
   n_outlet  : 1000

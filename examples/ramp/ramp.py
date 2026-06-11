@@ -55,7 +55,7 @@ from underPINN.nn.mlp import MLP
 from underPINN.pde.compressible_euler import CompressibleEulerPDE
 from underPINN.utils.checkpoint import save_checkpoint
 from underPINN.utils.restart import RestartManager
-from underPINN.utils.sampling import safe_choice
+from underPINN.utils.sampling import rad_resample, safe_choice
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +76,8 @@ def run_ramp(cfg) -> dict:
     gamma     = float(ph.gamma)
     M_inf     = float(ph.M_inf)
     theta_deg = float(ph.theta_deg)
+    art_visc  = float(cfg_get(ph, "art_visc", default=0.0))
+    train_av  = bool(cfg_get(ph, "trainable_visc", default=False))
 
     L = float(cfg_get(cfg.geometry, "L", default=1.0))
     H = float(cfg_get(cfg.geometry, "H", default=0.8))
@@ -88,6 +90,12 @@ def run_ramp(cfg) -> dict:
     seed      = int(cfg_get(tr, "seed",         default=0))
     batch_r   = int(cfg_get(tr, "batch_r",      default=2048))
     batch_bc  = int(cfg_get(tr, "batch_bc",     default=256))
+
+    # RAR (residual-based adaptive resampling) of the interior pool
+    rar_period = int(cfg_get(tr, "rar_period",     default=0))
+    rar_cand   = int(cfg_get(tr, "rar_candidates", default=5))
+    rar_k      = float(cfg_get(tr, "rar_k",        default=1.0))
+    rar_c      = float(cfg_get(tr, "rar_c",        default=1.0))
 
     W_PDE   = float(cfg_get(lw, "w_pde",   default=1.0))
     W_INLET = float(cfg_get(lw, "w_inlet", default=200.0))
@@ -102,9 +110,13 @@ def run_ramp(cfg) -> dict:
 
     print(f"Ramp PINN:  M={M_inf},  θ={theta_deg}°,  γ={gamma}")
     print(f"Domain:  x∈[0,{L}]  y∈[0,{H}]  (ramp wall at y=x·tan({theta_deg}°))")
+    if train_av:
+        print(f"Artificial viscosity:  TRAINABLE  (init ε≈{max(art_visc, 1e-3)})")
+    elif art_visc > 0.0:
+        print(f"Artificial viscosity:  ε={art_visc}  (fixed global Laplacian dissipation)")
 
     # ── Analytical oblique-shock solution ─────────────────────────────────────
-    pde  = CompressibleEulerPDE(None, gamma=gamma)     # model set below
+    pde  = CompressibleEulerPDE(None, gamma=gamma, art_visc=art_visc)  # model set below
     shock = pde.oblique_shock(M_inf, theta_deg)
     print(f"\nAnalytical oblique shock:")
     print(f"  Shock angle β = {shock['beta_deg']:.2f}°")
@@ -132,6 +144,15 @@ def run_ramp(cfg) -> dict:
 
     key    = jax.random.PRNGKey(seed)
     params = model.init(key, jnp.ones((1, 2)))
+
+    # ── Trainable artificial viscosity ────────────────────────────────────────
+    # Combine the network params with a raw scalar log_av so that the optimiser
+    # learns  ε = softplus(log_av).  Initialise so softplus(log_av) ≈ art_visc.
+    if train_av:
+        av_init = art_visc if art_visc > 0.0 else 1.0e-3
+        raw0    = CompressibleEulerPDE.inverse_softplus(av_init)
+        params  = {"net": params, "log_av": jnp.asarray(raw0, dtype=jnp.float32)}
+        print(f"  log_av init = {raw0:.3f}  →  ε ≈ {av_init}")
 
     # ── Optimizer ─────────────────────────────────────────────────────────────
     lr_sched  = optax.cosine_decay_schedule(lr, decay_steps=epochs, alpha=lr_alpha)
@@ -194,11 +215,19 @@ def run_ramp(cfg) -> dict:
     N_up   = xy_up.shape[0]
 
     logger   = ConsoleLogger(log_every=log_every)
-    stopper  = EarlyStopping(patience=patience)
+#    stopper  = EarlyStopping(patience=patience)
     key = jax.random.PRNGKey(seed + 7)
 
     try:
         for ep in range(start_ep, epochs):
+            # RAR: refresh the interior pool toward high-residual regions (shock)
+            if rar_period > 0 and ep > 0 and ep % rar_period == 0:
+                xy_r = jnp.array(rad_resample(
+                    pde, params, geom.sample_interior,
+                    n_keep=n_int, n_candidates=rar_cand * n_int,
+                    k=rar_k, c=rar_c, seed=seed + ep))
+                print(f"  [ep {ep:5d}] RAR resampled interior pool ({n_int} pts)")
+
             key, k1, k2, k3, k4 = jax.random.split(key, 5)
             ir  = safe_choice(k1, N_r,    batch_r)
             iin = safe_choice(k2, N_in,   min(batch_bc, N_in))
@@ -214,8 +243,10 @@ def run_ramp(cfg) -> dict:
 
             logs = {"loss": float(total), "pde": float(pl),
                     "inlet": float(il), "wall": float(wl)}
+            if train_av:
+                logs["eps"] = pde.viscosity(params)   # current learned ε
             logger.on_epoch_end(ep, logs)
-            stopper.on_epoch_end(ep, logs)
+#            stopper.on_epoch_end(ep, logs)
             restart.maybe_save(ep, params, opt_state,
                                {"loss_hist": loss_hist, "pde_hist": pde_hist})
     except StopIteration:
@@ -224,6 +255,10 @@ def run_ramp(cfg) -> dict:
     restart.done()
     logger.on_train_end({"loss": loss_hist[-1] if loss_hist else float("nan")})
     print(f"  Stopped at epoch {len(loss_hist)}")
+
+    eps_final = pde.viscosity(params)
+    if train_av:
+        print(f"  Learned artificial viscosity:  ε = {eps_final:.6e}")
 
     # ── Grid evaluation ───────────────────────────────────────────────────────
     XX, YY, mask = geom.make_grid(Nx=200, Ny=160)
@@ -359,7 +394,8 @@ def run_ramp(cfg) -> dict:
         "problem": "ramp",
         "network": {"type": cfg_get(cfg.network, "type", default="mlp"),
                     "layers": layers},
-        "physics": {"gamma": gamma, "M_inf": M_inf, "theta_deg": theta_deg},
+        "physics": {"gamma": gamma, "M_inf": M_inf, "theta_deg": theta_deg,
+                    "art_visc": eps_final, "trainable_visc": train_av},
         "oblique_shock": shock,
     })
 

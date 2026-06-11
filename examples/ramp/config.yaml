@@ -25,19 +25,21 @@ physics:
   gamma    : 1.4     # ratio of specific heats (air)
   M_inf    : 3.0     # inlet Mach number
   theta_deg: 10.0    # ramp angle (degrees)
+  art_visc      : 0.001   # artificial viscosity ε (Laplacian of conserved U); init value if trainable
+  trainable_visc: false    # learn ε = softplus(log_av), initialised to art_visc
 
 geometry:
   L: 1.0   # domain length (x)
   H: 0.8   # domain height (y)
 
 data:
-  n_interior: 8000   # interior collocation points
+  n_interior: 30000   # interior collocation points
   n_inlet   : 300    # inlet boundary points  (all vars fixed)
   n_wall    : 400    # ramp wall points        (slip BC)
   n_upper   : 200    # upper farfield points   (freestream)
 
 training:
-  epochs                   : 15000
+  epochs                   : 45000
   lr                       : 5.0e-4
   lr_alpha                 : 0.01       # cosine decay end-value = lr * alpha
   log_every                : 500
@@ -46,6 +48,10 @@ training:
   batch_bc                 : 256        # boundary batch
   early_stopping_patience  : 2000
   save_restart_every       : 500        # save restart snapshot every N epochs (0 = off)
+  rar_period               : 2000       # RAR: resample interior pool every N epochs (0 = off)
+  rar_candidates           : 5          # candidate pool = N × n_interior
+  rar_k                    : 1.0        # RAD residual exponent
+  rar_c                    : 1.0        # RAD uniform-coverage constant
 
 loss:
   w_pde  : 1.0

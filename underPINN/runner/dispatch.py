@@ -36,6 +36,7 @@ _REGISTRY: dict[str, tuple[str, str]] = {
     "pipe_flow":     ("examples/pipe_flow/pipe_flow.py",      "run_pipe_flow"),
     "aneurysm_flow": ("examples/aneurysm/aneurysm_flow.py", "run_aneurysm_flow"),
     "ramp":          ("examples/ramp/ramp.py",               "run_ramp"),
+    "sod_shock":     ("examples/sod_shock/sod_shock.py",     "run_sod_shock"),
 
     # Inverse problems
     "heat_inverse":      ("examples/heat/inverse.py",        "run_heat_inverse"),
