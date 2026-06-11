@@ -220,6 +220,27 @@ class TestExamplePipeFlow:
 
 
 # ---------------------------------------------------------------------------
+# 7b. Rheological Pipe Flow (3-D steady Carreau / shear-thinning blood)
+# ---------------------------------------------------------------------------
+
+class TestExamplePipeFlowRheology:
+    def test_runs_and_returns_loss_hist(self, tmp_path):
+        mod = _load_module("pipe_rheo", "pipe_flow_rheology/pipe_flow_rheology.py")
+        cfg = _cfg("pipe_flow_rheology/config.yaml",
+                   {"training.epochs": 3,
+                    "training.save_restart_every": 0,
+                    "data.n_interior": 100,
+                    "data.n_wall": 20,
+                    "data.n_inlet": 20,
+                    "data.n_outlet": 20},
+                   tmp_path)
+        result = mod.run_pipe_flow_rheology(cfg)
+        assert "loss_hist" in result
+        assert _has_nonempty_loss(result)
+        assert result["beta"] > 1.0          # shear-thinning (μ0 > μ∞)
+
+
+# ---------------------------------------------------------------------------
 # 8. Inverse Diffusion (separate entry point, same runner as heat_inverse)
 # ---------------------------------------------------------------------------
 

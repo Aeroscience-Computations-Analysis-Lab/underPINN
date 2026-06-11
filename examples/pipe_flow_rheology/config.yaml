@@ -1,0 +1,54 @@
+# ── Steady Carreau (shear-thinning) pipe flow — blood rheology ───────────────
+#
+#   python examples/pipe_flow_rheology/pipe_flow_rheology.py
+#   python -m underPINN run examples/pipe_flow_rheology/config.yaml
+#
+# Carreau model (Nagargoje, Mishra & Gupta, Phys. Fluids 33, 071904 (2021)):
+#   μ(γ̇) = μ∞ + (μ0 − μ∞)[1 + (λγ̇)²]^((n−1)/2)
+# Non-dimensional groups derived from the dimensional inputs below:
+#   Re = ρUR/μ∞,   β = μ0/μ∞,   Cu = λU/R
+# ─────────────────────────────────────────────────────────────────────────────
+
+problem: pipe_flow_rheology
+
+network:
+  type  : gated_mlp                       # 'mlp' or 'gated_mlp'
+  layers: [3, 128, 128, 128, 128, 4]      # (x, y, z) → (u, v, w, p)
+
+physics:
+  # Carreau / blood properties (paper Table II)
+  rho   : 1060.0     # density            [kg/m³]
+  mu0   : 0.056      # zero-shear viscosity   [Pa·s]
+  mu_inf: 0.0035     # infinite-shear viscosity [Pa·s]
+  lam   : 3.131      # relaxation time      [s]
+  n     : 0.3568     # power-law index
+  # Pipe geometry and reference velocity
+  R     : 0.004      # pipe radius (d = 8 mm)  [m]
+  L     : 0.04       # pipe length (≈ 10 D)    [m]
+  U     : 0.05       # centreline reference velocity [m/s]
+  x_lo  : 0.0        # inlet x-coordinate [m]
+
+data:
+  n_interior: 400000
+  n_wall    : 15000
+  n_inlet   : 3000
+  n_outlet  : 3000
+
+training:
+  epochs            : 200000
+  lr                : 1.0e-3
+  lr_alpha          : 0.01
+  batch_r           : 2048
+  batch_bc          : 512
+  log_every         : 2000
+  seed              : 0
+  save_restart_every: 2000
+
+loss:
+  w_pde   : 1.0
+  w_wall  : 100.0
+  w_inlet : 50.0
+  w_outlet: 20.0
+
+output:
+  dir: outputs/pipe_flow_rheology
