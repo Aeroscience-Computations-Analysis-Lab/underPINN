@@ -1,0 +1,56 @@
+# ── Steady Carreau (shear-thinning) flow through an axisymmetric AAA ────
+#
+#   python examples/AAA_rheology/AAA_rheology.py
+#   python -m underPINN run examples/AAA_rheology/config.yaml
+#
+# Same Carreau blood rheology as pipe_flow_rheology, in the bulge geometry.
+#   μ(γ̇) = μ∞ + (μ0 − μ∞)[1 + (λγ̇)²]^((n−1)/2)
+#   Re = ρUR_vessel/μ∞,  β = μ0/μ∞,  Cu = λU/R_vessel
+# ─────────────────────────────────────────────────────────────────────────────
+
+problem: AAA_rheology
+
+network:
+  type  : gated_mlp                          # 'mlp' or 'gated_mlp'
+  layers: [3, 192, 192, 192, 192, 192, 4]    # (x, y, z) → (u, v, w, p)
+
+physics:
+  # Carreau / blood properties (paper Table II)
+  rho   : 1060.0     # density               [kg/m³]
+  mu0   : 0.056      # zero-shear viscosity    [Pa·s]
+  mu_inf: 0.0035     # infinite-shear viscosity[Pa·s]
+  lam   : 3.131      # relaxation time         [s]
+  n     : 0.3568     # power-law index
+  # AAA geometry (dimensional, metres)
+  R_vessel  : 0.004    # straight-vessel radius  (d = 8 mm)
+  R_AAA: 0.008    # peak bulge radius (2× vessel)
+  L         : 0.04     # total domain length (10 D)
+  x_lo      : -0.02    # inlet x-coordinate
+  x0        : 0.0      # axial centre of the bulge
+  L_AAA: 0.012    # axial width of the bulge
+  U         : 0.05     # centreline reference velocity [m/s]
+
+data:
+  n_interior: 60000
+  n_wall    : 12000
+  n_inlet   : 1500
+  n_outlet  : 1500
+
+training:
+  epochs            : 60000
+  lr                : 1.0e-3
+  lr_alpha          : 0.01
+  batch_r           : 2048
+  batch_bc          : 512
+  log_every         : 500
+  seed              : 0
+  save_restart_every: 500
+
+loss:
+  w_pde   : 1.0
+  w_wall  : 100.0
+  w_inlet : 50.0
+  w_outlet: 20.0
+
+output:
+  dir: outputs/AAA_rheology

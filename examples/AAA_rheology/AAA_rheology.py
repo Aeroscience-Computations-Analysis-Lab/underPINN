@@ -1,26 +1,25 @@
-"""Steady Rheological (Carreau) Pipe Flow PINN.
+"""Steady Rheological (Carreau) Flow through an Axisymmetric AAA.
 
 Run directly or via the CLI:
 
-    python examples/pipe_flow_rheology/pipe_flow_rheology.py
-    python examples/pipe_flow_rheology/pipe_flow_rheology.py myconfig.yaml
-    python -m underPINN run examples/pipe_flow_rheology/config.yaml
+    python examples/AAA_rheology/AAA_rheology.py
+    python examples/AAA_rheology/AAA_rheology.py myconfig.yaml
+    python -m underPINN run examples/AAA_rheology/config.yaml
 
-3-D steady incompressible flow of a shear-thinning fluid (blood) through a
-cylindrical pipe, using the **Carreau** rheological model of Nagargoje, Mishra
-& Gupta, *Phys. Fluids* 33, 071904 (2021):
+Same shear-thinning (Carreau) blood rheology as the rheological pipe-flow case
+(Nagargoje, Mishra & Gupta, *Phys. Fluids* 33, 071904 (2021)), but in the
+axisymmetric **bulge / AAA** geometry:
 
-    μ(γ̇) = μ∞ + (μ0 − μ∞)[1 + (λ γ̇)²]^((n−1)/2)
-    Table II (blood):  μ0 = 0.056,  μ∞ = 0.0035 Pa·s,  λ = 3.131 s,  n = 0.3568
+    R(x) = R_vessel + (R_AAA − R_vessel) cos²(½π|x−x0|/(L_AAA/2))
 
-Non-dimensional groups (length R, velocity U, viscosity μ∞):
-    Re = ρ U R / μ∞,   β = μ0/μ∞,   Cu = λ U / R
+    μ(γ̇) = μ∞ + (μ0 − μ∞)[1 + (λγ̇)²]^((n−1)/2)
 
-The fully-developed Carreau profile (computed here by a 1-D ODE solve) is
-imposed at the inlet, no-slip on the wall, and p = 0 at the outlet.  Because
-the flow is fully developed, the exact solution is that profile everywhere —
-used to validate the PINN and to contrast the shear-thinning (flatter) profile
-with the Newtonian parabola.
+Non-dimensional groups (length R_vessel, velocity U, viscosity μ∞):
+    Re = ρ U R_vessel / μ∞,   β = μ0/μ∞,   Cu = λ U / R_vessel
+
+A fully-developed Carreau profile is imposed at the inlet (straight vessel),
+no-slip on the curved wall, p = 0 at the outlet.  There is no analytic solution
+in the bulge, so accuracy is assessed via the inlet/outlet flow-rate balance.
 
 Network: (x, y, z) → (u, v, w, p)
 """
@@ -39,7 +38,7 @@ import matplotlib.pyplot as plt
 from underPINN.config.loader import cfg_get, save_config
 from underPINN.nn.mlp import MLP, GatedMLP
 from underPINN.pde.carreau_ns_3d import CarreauNS3DPDE, carreau_developed_profile
-from underPINN.geometry.pipe import Pipe
+from underPINN.geometry.aaa import BulgeGeometry
 from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.utils.io import save_predictions
 from underPINN.utils.checkpoint import save_checkpoint
@@ -47,41 +46,42 @@ from underPINN.utils.restart import RestartManager
 from underPINN.utils.sampling import safe_choice
 
 
-# ---------------------------------------------------------------------------
-# Main runner
-# ---------------------------------------------------------------------------
-
-def run_pipe_flow_rheology(cfg) -> dict:
-    """Train a PINN on steady Carreau (shear-thinning) pipe flow."""
+def run_AAA_rheology(cfg) -> dict:
+    """Train a Carreau (shear-thinning) PINN through an axisymmetric bulge."""
     ph  = cfg.physics
     tr  = cfg.training
     lw  = cfg.loss
     out = cfg_get(cfg, "output", default=None)
-    out_dir = (cfg_get(out, "dir", default="outputs/pipe_flow_rheology")
-               if out else "outputs/pipe_flow_rheology")
+    out_dir = (cfg_get(out, "dir", default="outputs/AAA_rheology")
+               if out else "outputs/AAA_rheology")
     os.makedirs(out_dir, exist_ok=True)
 
     # ── Dimensional (paper Table II) → non-dimensional groups ─────────────────
-    rho    = float(cfg_get(ph, "rho",    default=1060.0))
-    mu0    = float(cfg_get(ph, "mu0",    default=0.056))
-    mu_inf = float(cfg_get(ph, "mu_inf", default=0.0035))
-    lam    = float(cfg_get(ph, "lam",    default=3.131))
-    n      = float(cfg_get(ph, "n",      default=0.3568))
-    R      = float(cfg_get(ph, "R",      default=0.004))     # pipe radius (m)
-    L_phys = float(cfg_get(ph, "L",      default=0.04))      # pipe length (m)
-    U      = float(cfg_get(ph, "U",      default=0.1))       # centreline velocity (m/s)
-    x_lo   = float(cfg_get(ph, "x_lo",   default=0.0))
+    rho        = float(cfg_get(ph, "rho",    default=1060.0))
+    mu0        = float(cfg_get(ph, "mu0",    default=0.056))
+    mu_inf     = float(cfg_get(ph, "mu_inf", default=0.0035))
+    lam        = float(cfg_get(ph, "lam",    default=3.131))
+    n          = float(cfg_get(ph, "n",      default=0.3568))
+    R_vessel   = float(cfg_get(ph, "R_vessel",   default=0.004))
+    R_AAA = float(cfg_get(ph, "R_AAA", default=0.008))
+    L_phys     = float(cfg_get(ph, "L",          default=0.04))
+    x_lo_phys  = float(cfg_get(ph, "x_lo",       default=-0.02))
+    x0_phys    = float(cfg_get(ph, "x0",         default=0.0))
+    La_phys    = float(cfg_get(ph, "L_AAA", default=0.012))
+    U          = float(cfg_get(ph, "U",          default=0.05))
 
-    Re   = rho * U * R / mu_inf
+    Re   = rho * U * R_vessel / mu_inf
     beta = mu0 / mu_inf
-    Cu   = lam * U / R
+    Cu   = lam * U / R_vessel
 
-    # Work in non-dimensional units: lengths / R, velocities / U.
-    R_nd = 1.0
-    L_nd = L_phys / R
-    x_lo_nd = x_lo / R
-    x_hi_nd = x_lo_nd + L_nd
-    x_mid_nd = 0.5 * (x_lo_nd + x_hi_nd)
+    # Non-dimensionalise lengths by R_vessel
+    Rv   = 1.0
+    Ra   = R_AAA / R_vessel
+    L    = L_phys     / R_vessel
+    x_lo = x_lo_phys  / R_vessel
+    x0   = x0_phys    / R_vessel
+    La   = La_phys    / R_vessel
+    x_hi = x_lo + L
 
     W_PDE    = float(cfg_get(lw, "w_pde",    default=1.0))
     W_WALL   = float(cfg_get(lw, "w_wall",   default=100.0))
@@ -97,34 +97,29 @@ def run_pipe_flow_rheology(cfg) -> dict:
     batch_bc  = int(cfg_get(tr, "batch_bc",    default=512))
 
     d        = cfg.data
-    n_int    = int(cfg_get(d, "n_interior", default=40000))
-    n_wall   = int(cfg_get(d, "n_wall",     default=8000))
+    n_int    = int(cfg_get(d, "n_interior", default=60000))
+    n_wall   = int(cfg_get(d, "n_wall",     default=12000))
     n_inlet  = int(cfg_get(d, "n_inlet",    default=1500))
     n_outlet = int(cfg_get(d, "n_outlet",   default=1500))
 
-    print("Carreau (shear-thinning) pipe flow")
-    print(f"  Dimensional: ρ={rho}, μ0={mu0}, μ∞={mu_inf}, λ={lam}, n={n}, "
-          f"R={R} m, U={U} m/s")
-    print(f"  Non-dim:  Re={Re:.2f},  β=μ0/μ∞={beta:.2f},  Cu=λU/R={Cu:.2f},  n={n}")
-    print(f"  Pipe (non-dim):  x ∈ [{x_lo_nd:.2f}, {x_hi_nd:.2f}],  R={R_nd}")
+    print("Carreau (shear-thinning) AAA flow")
+    print(f"  Non-dim:  Re={Re:.2f},  β={beta:.2f},  Cu={Cu:.2f},  n={n}")
+    print(f"  Bulge (non-dim):  R_vessel={Rv}, R_AAA={Ra:.2f}, "
+          f"x ∈ [{x_lo:.2f}, {x_hi:.2f}], x0={x0:.2f}, L_AAA={La:.2f}")
 
-    # ── Fully-developed Carreau reference profile (non-dim, centreline = 1) ───
-    r_ref, u_ref, P_ref = carreau_developed_profile(beta, Cu, n, u_center=1.0)
-    dpdx_nd = P_ref / Re                       # non-dim dp*/dx*  (negative)
-
-    def inlet_velocity_nd(yz_r):               # interpolate ref profile at radius
-        return np.interp(yz_r, r_ref, u_ref).astype(np.float32)
+    # ── Carreau developed inlet profile (centreline = 1) ──────────────────────
+    r_ref, u_ref, _ = carreau_developed_profile(beta, Cu, n, u_center=1.0)
 
     # ── Geometry + collocation (non-dim) ──────────────────────────────────────
-    pipe    = Pipe(R=R_nd, L=L_nd, x_lo=x_lo_nd)
-    xyz_r   = jnp.array(pipe.sample_interior(n_int,  seed=seed))
-    xyz_w   = jnp.array(pipe.sample_wall(    n_wall, seed=seed + 1))
-    xyz_in  = jnp.array(pipe.sample_inlet(   n_inlet, seed=seed + 2))
-    xyz_out = jnp.array(pipe.sample_outlet(  n_outlet, seed=seed + 3))
+    geom = BulgeGeometry(R_vessel=Rv, R_AAA=Ra, L=L,
+                         x_lo=x_lo, x0=x0, L_AAA=La)
+    xyz_r   = jnp.array(geom.sample_interior(n_int,  seed=seed))
+    xyz_w   = jnp.array(geom.sample_wall(    n_wall, seed=seed + 1))
+    xyz_in  = jnp.array(geom.sample_inlet(   n_inlet, seed=seed + 2))
+    xyz_out = jnp.array(geom.sample_outlet(  n_outlet, seed=seed + 3))
 
-    # inlet target velocity (Carreau developed profile)
     r_in   = np.sqrt(np.asarray(xyz_in[:, 1]) ** 2 + np.asarray(xyz_in[:, 2]) ** 2)
-    u_in_t = jnp.array(inlet_velocity_nd(r_in))
+    u_in_t = jnp.array(np.interp(r_in, r_ref, u_ref).astype(np.float32))
 
     # ── Model + PDE ───────────────────────────────────────────────────────────
     net_type = str(cfg_get(cfg.network, "type", default="gated_mlp")).lower()
@@ -146,7 +141,7 @@ def run_pipe_flow_rheology(cfg) -> dict:
     @jax.jit
     def step(params, state, xyz_r, xyz_w, xyz_in, u_in, xyz_out):
         def loss_fn(p):
-            res   = pde.residual(p, xyz_r)                 # (N, 4)
+            res   = pde.residual(p, xyz_r)
             pde_l = jnp.mean(jnp.sum(res ** 2, axis=-1))
 
             out_w  = model.apply(p, xyz_w)
@@ -201,69 +196,84 @@ def run_pipe_flow_rheology(cfg) -> dict:
     restart.done()
     logger.on_train_end({"loss": loss_hist[-1] if loss_hist else float("nan")})
 
-    # ── Validation: radial profile at mid-pipe vs Carreau reference ───────────
-    Nr     = 120
-    r_line = np.linspace(0.0, R_nd, Nr, dtype=np.float32)
-    xyz_rp = jnp.array(np.stack([np.full(Nr, x_mid_nd, np.float32),
-                                 r_line, np.zeros(Nr, np.float32)], axis=1))
-    u_pinn  = np.array(model.apply(params, xyz_rp)[:, 0])
-    u_carr  = np.interp(r_line, r_ref, u_ref)
-    u_newt  = 1.0 - r_line ** 2                       # Newtonian parabola (centreline 1)
-    rel_l2  = float(np.linalg.norm(u_pinn - u_carr) / (np.linalg.norm(u_carr) + 1e-12))
-    print(f"\nRel-L² (PINN vs Carreau reference) for u(r): {rel_l2:.3e}")
-
-    # apparent viscosity along the radius
-    mu_pinn = np.array(pde.apparent_viscosity(params, xyz_rp))
+    # ── Flow-rate balance ─────────────────────────────────────────────────────
+    xyz_in_v  = jnp.array(geom.sample_inlet(2000,  seed=77))
+    xyz_out_v = jnp.array(geom.sample_outlet(2000, seed=78))
+    A_vessel  = np.pi * Rv ** 2
+    Q_in  = float(jnp.mean(model.apply(params, xyz_in_v)[:, 0]))  * A_vessel
+    Q_out = float(jnp.mean(model.apply(params, xyz_out_v)[:, 0])) * A_vessel
+    flow_balance = abs(Q_in - Q_out) / (abs(Q_in) + 1e-10)
+    print(f"\nFlow-rate balance:  Q_in={Q_in:.4f}  Q_out={Q_out:.4f}"
+          f"  rel_diff={flow_balance:.4f}")
 
     # ── Plots ──────────────────────────────────────────────────────────────────
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
-    ax1.plot(r_line, u_newt, "k:",  lw=1.8, label="Newtonian parabola")
-    ax1.plot(r_line, u_carr, "k-",  lw=2.0, label="Carreau reference")
-    ax1.plot(r_line, u_pinn, "b--", lw=1.8, label="PINN")
-    ax1.set_xlabel("r / R")
-    ax1.set_ylabel("u / U")
-    ax1.set_title(f"Axial velocity profile  (Re={Re:.0f}, Cu={Cu:.1f}, n={n})")
-    ax1.legend()
-    ax1.grid(alpha=0.3)
-
-    ax2.plot(r_line, mu_pinn, "b-", lw=1.8, label="PINN  μ*(r)")
-    ax2.axhline(beta, color="grey", ls=":", lw=1.0, label=f"β=μ0/μ∞={beta:.0f} (low shear)")
-    ax2.axhline(1.0,  color="grey", ls="--", lw=1.0, label="1 (high shear)")
-    ax2.set_xlabel("r / R")
-    ax2.set_ylabel("μ* = μ / μ∞")
-    ax2.set_title("Apparent viscosity (shear thinning)")
-    ax2.legend()
-    ax2.grid(alpha=0.3)
-    fig.suptitle("Carreau pipe flow — shear-thinning blood", fontsize=13)
-    fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, "rheology_profiles.png"), dpi=150, bbox_inches="tight")
-    plt.close(fig)
-
-    # Cross-section contour of u at mid-pipe
+    # 1. Axial-velocity cross-section at the bulge centre
     N_cs = 80
-    yz   = np.linspace(-R_nd, R_nd, N_cs, dtype=np.float32)
+    yz   = np.linspace(-Ra, Ra, N_cs, dtype=np.float32)
     YY, ZZ = np.meshgrid(yz, yz)
-    xyz_cs = jnp.array(np.stack([np.full(N_cs * N_cs, x_mid_nd, np.float32),
+    xyz_cs = jnp.array(np.stack([np.full(N_cs * N_cs, float(x0), np.float32),
                                  YY.ravel(), ZZ.ravel()], axis=1))
-    u_cs = np.array(model.apply(params, xyz_cs)[:, 0]).reshape(N_cs, N_cs)
-    u_cs = np.where(YY ** 2 + ZZ ** 2 > R_nd ** 2, np.nan, u_cs)
+    u_cs  = np.array(model.apply(params, xyz_cs)[:, 0]).reshape(N_cs, N_cs)
+    R_x0  = float(geom.radius_at(np.array([x0]))[0])
+    u_cs  = np.where(YY ** 2 + ZZ ** 2 > R_x0 ** 2, np.nan, u_cs)
     figc, axc = plt.subplots(figsize=(5, 4))
     cf = axc.contourf(yz, yz, u_cs, levels=50, cmap="jet")
     plt.colorbar(cf, ax=axc, label="u / U")
     axc.set_aspect("equal")
-    axc.set_xlabel("y / R")
-    axc.set_ylabel("z / R")
-    axc.set_title(f"u cross-section at x={x_mid_nd:.1f}")
+    axc.set_xlabel("y / R_v")
+    axc.set_ylabel("z / R_v")
+    axc.set_title(f"u at bulge centre x={x0:.1f}")
     figc.tight_layout()
-    figc.savefig(os.path.join(out_dir, "rheology_crosssection.png"), dpi=150, bbox_inches="tight")
+    figc.savefig(os.path.join(out_dir, "AAA_crosssection.png"),
+                 dpi=150, bbox_inches="tight")
     plt.close(figc)
 
-    # Loss
+    # 2. Centreline velocity + wall profile
+    N_ax = 240
+    x_ax = np.linspace(x_lo, x_hi, N_ax, dtype=np.float32)
+    xyz_ax = jnp.array(np.stack([x_ax, np.zeros(N_ax, np.float32),
+                                 np.zeros(N_ax, np.float32)], axis=1))
+    u_ctr = np.array(model.apply(params, xyz_ax)[:, 0])
+    R_ax  = geom.radius_at(x_ax)
+    figa, ax1 = plt.subplots(figsize=(9, 4))
+    ax1.plot(x_ax, u_ctr, "b-", lw=2.0, label="u centreline / U")
+    ax1.set_xlabel("x / R_v")
+    ax1.set_ylabel("u / U", color="b")
+    ax1.tick_params(axis="y", labelcolor="b")
+    ax2 = ax1.twinx()
+    ax2.plot(x_ax, R_ax, "r--", lw=1.5, label="R(x)")
+    ax2.fill_between(x_ax,  R_ax,  Rv, alpha=0.12, color="r")
+    ax2.fill_between(x_ax, -R_ax, -Rv, alpha=0.12, color="r")
+    ax2.set_ylabel("R(x) / R_v", color="r")
+    ax2.tick_params(axis="y", labelcolor="r")
+    ax1.set_title(f"Carreau AAA — centreline velocity  (Re={Re:.0f}, Cu={Cu:.1f})")
+    ax1.grid(alpha=0.3)
+    figa.tight_layout()
+    figa.savefig(os.path.join(out_dir, "AAA_centreline.png"),
+                 dpi=150, bbox_inches="tight")
+    plt.close(figa)
+
+    # 3. Apparent-viscosity cross-section at the bulge centre
+    mu_cs = np.array(pde.apparent_viscosity(params, xyz_cs)).reshape(N_cs, N_cs)
+    mu_cs = np.where(YY ** 2 + ZZ ** 2 > R_x0 ** 2, np.nan, mu_cs)
+    figm, axm = plt.subplots(figsize=(5, 4))
+    cfm = axm.contourf(yz, yz, mu_cs, levels=50, cmap="viridis")
+    plt.colorbar(cfm, ax=axm, label="μ* = μ/μ∞")
+    axm.set_aspect("equal")
+    axm.set_xlabel("y / R_v")
+    axm.set_ylabel("z / R_v")
+    axm.set_title(f"Apparent viscosity at x={x0:.1f}")
+    figm.tight_layout()
+    figm.savefig(os.path.join(out_dir, "AAA_viscosity.png"),
+                 dpi=150, bbox_inches="tight")
+    plt.close(figm)
+
+    # 4. Loss
     figl, axl = plt.subplots(figsize=(7, 3))
     axl.semilogy(loss_hist, lw=1.0)
     axl.set_xlabel("Epoch")
     axl.set_ylabel("Loss")
-    axl.set_title(f"Carreau pipe flow  Re={Re:.0f}")
+    axl.set_title(f"Carreau AAA flow  Re={Re:.0f}")
     figl.tight_layout()
     figl.savefig(os.path.join(out_dir, "loss.png"), dpi=150, bbox_inches="tight")
     plt.close(figl)
@@ -280,16 +290,18 @@ def run_pipe_flow_rheology(cfg) -> dict:
                    "w_pred": uvwp[:, 2], "p_pred": uvwp[:, 3]},
     )
     save_checkpoint(params, out_dir, metadata={
-        "problem": "pipe_flow_rheology",
+        "problem": "AAA_rheology",
         "network": {"type": net_type, "layers": layers},
         "physics": {"rho": rho, "mu0": mu0, "mu_inf": mu_inf, "lam": lam, "n": n,
-                    "R": R, "U": U, "Re": Re, "beta": beta, "Cu": Cu},
-        "results": {"rel_l2_u": rel_l2, "dpdx_nd": dpdx_nd, "n_epochs": len(loss_hist)},
+                    "R_vessel": R_vessel, "R_AAA": R_AAA, "U": U,
+                    "Re": Re, "beta": beta, "Cu": Cu},
+        "results": {"flow_balance": flow_balance, "n_epochs": len(loss_hist)},
     })
     print(f"\nOutputs saved to: {out_dir}/")
 
-    return {"params": params, "loss_hist": loss_hist, "rel_l2_u": rel_l2,
-            "Re": Re, "beta": beta, "Cu": Cu, "n_epochs": len(loss_hist)}
+    return {"params": params, "loss_hist": loss_hist,
+            "flow_balance": flow_balance, "Re": Re, "beta": beta, "Cu": Cu,
+            "n_epochs": len(loss_hist)}
 
 
 if __name__ == "__main__":
@@ -298,4 +310,4 @@ if __name__ == "__main__":
     _HERE = pathlib.Path(__file__).parent
     cfg_path = str(pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else _HERE / "config.yaml")
     from underPINN.config.loader import load_config
-    run_pipe_flow_rheology(load_config(cfg_path))
+    run_AAA_rheology(load_config(cfg_path))

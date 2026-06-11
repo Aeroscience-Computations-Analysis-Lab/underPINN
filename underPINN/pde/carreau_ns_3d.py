@@ -30,8 +30,77 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 from underPINN.core.base import BasePDE
+
+
+# ---------------------------------------------------------------------------
+# Fully-developed Carreau pipe profile (non-dimensional reference, R* = 1)
+# ---------------------------------------------------------------------------
+
+def carreau_mu_star(a, beta: float, Cu: float, n: float):
+    """Non-dimensional apparent viscosity μ* at shear-rate magnitude *a*."""
+    return 1.0 + (beta - 1.0) * (1.0 + (Cu * a) ** 2) ** ((n - 1.0) / 2.0)
+
+
+def carreau_shear_from_stress(tau_mag: float, beta: float, Cu: float, n: float) -> float:
+    """Invert μ*(a)·a = tau_mag for the shear-rate magnitude a ≥ 0 (bisection).
+
+    The shear stress μ*(a)·a is monotone increasing in a for a Carreau fluid,
+    so the inverse is unique.
+    """
+    if tau_mag <= 0.0:
+        return 0.0
+
+    def f(a):
+        return carreau_mu_star(a, beta, Cu, n) * a - tau_mag
+
+    lo, hi = 0.0, 1.0
+    while f(hi) < 0.0:
+        hi *= 2.0
+    for _ in range(80):
+        mid = 0.5 * (lo + hi)
+        if f(mid) < 0.0:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
+def carreau_developed_profile(beta: float, Cu: float, n: float,
+                              u_center: float = 1.0, n_r: int = 400):
+    """Fully-developed Carreau velocity profile u*(r) on r ∈ [0, 1].
+
+    Solves  μ*(|u*'|) u*' = ½ P r  with u*(1)=0, matching the centreline value
+    ``u_center`` by adjusting the non-dimensional pressure-gradient constant P.
+
+    Returns
+    -------
+    r : (n_r,) radial grid in [0, 1]
+    u : (n_r,) velocity profile  (u[0] = u_center, u[-1] = 0)
+    P : matched pressure-gradient constant  (= Re · dp*/dx*, negative)
+    """
+    r = np.linspace(0.0, 1.0, n_r)
+
+    def profile_for_P(P):
+        a = np.array([carreau_shear_from_stress(0.5 * abs(P) * ri, beta, Cu, n)
+                      for ri in r])
+        seg = 0.5 * (a[:-1] + a[1:]) * np.diff(r)        # trapezoid segments
+        u = np.concatenate([np.cumsum(seg[::-1])[::-1], [0.0]])  # ∫_r^1 a dr'
+        return u
+
+    P_lo, P_hi = 1e-6, 1.0
+    while profile_for_P(P_hi)[0] < u_center:
+        P_hi *= 2.0
+    for _ in range(80):
+        P_mid = 0.5 * (P_lo + P_hi)
+        if profile_for_P(P_mid)[0] < u_center:
+            P_lo = P_mid
+        else:
+            P_hi = P_mid
+    P = 0.5 * (P_lo + P_hi)
+    return r, profile_for_P(P), -P
 
 
 class CarreauNS3DPDE(BasePDE):

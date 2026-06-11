@@ -1,4 +1,4 @@
-problem: aneurysm_flow
+problem: AAA_flow
 
 network:
   type  : gated_mlp                      # 'mlp' or 'gated_mlp'
@@ -7,11 +7,11 @@ network:
 physics:
   Re         : 40.0
   R_vessel   : 0.5      # straight-vessel radius
-  R_aneurysm : 1.0      # peak bulge radius
+  R_AAA : 1.0      # peak bulge radius
   L          : 7.0      # total domain length  (x_lo to x_lo + L)
   x_lo       : -3.5     # inlet x-coordinate → pipe spans x ∈ [-3.5, 3.5]
   x0         : -2.0      # axial centre of the bulge
-  L_aneurysm : 1.5      # full axial width of the bulge region
+  L_AAA : 1.5      # full axial width of the bulge region
   V_max      : 2.0      # parabolic inflow peak  u(r) = V_max·(1 − r²/R_vessel²)
 
 data:
@@ -37,4 +37,4 @@ loss:
   w_outlet : 20.0
 
 output:
-  dir: outputs/aneurysm_flow
+  dir: outputs/AAA_flow

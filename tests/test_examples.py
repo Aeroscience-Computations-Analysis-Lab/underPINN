@@ -493,14 +493,14 @@ class TestExampleCylinderFlow:
 
 
 # ---------------------------------------------------------------------------
-# 14. Aneurysm Flow (3-D steady axisymmetric bulge)
+# 14. AAA Flow (3-D steady axisymmetric bulge)
 # ---------------------------------------------------------------------------
 
-class TestExampleAneurysmFlow:
+class TestExampleAAAFlow:
     def test_runs_and_returns_loss_hist(self, tmp_path):
-        mod = _load_module("aneurysm_flow", "aneurysm/aneurysm_flow.py")
+        mod = _load_module("AAA_flow", "AAA/AAA_flow.py")
         cfg = _cfg(
-            "aneurysm/config.yaml",
+            "AAA/config.yaml",
             {"training.epochs": 3,
              "training.save_restart_every": 0,
              "data.n_interior": 100,
@@ -509,9 +509,31 @@ class TestExampleAneurysmFlow:
              "data.n_outlet": 20},
             tmp_path,
         )
-        result = mod.run_aneurysm_flow(cfg)
+        result = mod.run_AAA_flow(cfg)
         assert "loss_hist" in result
         assert _has_nonempty_loss(result)
+
+
+# ---------------------------------------------------------------------------
+# 14b. AAA Rheology (3-D steady Carreau through the bulge)
+# ---------------------------------------------------------------------------
+
+class TestExampleAAARheology:
+    def test_runs_and_returns_loss_hist(self, tmp_path):
+        mod = _load_module("AAA_rheo", "AAA_rheology/AAA_rheology.py")
+        cfg = _cfg("AAA_rheology/config.yaml",
+                   {"training.epochs": 3,
+                    "training.save_restart_every": 0,
+                    "data.n_interior": 100,
+                    "data.n_wall": 20,
+                    "data.n_inlet": 20,
+                    "data.n_outlet": 20},
+                   tmp_path)
+        result = mod.run_AAA_rheology(cfg)
+        assert "loss_hist" in result
+        assert _has_nonempty_loss(result)
+        assert result["beta"] > 1.0          # shear-thinning (μ0 > μ∞)
+        assert "flow_balance" in result
 
 
 # ---------------------------------------------------------------------------

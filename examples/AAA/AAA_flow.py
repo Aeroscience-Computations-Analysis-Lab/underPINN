@@ -1,15 +1,15 @@
-"""3-D Steady Axisymmetric Bulge (Aneurysm-like) PINN.
+"""3-D Steady Axisymmetric Bulge (AAA-like) PINN.
 
 Run directly or via the CLI:
 
-    python examples/aneurysm/aneurysm_flow.py           # uses config.yaml
-    python examples/aneurysm/aneurysm_flow.py myconfig.yaml
-    python -m underPINN run examples/aneurysm/config.yaml
+    python examples/AAA/AAA_flow.py           # uses config.yaml
+    python examples/AAA/AAA_flow.py myconfig.yaml
+    python -m underPINN run examples/AAA/config.yaml
 
 Solves steady 3-D incompressible NS inside an axisymmetric vessel with a
 local outward bulge.  The vessel cross-section varies along x as
 
-    R(x) = R_vessel + (R_aneurysm − R_vessel) · cos(π/2 · |x−x0|/half_bulge)²
+    R(x) = R_vessel + (R_AAA − R_vessel) · cos(π/2 · |x−x0|/half_bulge)²
 
 A parabolic (Poiseuille-like) inflow is imposed on the inlet disk; no-slip on
 the curved wall; zero-pressure on the outlet disk.  There is no known exact
@@ -32,7 +32,7 @@ import matplotlib.pyplot as plt
 from underPINN.config.loader import cfg_get, save_config
 from underPINN.nn.mlp import MLP, GatedMLP
 from underPINN.pde.navier_stokes_3d import SteadyNS3DPDE
-from underPINN.geometry.aneurysm import BulgeGeometry
+from underPINN.geometry.aaa import BulgeGeometry
 from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.utils.io import save_predictions
 from underPINN.utils.checkpoint import save_checkpoint
@@ -40,7 +40,7 @@ from underPINN.utils.restart import RestartManager
 from underPINN.utils.sampling import safe_choice
 
 
-def run_aneurysm_flow(cfg) -> dict:
+def run_AAA_flow(cfg) -> dict:
     """Train a PINN on 3-D steady flow through an axisymmetric bulge."""
     # ── Unpack ─────────────────────────────────────────────────────────────────
     ph   = cfg.physics
@@ -48,16 +48,16 @@ def run_aneurysm_flow(cfg) -> dict:
     lw   = cfg.loss
     seed = cfg_get(tr,  "seed",   default=0)
     out  = cfg_get(cfg, "output", default=None)
-    out_dir = cfg_get(out, "dir", default="outputs/aneurysm_flow") if out else "outputs/aneurysm_flow"
+    out_dir = cfg_get(out, "dir", default="outputs/AAA_flow") if out else "outputs/AAA_flow"
     os.makedirs(out_dir, exist_ok=True)
 
     Re         = float(ph.Re)
     R_vessel   = float(ph.R_vessel)
-    R_aneurysm = float(ph.R_aneurysm)
+    R_AAA = float(ph.R_AAA)
     L          = float(ph.L)
     x_lo       = float(cfg_get(ph, "x_lo",       default=-3.5))
     x0         = float(cfg_get(ph, "x0",          default=1.5))
-    L_aneurysm = float(cfg_get(ph, "L_aneurysm",  default=1.5))
+    L_AAA = float(cfg_get(ph, "L_AAA",  default=1.5))
     V_max      = float(ph.V_max)
     x_hi       = x_lo + L
 
@@ -73,14 +73,14 @@ def run_aneurysm_flow(cfg) -> dict:
     batch_r   = cfg_get(tr, "batch_r",   default=256)
     batch_bc  = cfg_get(tr, "batch_bc",  default=128)
 
-    print(f"Aneurysm flow:  Re={Re},  R_vessel={R_vessel},  R_aneurysm={R_aneurysm}")
-    print(f"  x ∈ [{x_lo}, {x_hi}],  bulge centre x0={x0},  L_aneurysm={L_aneurysm}")
+    print(f"AAA flow:  Re={Re},  R_vessel={R_vessel},  R_AAA={R_AAA}")
+    print(f"  x ∈ [{x_lo}, {x_hi}],  bulge centre x0={x0},  L_AAA={L_AAA}")
     print(f"  V_max={V_max}")
 
     # ── Geometry + collocation data ────────────────────────────────────────────
     geom = BulgeGeometry(
-        R_vessel=R_vessel, R_aneurysm=R_aneurysm,
-        L=L, x_lo=x_lo, x0=x0, L_aneurysm=L_aneurysm,
+        R_vessel=R_vessel, R_AAA=R_AAA,
+        L=L, x_lo=x_lo, x0=x0, L_AAA=L_AAA,
     )
     d = cfg.data
     xyz_r   = jnp.array(geom.sample_interior(cfg_get(d, "n_interior", default=5000), seed=seed))
@@ -209,7 +209,7 @@ def run_aneurysm_flow(cfg) -> dict:
     # ── Solution visualisation ─────────────────────────────────────────────────
     # 1. Cross-section contourf of u(y,z) at x = x0  (bulge centre)
     N_cs  = 80
-    R_cs  = R_aneurysm        # plot covers the maximum cross-section
+    R_cs  = R_AAA        # plot covers the maximum cross-section
     y_cs  = np.linspace(-R_cs, R_cs, N_cs, dtype=np.float32)
     z_cs  = np.linspace(-R_cs, R_cs, N_cs, dtype=np.float32)
     YY_cs, ZZ_cs = np.meshgrid(y_cs, z_cs)
@@ -274,17 +274,17 @@ def run_aneurysm_flow(cfg) -> dict:
     ax.semilogy(loss_hist, lw=1.2)
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Loss")
-    ax.set_title(f"Aneurysm Flow  Re={Re}")
+    ax.set_title(f"AAA Flow  Re={Re}")
     fig.tight_layout()
     fig.savefig(os.path.join(out_dir, "loss.png"), dpi=150, bbox_inches="tight")
     plt.close(fig)
 
     # ── Checkpoint ────────────────────────────────────────────────────────────
     save_checkpoint(params, out_dir, metadata={
-        "problem": "aneurysm_flow",
+        "problem": "AAA_flow",
         "network": {"type": net_type, "layers": list(cfg.network.layers)},
-        "physics": {"Re": Re, "R_vessel": R_vessel, "R_aneurysm": R_aneurysm,
-                    "L": L, "x_lo": x_lo, "x0": x0, "L_aneurysm": L_aneurysm,
+        "physics": {"Re": Re, "R_vessel": R_vessel, "R_AAA": R_AAA,
+                    "L": L, "x_lo": x_lo, "x0": x0, "L_AAA": L_AAA,
                     "V_max": V_max},
     })
 
@@ -301,4 +301,4 @@ if __name__ == "__main__":
         pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else _HERE / "config.yaml"
     )
     from underPINN.config.loader import load_config
-    run_aneurysm_flow(load_config(cfg_path))
+    run_AAA_flow(load_config(cfg_path))
