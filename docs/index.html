@@ -424,11 +424,11 @@
 
 <!-- ─── Stats bar ─────────────────────────────────────────────────────────── -->
 <div class="stats-bar">
-  <div class="stat"><div class="stat-number">16</div><div class="stat-label">Physics Examples</div></div>
+  <div class="stat"><div class="stat-number">22</div><div class="stat-label">Physics Examples</div></div>
   <div class="stat"><div class="stat-number">5</div><div class="stat-label">PDE Solvers</div></div>
-  <div class="stat"><div class="stat-number">12+</div><div class="stat-label">CLI Runners</div></div>
+  <div class="stat"><div class="stat-number">19+</div><div class="stat-label">CLI Runners</div></div>
   <div class="stat"><div class="stat-number">500×</div><div class="stat-label">Less GPU Dispatch</div></div>
-  <div class="stat"><div class="stat-number">3D</div><div class="stat-label">Navier-Stokes</div></div>
+  <div class="stat"><div class="stat-number">3D</div><div class="stat-label">Unsteady Navier-Stokes</div></div>
   <div class="stat"><div class="stat-number">Auto</div><div class="stat-label">Restart/Resume</div></div>
 </div>
 
@@ -445,6 +445,11 @@
         <div class="feature-icon" style="background:rgba(37,99,235,.12)">&#9632;</div>
         <h3>MLP</h3>
         <p>Standard multi-layer perceptron with tanh activations. Configurable depth and width via a simple layer list — e.g. <code>[2, 64, 64, 64, 1]</code> for a space-time Burgers network.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(255,166,87,.12)">&#9650;</div>
+        <h3>GatedMLP</h3>
+        <p>Modified MLP (Wang et al. 2022): two input encoders U/V gate-blended into every hidden layer. Cures pathological gradient flow on stiff PDEs — select with <code>network.type: gated_mlp</code> in any flow example.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon" style="background:rgba(210,168,255,.12)">&#126;</div>
@@ -474,6 +479,16 @@
         <div class="feature-icon" style="background:rgba(247,129,102,.12)">&#8635;</div>
         <h3>RAR-D Adaptive Resampling</h3>
         <p>Periodically replaces collocation points with samples drawn proportional to |residual|^k (Lu et al., 2021). Focuses compute on high-error regions without changing total batch size.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(247,129,102,.12)">&#9888;</div>
+        <h3>Shock Capturing</h3>
+        <p>Conservative-form compressible Euler with global artificial viscosity &minus;&epsilon;&nabla;&sup2;U — fixed or <strong>learned</strong> as &epsilon; = softplus(log_av) — plus RAR/RAD resampling that migrates points onto shocks (ramp, Sod tube).</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" style="background:rgba(63,185,80,.12)">&#9201;</div>
+        <h3>Time-Marching Transfer</h3>
+        <p>Long-horizon unsteady flows split into windows: each warm-starts from the previous and chains its end-state as the next initial condition. Per-window checkpoints + window-level restart (3-D pulsatile pipe).</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon" style="background:rgba(210,168,255,.12)">&#9878;</div>
@@ -553,6 +568,17 @@
         </div>
 <pre>pip install -U <span class="st">"jax[cuda12]"</span>
 pip install -r requirements-gpu.txt</pre>
+      </div>
+      <div>
+        <h3 style="color:var(--accent3);margin-bottom:1rem">TPU (Colab / Cloud TPU VM)</h3>
+        <div class="code-header">
+          <div class="dot-row"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
+          Terminal
+        </div>
+<pre>pip install -r requirements-tpu.txt
+pip install -e . --no-deps
+<span class="cm"># auto-sets full-f32 matmuls on TPU
+# (bf16 default breaks PDE Hessians)</span></pre>
       </div>
     </div>
 
@@ -1016,7 +1042,7 @@ solver.<span class="fn">train</span>(*data, config=config)
 <section id="examples">
   <div class="container">
     <div class="section-tag">Physics Examples</div>
-    <h2 class="section-title">16 worked examples across 7 physics domains</h2>
+    <h2 class="section-title">22 worked examples across 8 physics domains</h2>
     <p class="section-sub">Each example folder is self-contained: one script + one YAML config. Run directly (<code>python examples/burgers/burgers.py</code>) or via the CLI. Saves predictions, plots, and a <code>params.msgpack</code> checkpoint automatically.</p>
 
     <div class="table-wrap">
@@ -1103,24 +1129,66 @@ solver.<span class="fn">train</span>(*data, config=config)
           </tr>
           <tr>
             <td><strong>2-D Compressible Ramp</strong></td>
-            <td>Steady Euler, M=3</td>
+            <td>Steady Euler (conservative), M=3</td>
             <td>MLP [2,80,80,80,80,80,4]</td>
-            <td><span class="tag tag-red">oblique shock &theta;=10&deg;</span><span class="tag tag-orange">ramp geometry</span></td>
+            <td><span class="tag tag-red">oblique shock &theta;=10&deg;</span><span class="tag tag-orange">artificial viscosity (fixed/learnable)</span><span class="tag tag-blue">RAR</span></td>
             <td><code>examples/ramp/config.yaml</code></td>
           </tr>
           <tr>
-            <td><strong>NACA 0012 Airfoil</strong></td>
-            <td>Steady N-S, Re=200</td>
-            <td>MLP [2,128,128,128,3]</td>
-            <td><span class="tag tag-green">exterior geometry</span><span class="tag tag-purple">Cp curve, CL</span><span class="tag tag-orange">RAR-D</span></td>
+            <td><strong>1-D Sod Shock Tube</strong></td>
+            <td>Unsteady Euler (conservative)</td>
+            <td>MLP [2,80&times;5,3]</td>
+            <td><span class="tag tag-red">learnable &epsilon; = softplus(log_av)</span><span class="tag tag-green">exact Riemann</span><span class="tag tag-blue">RAR</span></td>
+            <td><code>examples/sod_shock/config.yaml</code></td>
+          </tr>
+          <tr>
+            <td><strong>NACA Airfoil</strong></td>
+            <td>Steady N-S, Re=100</td>
+            <td>MLP / GatedMLP [2,128&times;6,3]</td>
+            <td><span class="tag tag-green">cambered profiles</span><span class="tag tag-purple">AoA via rotation</span><span class="tag tag-orange">surface pressure &amp; Cp</span></td>
             <td><code>examples/airfoil/config.yaml</code></td>
+          </tr>
+          <tr>
+            <td><strong>Cylinder Cross-flow</strong></td>
+            <td>Steady N-S, Re=40</td>
+            <td>MLP [2,128&times;6,3]</td>
+            <td><span class="tag tag-blue">pure-PINN recipe</span><span class="tag tag-purple">Cp(&theta;) vs inviscid</span><span class="tag tag-green">wake pool</span></td>
+            <td><code>examples/cylinder/config.yaml</code></td>
           </tr>
           <tr>
             <td><strong>3-D Pipe Flow</strong></td>
             <td>Steady 3-D N-S</td>
-            <td>MLP [3,64,64,64,64,4]</td>
-            <td><span class="tag tag-red">double-jacfwd Hessian</span><span class="tag tag-orange">Pipe geometry</span></td>
+            <td>MLP / GatedMLP [3,&hellip;,4]</td>
+            <td><span class="tag tag-red">double-jacfwd Hessian</span><span class="tag tag-orange">Hagen-Poiseuille exact</span></td>
             <td><code>examples/pipe_flow/pipe_flow.yaml</code></td>
+          </tr>
+          <tr>
+            <td><strong>3-D AAA Bulge</strong></td>
+            <td>Steady 3-D N-S</td>
+            <td>GatedMLP [3,192&times;5,4]</td>
+            <td><span class="tag tag-green">cosine&sup2; bulge R(x)</span><span class="tag tag-blue">flow-rate balance</span></td>
+            <td><code>examples/AAA/config.yaml</code></td>
+          </tr>
+          <tr>
+            <td><strong>Carreau Pipe (blood)</strong></td>
+            <td>Steady Carreau N-S</td>
+            <td>GatedMLP [3,128&times;4,4]</td>
+            <td><span class="tag tag-red">shear-thinning &mu;(&gamma;&#775;)</span><span class="tag tag-green">1-D Carreau exact</span><span class="tag tag-purple">&beta;=16, Cu=&lambda;U/R</span></td>
+            <td><code>examples/pipe_flow_rheology/config.yaml</code></td>
+          </tr>
+          <tr>
+            <td><strong>Carreau AAA (blood)</strong></td>
+            <td>Steady Carreau N-S</td>
+            <td>GatedMLP [3,192&times;5,4]</td>
+            <td><span class="tag tag-red">blood rheology in the bulge</span><span class="tag tag-orange">apparent-viscosity maps</span></td>
+            <td><code>examples/AAA_rheology/config.yaml</code></td>
+          </tr>
+          <tr>
+            <td><strong>3-D Pulsatile Pipe</strong></td>
+            <td>Unsteady 3-D N-S</td>
+            <td>GatedMLP [4,&hellip;,4]</td>
+            <td><span class="tag tag-blue">time-marching transfer</span><span class="tag tag-green">per-window ckpts</span><span class="tag tag-orange">window restart</span></td>
+            <td><code>examples/pipe_flow/pipe_flow_pulsatile_transfer.yaml</code></td>
           </tr>
           <tr>
             <td><strong>3-D Unsteady Pipe — Transfer</strong></td>
@@ -1161,12 +1229,12 @@ solver.<span class="fn">train</span>(*data, config=config)
         <h3>Package Layout</h3>
         <ul class="layer-list">
           <li class="layer-item"><span class="layer-dot dot-blue"></span><strong>core/</strong> &mdash; BasePDE, BaseLoss, BaseSolver, TrainingConfig</li>
-          <li class="layer-item"><span class="layer-dot dot-purple"></span><strong>nn/</strong> &mdash; MLP, FourierMLP, FBPINN, HybridAttention, SimpleGate</li>
-          <li class="layer-item"><span class="layer-dot dot-green"></span><strong>pde/</strong> &mdash; Burgers, Wave, Helmholtz, Heat, N-S 2D/3D, k-&epsilon;, Euler, ODE</li>
+          <li class="layer-item"><span class="layer-dot dot-purple"></span><strong>nn/</strong> &mdash; MLP, GatedMLP, FourierMLP, FBPINN, HybridAttention, SimpleGate</li>
+          <li class="layer-item"><span class="layer-dot dot-green"></span><strong>pde/</strong> &mdash; Burgers, Wave, Helmholtz, Heat, N-S 2D/3D (steady + unsteady), Carreau N-S, k-&epsilon;, Euler (2-D ramp + 1-D Sod), ODE</li>
           <li class="layer-item"><span class="layer-dot dot-orange"></span><strong>solver/</strong> &mdash; FBPINNSolver, SteadySolver, ODESolver, LDCSolver, RANSSolver</li>
           <li class="layer-item"><span class="layer-dot dot-red"></span><strong>losses/</strong> &mdash; PINNLoss (RBA), ODELoss, SteadyLoss</li>
           <li class="layer-item"><span class="layer-dot dot-blue"></span><strong>callbacks/</strong> &mdash; ConsoleLogger, EarlyStopping, ModelCheckpoint</li>
-          <li class="layer-item"><span class="layer-dot dot-green"></span><strong>geometry/</strong> &mdash; Interval, Rectangle, Airfoil, Pipe, Ramp, Composite, ShapelyGeom</li>
+          <li class="layer-item"><span class="layer-dot dot-green"></span><strong>geometry/</strong> &mdash; Interval, Rectangle, NACAAirfoil (AoA rotation), Cylinder2D, Pipe, BulgeGeometry (AAA), Ramp, Composite, ShapelyGeom</li>
           <li class="layer-item"><span class="layer-dot dot-purple"></span><strong>training/</strong> &mdash; rar_d_resample (RAR-D adaptive collocation)</li>
           <li class="layer-item"><span class="layer-dot dot-orange"></span><strong>runner/</strong> &mdash; dispatch.py path-registry + importlib loader</li>
           <li class="layer-item"><span class="layer-dot dot-red"></span><strong>utils/</strong> &mdash; save_predictions, checkpoint, restart, ModelPredictor, timing, metrics</li>
@@ -1249,6 +1317,10 @@ _REGISTRY = {
           <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/helmholtz/config.yaml</span></div>
           <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/ramp/config.yaml</span></div>
           <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/airfoil/config.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/cylinder/config.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/sod_shock/config.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/AAA/config.yaml</span></div>
+          <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/pipe_flow_rheology/config.yaml</span></div>
           <div><span class="prompt">$ </span><span class="cmd">python -m underPINN run examples/pipe_flow/pipe_flow.yaml</span></div>
         </div>
       </div>

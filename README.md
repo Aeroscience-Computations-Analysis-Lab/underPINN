@@ -3,7 +3,7 @@
 
 ![Static Badge](https://img.shields.io/badge/version-v2605-blue) ![Static Badge](https://img.shields.io/badge/repo%20status-Active-95eb34) ![Static Badge](https://img.shields.io/badge/license-GPL--3.0-green) ![Static Badge](https://img.shields.io/badge/python-%3E%3D3.9-blue) ![Static Badge](https://img.shields.io/badge/jax-%3E%3D0.4.26-orange)
 
-underPINN is a research-grade PINN engine that combines classical collocation-based PINNs with Finite Basis decomposition (FBPINN), attention-augmented networks, residual-based adaptive weighting, transfer learning, inverse problems, and a full restart/resume system — all JIT-compiled and differentiable via XLA.
+underPINN is a research-grade PINN engine that combines classical collocation-based PINNs with Finite Basis decomposition (FBPINN), attention-augmented networks, residual-based adaptive weighting/resampling, transfer learning (including windowed time-marching for long-horizon unsteady flows), shock capturing with learnable artificial viscosity, non-Newtonian (Carreau) blood rheology, inverse problems, and a full restart/resume system — all JIT-compiled and differentiable via XLA on CPU, GPU, and TPU.
 
 ---
 
@@ -11,6 +11,7 @@ underPINN is a research-grade PINN engine that combines classical collocation-ba
 
 ### Network Architectures
 - **MLP** — standard multi-layer perceptron with tanh activations; configurable depth and width via a layer list
+- **GatedMLP** — modified MLP (Wang et al. 2022): two input encoders U/V are gate-blended into every hidden layer, curing the pathological gradient flow of plain tanh MLPs on stiff PDEs; selectable in any flow example via `network.type: gated_mlp`
 - **FourierMLP** — random Fourier feature embeddings (trainable σ) prepended to a standard MLP; essential for oscillatory solutions (Helmholtz, wave, high-Re flows) where plain MLPs fail to represent high spatial frequencies
 - **FBPINN** — overlapping subdomain decomposition with sigmoid partition-of-unity windows; each subdomain gets its own network so training is never dominated by one region
 - **HybridAttention + SimpleGate** — gated residual blocks inside each FBPINN subdomain; SimpleGate multiplies the hidden state element-wise by a learnable gate for compact, expressive feature modulation
@@ -19,6 +20,9 @@ underPINN is a research-grade PINN engine that combines classical collocation-ba
 - **`lax.scan` fused kernels** — fuse N gradient steps into a single XLA kernel, eliminating Python dispatch between epochs; delivers 50–500× less overhead on GPU compared to a Python for-loop
 - **Cosine LR decay** — via `optax.cosine_decay_schedule`; integrates seamlessly with `TrainingConfig`
 - **RAR-D adaptive collocation resampling** — periodically replaces a fraction of collocation points with samples drawn proportional to `|residual|^k` (Lu et al., 2021); focuses compute on high-error regions without changing the total batch size
+- **RAR/RAD shock-focused resampling** — `rad_resample` (Wu et al., 2023; `p ∝ r^k/E[r^k] + c`) refreshes the interior pool toward shocks/contacts in the compressible cases (`ramp`, `sod_shock`); config knobs `rar_period`, `rar_candidates`, `rar_k`, `rar_c`
+- **Artificial viscosity for shocks** — global Laplacian dissipation `−ε∇²U` on the conserved variables in the compressible Euler cases; ε can be **fixed** (`art_visc`) or **learned** as `ε = softplus(log_av)` jointly with the network (`trainable_visc: true`)
+- **Time-marching transfer learning** — long-horizon unsteady problems split into windows; each window warm-starts from the previous one and chains its end-state as the next initial condition (pulsatile pipe flow), with per-window checkpoints and window-level restart
 - **RBA element-wise loss weighting** — residual-based adaptivity assigns per-point weights so that boundary and collocation losses are automatically balanced during training
 - **EarlyStopping** — monitors a metric (default: total loss) and halts training after `patience` epochs without improvement
 - **`TrainingConfig` dataclass** — centralises all hyperparameters with runtime validation; a single object is passed to every solver
@@ -39,10 +43,13 @@ underPINN is a research-grade PINN engine that combines classical collocation-ba
 - 1-D / 2-D diffusion / heat — forward and inverse (recover thermal diffusivity α)
 - 1-D wave equation (`u_tt = c²u_xx`)
 - 2-D Helmholtz (`Δu + k²u = f`, manufactured source)
-- 2-D steady incompressible Navier-Stokes (lid-driven cavity, Re=100)
+- 2-D steady incompressible Navier-Stokes (lid-driven cavity Re=100, NACA airfoil, circular cylinder Re=40)
 - 2-D RANS k-ε turbulence model (turbulent channel, Re=10 000)
-- 3-D steady incompressible Navier-Stokes (Hagen-Poiseuille pipe flow)
-- 2-D steady compressible Euler (oblique-shock ramp, Mach 3, θ=10°)
+- 3-D steady incompressible Navier-Stokes (Hagen-Poiseuille pipe flow, AAA bulge)
+- 3-D **unsteady** incompressible Navier-Stokes (`(x,y,z,t) → (u,v,w,p)`; pulsatile pipe via time-marching transfer)
+- 3-D **generalized-Newtonian (Carreau)** Navier-Stokes — shear-thinning blood rheology (`μ(γ̇) = μ∞ + (μ0−μ∞)[1+(λγ̇)²]^((n−1)/2)`); pipe and AAA cases
+- 2-D steady compressible Euler — **conservative flux-divergence form** with optional artificial viscosity (oblique-shock ramp, Mach 3, θ=10°)
+- 1-D **unsteady** compressible Euler — Sod shock tube with learnable artificial viscosity + exact Riemann reference
 - Unsteady pipe cross-section (`(y, z, t) → u`)
 - Harmonic oscillator (`d²u/dt² + ω²u = 0`)
 - Exponential decay ODE (`du/dt + λu = 0`)
@@ -50,8 +57,10 @@ underPINN is a research-grade PINN engine that combines classical collocation-ba
 ### Geometry
 - **Interval** — 1-D uniform / stratified sampler
 - **Rectangle** — 2-D interior + boundary-aware sampling
-- **NACA 4-digit airfoil** — exterior domain, near-surface, and farfield boundary sampling; exact profile coordinates
+- **NACA 4-digit airfoil** — symmetric **and cambered** profiles; angle of attack imposed by **rotating the airfoil** about the quarter-chord (inflow stays horizontal); SDF-weighted near-surface sampling; camber-aware upper/lower surface split
+- **Circular cylinder (2-D)** — exterior cross-flow domain with analytic SDF (`Cylinder2D`)
 - **Cylindrical Pipe** — interior, wall, inlet, and outlet face samplers
+- **AAA bulge** (`BulgeGeometry`) — axisymmetric vessel with a cosine-squared AAA bulge `R(x)`; interior / curved-wall / inlet / outlet samplers
 - **Ramp** — trapezoidal domain above a wedge surface for compressible shock problems
 - **Composite** — boolean combinations of any geometry objects
 - **Shapely-backed polygon** — arbitrary 2-D polygon sampler backed by Shapely 2.x
@@ -107,6 +116,14 @@ pip install jax flax optax matplotlib scipy shapely pandas pyyaml
 ```bash
 # GPU (CUDA 12)
 pip install -U "jax[cuda12]" && pip install -r requirements-gpu.txt
+```
+
+```bash
+# TPU (Google Colab TPU runtime / Cloud TPU VM)
+pip install -r requirements-tpu.txt
+pip install -e . --no-deps     # --no-deps so pip can't replace the TPU jax with the cpu pin
+# underPINN auto-detects the TPU and forces full-float32 matmuls
+# (the bf16 MXU default corrupts second-order PDE residuals)
 ```
 
 ```bash
@@ -194,6 +211,12 @@ python -m underPINN run  examples/burgers/config.yaml
 python -m underPINN run  examples/wave/config.yaml
 python -m underPINN run  examples/pipe_flow/pipe_flow.yaml
 python -m underPINN run  examples/ramp/config.yaml
+python -m underPINN run  examples/cylinder/config.yaml                          # flow over a cylinder (Re=40)
+python -m underPINN run  examples/sod_shock/config.yaml                         # Sod tube, learnable ε
+python -m underPINN run  examples/AAA/config.yaml                               # 3-D AAA bulge
+python -m underPINN run  examples/pipe_flow_rheology/config.yaml                # Carreau blood, pipe
+python -m underPINN run  examples/AAA_rheology/config.yaml                      # Carreau blood, AAA
+python -m underPINN run  examples/pipe_flow/pipe_flow_pulsatile_transfer.yaml   # pulsatile, time-marching TL
 ```
 
 ### Programmatic
@@ -248,14 +271,34 @@ python examples/heat/forward.py
 python examples/heat/inverse.py
 python examples/LDC/run_ldc.py
 python examples/airfoil/airfoil_flow.py
+python examples/cylinder/cylinder_flow.py
 python examples/ode/ode_test.py
 python examples/pipe_flow/pipe_flow.py
 python examples/pipe_flow/pipe_flow_unsteady_transfer.py
+python examples/pipe_flow/pipe_flow_pulsatile_transfer.py
+python examples/pipe_flow_rheology/pipe_flow_rheology.py
+python examples/AAA/AAA_flow.py
+python examples/AAA_rheology/AAA_rheology.py
+python examples/ramp/ramp.py
+python examples/sod_shock/sod_shock.py
 python examples/transfer/burgers_transfer.py
 python examples/inverse/inverse_diffusion.py
 
 # Pass a custom config as the first argument:
 python examples/burgers/burgers.py my_custom.yaml
+```
+
+### Post-processing / prediction (after training)
+
+```bash
+# Steady pipe & AAA (Newtonian or Carreau) — axial-plane u contour + streamlines,
+# pressure contour & line plots, wall shear stress, and an NPZ of the solution:
+python examples/predict_steady.py outputs/pipe_flow
+python examples/predict_steady.py outputs/AAA_rheology
+
+# Pulsatile pipe (time-marching) — point queries, snapshot/spacetime plots, GIF:
+python examples/pipe_flow/predict_pulsatile.py outputs/pipe_flow_pulsatile_transfer --t 2.7 --plot
+python examples/pipe_flow/predict_pulsatile.py outputs/pipe_flow_pulsatile_transfer --spacetime --animate
 ```
 
 ### CLI commands
@@ -633,7 +676,10 @@ underPINN/
 │   ├── helmholtz.py       # 2-D Helmholtz  Δu + k²u = f
 │   ├── wave.py            # 1-D wave equation  u_tt = c²u_xx
 │   ├── navier_stokes.py   # 2-D steady incompressible N-S
-│   ├── navier_stokes_3d.py# 3-D steady incompressible N-S
+│   ├── navier_stokes_3d.py# 3-D steady + UNSTEADY incompressible N-S
+│   ├── carreau_ns_3d.py   # 3-D Carreau (shear-thinning) N-S + 1-D exact profile
+│   ├── compressible_euler.py # 2-D steady Euler — conservative form + artificial viscosity
+│   ├── euler_1d_unsteady.py  # 1-D unsteady Euler (Sod) — learnable artificial viscosity
 │   ├── pipe_flow_unsteady.py # Unsteady pipe cross-section  (y, z, t) → u
 │   ├── k_epsilon.py       # RANS k-ε turbulence model
 │   └── ode.py             # Exponential decay, Harmonic oscillator
@@ -641,8 +687,10 @@ underPINN/
 ├── geometry/
 │   ├── interval.py        # 1-D interval sampler
 │   ├── rectangle.py       # 2-D rectangle sampler
-│   ├── airfoil.py         # NACA 4-digit profile + exterior/surface sampling
+│   ├── airfoil.py         # NACA 4-digit (sym/cambered) + AoA rotation + SDF sampling
+│   ├── cylinder.py        # 2-D circular cylinder (cross-flow exterior)
 │   ├── pipe.py            # Cylindrical pipe (interior, wall, inlet, outlet)
+│   ├── aaa.py             # BulgeGeometry — axisymmetric AAA bulge R(x)
 │   ├── ramp.py            # Trapezoidal ramp domain above a wedge (compressible Euler)
 │   ├── composite.py       # Boolean combination of geometries
 │   └── shapely_geom.py    # Shapely-backed arbitrary polygon sampler
@@ -706,10 +754,18 @@ examples/                  # self-contained: each folder holds script + YAML
 ├── inverse/               inverse_diffusion.py + config.yaml    (2-D diffusion inverse)
 ├── LDC/                   run_ldc.py  +  config.yaml            (2-D Lid-Driven Cavity Re=100)
 ├── K-Epsilon/             run_kepsilon.py + config.yaml         (k-ε RANS turbulent channel)
-├── airfoil/               airfoil_flow.py + config.yaml         (NACA 0012 Re=200)
+├── airfoil/               airfoil_flow.py + config.yaml         (NACA airfoil, AoA via rotation)
+├── cylinder/              cylinder_flow.py + config.yaml        (cylinder cross-flow, Re=40)
 ├── pipe_flow/             pipe_flow.py + pipe_flow.yaml         (3-D Hagen-Poiseuille)
 │                          pipe_flow_unsteady_transfer.py + yaml  (Re + temporal transfer)
-├── ramp/                  ramp.py     +  config.yaml            (2-D compressible Euler, M=3)
+│                          pipe_flow_pulsatile_transfer.py + yaml (3-D pulsatile, time-marching TL)
+│                          predict_pulsatile.py                   (window predictor: plots, GIF, spacetime)
+├── pipe_flow_rheology/    pipe_flow_rheology.py + config.yaml   (Carreau blood, pipe)
+├── AAA/                   AAA_flow.py + config.yaml             (3-D AAA bulge, Newtonian)
+├── AAA_rheology/          AAA_rheology.py + config.yaml         (Carreau blood, AAA bulge)
+├── ramp/                  ramp.py     +  config.yaml            (2-D compressible Euler, M=3, AV + RAR)
+├── sod_shock/             sod_shock.py + config.yaml            (Sod tube, learnable ε + RAR)
+├── predict_steady.py                                            (post-process steady pipe/AAA: WSS, contours, NPZ)
 └── transfer/              burgers_transfer.py + yaml            (Burgers param + temp. TL)
                            heat2d_transfer.py  + yaml            (2-D heat transfer)
 
@@ -733,9 +789,15 @@ docs/
 | 2-D Diffusion Inverse | u_t = α∇²u | MLP [3,64,64,64,1] | Log-param joint optimisation | `examples/inverse/config.yaml` |
 | 2-D Lid-Driven Cavity | Steady N-S, Re=100 | FBPINN + SimpleGate | `LDCSolver`, attention, Re=100 | `examples/LDC/config.yaml` |
 | 2-D RANS k-ε | Turbulent channel | FBPINN | `RANSSolver`, RBA, Re=10000 | `examples/K-Epsilon/config.yaml` |
-| 2-D Compressible Ramp | Steady Euler, M=3 | MLP [2,80,80,80,80,80,4] | Oblique shock θ=10°, ramp geometry | `examples/ramp/config.yaml` |
-| NACA 0012 Airfoil | Steady N-S, Re=200 | MLP [2,128,128,128,3] | Exterior geometry, Cp curve, CL, RAR-D resampling | `examples/airfoil/config.yaml` |
-| 3-D Pipe Flow | Steady 3-D N-S | MLP [3,64,64,64,64,4] | Double-jacfwd Hessian, Pipe geometry | `examples/pipe_flow/pipe_flow.yaml` |
+| 2-D Compressible Ramp | Steady Euler (conservative), M=3 | MLP [2,80,80,80,80,80,4] | Oblique shock θ=10°, artificial viscosity (fixed/learnable), RAR | `examples/ramp/config.yaml` |
+| 1-D Sod Shock Tube | Unsteady Euler (conservative) | MLP [2,80×5,3] | **Learnable ε = softplus(log_av)**, exact Riemann reference, RAR | `examples/sod_shock/config.yaml` |
+| NACA Airfoil | Steady N-S, Re=100 | MLP / GatedMLP [2,128×6,3] | Cambered profiles, AoA via airfoil rotation, surface pressure & Cp | `examples/airfoil/config.yaml` |
+| Cylinder Cross-flow | Steady N-S, Re=40 | MLP [2,128×6,3] | Pure-PINN recipe, Cp(θ) vs inviscid reference, wake pool | `examples/cylinder/config.yaml` |
+| 3-D Pipe Flow | Steady 3-D N-S | MLP / GatedMLP [3,…,4] | Double-jacfwd Hessian, Hagen-Poiseuille exact | `examples/pipe_flow/pipe_flow.yaml` |
+| 3-D AAA Bulge | Steady 3-D N-S | GatedMLP [3,192×5,4] | Cosine² bulge `R(x)`, flow-rate balance check | `examples/AAA/config.yaml` |
+| Carreau Pipe (blood) | Steady Carreau N-S | GatedMLP [3,128×4,4] | Shear-thinning μ(γ̇), 1-D Carreau exact profile, β=16, Cu=λU/R | `examples/pipe_flow_rheology/config.yaml` |
+| Carreau AAA (blood) | Steady Carreau N-S | GatedMLP [3,192×5,4] | Blood rheology in the bulge, apparent-viscosity maps | `examples/AAA_rheology/config.yaml` |
+| 3-D Pulsatile Pipe | Unsteady 3-D N-S | GatedMLP [4,…,4] | **Time-marching transfer** (windowed), per-window ckpts, window restart | `examples/pipe_flow/pipe_flow_pulsatile_transfer.yaml` |
 | 3-D Unsteady Pipe Transfer | u_t = G + ν∇²u | MLP [3,64,64,64,64,1] | Bessel exact solution, Re + temporal TL | `examples/pipe_flow/pipe_flow_unsteady_transfer.yaml` |
 | Burgers Transfer | Burgers | MLP [2,64,64,64,1] | Parameter transfer (ν) + temporal transfer | `examples/transfer/burgers_transfer.yaml` |
 | Heat 2-D Transfer | 2-D heat | MLP [3,64,64,64,1] | Cross-diffusivity transfer + temporal | `examples/transfer/heat2d_transfer.yaml` |
@@ -751,11 +813,14 @@ docs/
 | Heat (2-D unsteady) | u_t = α(u_xx + u_yy) | `Heat2DPDE.residual` | `examples/inverse/`, `examples/transfer/` |
 | Wave (1-D) | u_tt = c²u_xx | `WavePDE.residual` | `examples/wave/` |
 | Helmholtz (2-D) | Δu + k²u = f | `HelmholtzPDE.residual` | `examples/helmholtz/` |
-| Navier-Stokes (2-D steady) | ∇·u=0, u·∇u = -∇p + ν∇²u | `SteadyNSPDE.residual` | `examples/LDC/`, `examples/airfoil/` |
-| Navier-Stokes (3-D steady) | Same + z-momentum | `SteadyNS3DPDE.residual` | `examples/pipe_flow/` |
+| Navier-Stokes (2-D steady) | ∇·u=0, u·∇u = -∇p + ν∇²u | `NavierStokesPDE.residual` | `examples/LDC/`, `examples/airfoil/`, `examples/cylinder/` |
+| Navier-Stokes (3-D steady) | Same + z-momentum | `SteadyNS3DPDE.residual` | `examples/pipe_flow/`, `examples/AAA/` |
+| Navier-Stokes (3-D unsteady) | u_t + (u·∇)u = −∇p + ν∇²u | `UnsteadyNS3DPDE.residual` | `examples/pipe_flow/` (pulsatile) |
+| Carreau N-S (3-D steady) | ∇·[μ*(γ̇)(∇u+∇uᵀ)] stress | `CarreauNS3DPDE.residual` | `examples/pipe_flow_rheology/`, `examples/AAA_rheology/` |
 | Pipe unsteady | u_t = G + ν(u_yy + u_zz) | `PipeUnsteadyPDE.residual` | `examples/pipe_flow/` |
 | RANS k-ε | N-S + k + ε transport | `KEpsilonPDE.residual` | `examples/K-Epsilon/` |
-| Compressible Euler (2-D) | ∂_t U + ∇·F = 0 (steady) | `EulerRampPDE.residual` | `examples/ramp/` |
+| Compressible Euler (2-D steady) | ∂F/∂x + ∂G/∂y = ε∇²U (conservative) | `CompressibleEulerPDE.residual` | `examples/ramp/` |
+| Compressible Euler (1-D unsteady) | ∂U/∂t + ∂F/∂x = ε∂²U/∂x² | `Euler1DUnsteadyPDE.residual` | `examples/sod_shock/` |
 | Exponential Decay | du/dt + λu = 0 | `ExpDecayODE.residual` | `examples/ode/` |
 | Harmonic Oscillator | d²u/dt² + ω²u = 0 | `HarmonicODE.residual` | `examples/ode/` |
 
@@ -767,8 +832,10 @@ docs/
 |---|---|---|
 | `Interval` | 1-D uniform or Sobol interior + boundary points | Burgers, wave, heat (1-D) |
 | `Rectangle` | 2-D interior (LHS / Sobol) + all four boundary edges | Helmholtz, LDC, diffusion inverse |
-| `Airfoil` | NACA 4-digit exterior domain, near-surface strip, farfield arc | `examples/airfoil/` |
-| `Pipe` | 3-D cylindrical interior, lateral wall, circular inlet, circular outlet | `examples/pipe_flow/` |
+| `NACAAirfoil` | NACA 4-digit (symmetric & cambered) exterior domain, SDF-weighted near-surface, AoA via quarter-chord rotation | `examples/airfoil/` |
+| `Cylinder2D` | Circular cylinder exterior cross-flow domain, analytic SDF, surface points | `examples/cylinder/` |
+| `Pipe` | 3-D cylindrical interior, lateral wall, circular inlet, circular outlet | `examples/pipe_flow/`, `examples/pipe_flow_rheology/` |
+| `BulgeGeometry` | Axisymmetric AAA bulge `R(x)` (cosine²): interior, curved wall, inlet, outlet | `examples/AAA/`, `examples/AAA_rheology/` |
 | `Ramp` | Trapezoidal domain above a wedge surface at angle θ | `examples/ramp/` |
 | `Composite` | Boolean union / intersection / difference of any two geometry objects | LDC (cavity minus any obstacle) |
 | `ShapelyGeom` | Arbitrary 2-D polygon backed by Shapely 2.x; rejection-samples interior | Custom geometries |
@@ -829,7 +896,10 @@ Enable RAR-D (`resample_period > 0`) when the solution has sharp gradients or sh
 JAX defaults to float32, which is optimal on all GPUs. Do not enable `jax.config.update("jax_enable_x64", True)` unless you have a specific reason; it halves throughput on CUDA devices.
 
 ### Multi-GPU
-Use `CUDA_VISIBLE_DEVICES=1` to restrict to a specific GPU. Full multi-GPU `pmap` training is not currently implemented; single-device training on the fastest GPU is the recommended approach.
+Use `CUDA_VISIBLE_DEVICES=1` to restrict to a specific GPU. Full multi-GPU sharded training is not currently implemented; single-device training on the fastest GPU is the recommended approach. To use several GPUs, launch one run per device (e.g. a parameter sweep with a different `CUDA_VISIBLE_DEVICES` per process).
+
+### TPU
+Install with `requirements-tpu.txt` (see Installation). On import, underPINN detects the TPU backend and sets `jax_default_matmul_precision = "highest"` automatically — the TPU's default bfloat16 matmuls corrupt second-order PDE residuals (Hessians), so full-float32 matmuls are required for PINN accuracy. Override via the `JAX_DEFAULT_MATMUL_PRECISION` env var.
 
 ### Cosine LR decay
 Always prefer `optax.cosine_decay_schedule` over a fixed learning rate for runs longer than 2 000 epochs. It provides free accuracy improvement at no cost by reducing the LR smoothly toward a small `alpha` value (recommended: `alpha=1e-2`).

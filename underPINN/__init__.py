@@ -2,6 +2,23 @@
 
 from ._version import __version__, version_tag   # calver: "2605", "v2605"
 
+# ── TPU: force full-precision matmuls ─────────────────────────────────────────
+# JAX on TPU runs float32 matmuls at reduced (bfloat16-input) precision on the
+# MXU by default.  PINNs differentiate the network twice (PDE residuals via
+# Hessians), so bf16 matmul noise corrupts the residual and stalls training.
+# "highest" restores true float32 matmuls (slower, but required for accuracy).
+# No effect on CPU/GPU.  Override by setting JAX_DEFAULT_MATMUL_PRECISION.
+import os as _os
+try:
+    import jax as _jax
+    if (_jax.default_backend() == "tpu"
+            and "JAX_DEFAULT_MATMUL_PRECISION" not in _os.environ):
+        _jax.config.update("jax_default_matmul_precision", "highest")
+        print("[underPINN] TPU detected — matmul precision set to 'highest' "
+              "(full float32; needed for accurate PDE residuals).")
+except Exception:                                  # pragma: no cover
+    pass                                           # never block import on this
+
 from .geometry import *
 from .nn import *
 from .pde import *
