@@ -795,7 +795,7 @@ docs/
 | Cylinder Cross-flow | Steady N-S, Re=40 | MLP [2,128×6,3] | Pure-PINN recipe, Cp(θ) vs inviscid reference, wake pool | `examples/cylinder/config.yaml` |
 | 3-D Pipe Flow | Steady 3-D N-S | MLP / GatedMLP [3,…,4] | Double-jacfwd Hessian, Hagen-Poiseuille exact | `examples/pipe_flow/pipe_flow.yaml` |
 | 3-D AAA Bulge | Steady 3-D N-S | GatedMLP [3,192×5,4] | Cosine² bulge `R(x)`, flow-rate balance check | `examples/AAA/config.yaml` |
-| Carreau Pipe (blood) | Steady Carreau N-S | GatedMLP [3,128×4,4] | Shear-thinning μ(γ̇), 1-D Carreau exact profile, β=16, Cu=λU/R | `examples/pipe_flow_rheology/config.yaml` |
+| Carreau Pipe (blood) | Steady Carreau N-S | GatedMLP [3,128×4,4] | Shear-thinning μ(γ̇), 1-D Carreau exact profile, β=16; same domain/Re as Newtonian pipe | `examples/pipe_flow_rheology/config.yaml` |
 | Carreau AAA (blood) | Steady Carreau N-S | GatedMLP [3,192×5,4] | Blood rheology in the bulge, apparent-viscosity maps | `examples/AAA_rheology/config.yaml` |
 | 3-D Pulsatile Pipe | Unsteady 3-D N-S | GatedMLP [4,…,4] | **Time-marching transfer** (windowed), per-window ckpts, window restart | `examples/pipe_flow/pipe_flow_pulsatile_transfer.yaml` |
 | 3-D Unsteady Pipe Transfer | u_t = G + ν∇²u | MLP [3,64,64,64,64,1] | Bessel exact solution, Re + temporal TL | `examples/pipe_flow/pipe_flow_unsteady_transfer.yaml` |

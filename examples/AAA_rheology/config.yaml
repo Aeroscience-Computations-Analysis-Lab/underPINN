@@ -1,11 +1,15 @@
-# ── Steady Carreau (shear-thinning) flow through an axisymmetric AAA ────
+# ── Steady Carreau (shear-thinning) flow through an axisymmetric AAA ─────────
 #
 #   python examples/AAA_rheology/AAA_rheology.py
 #   python -m underPINN run examples/AAA_rheology/config.yaml
 #
-# Same Carreau blood rheology as pipe_flow_rheology, in the bulge geometry.
-#   μ(γ̇) = μ∞ + (μ0 − μ∞)[1 + (λγ̇)²]^((n−1)/2)
-#   Re = ρUR_vessel/μ∞,  β = μ0/μ∞,  Cu = λU/R_vessel
+# Same domain and Reynolds number as the NEWTONIAN AAA case
+# (examples/AAA/config.yaml):  x ∈ [-3.5, 3.5], R_vessel = 0.5, R_AAA = 1.0,
+# x0 = -2.0, L_AAA = 1.5, Re = 40, V_max = 2.0.
+# Only the constitutive law changes — Carreau shear-thinning viscosity:
+#   μ*(γ̇) = 1 + (β − 1)[1 + (Cu γ̇)²]^((n−1)/2)
+#   β = μ0/μ∞ = 16,  n = 0.3568   (blood, Nagargoje et al. 2021, Table II)
+# β = 1 recovers the Newtonian case exactly.
 # ─────────────────────────────────────────────────────────────────────────────
 
 problem: AAA_rheology
@@ -15,36 +19,35 @@ network:
   layers: [3, 192, 192, 192, 192, 192, 4]    # (x, y, z) → (u, v, w, p)
 
 physics:
-  # Carreau / blood properties (paper Table II)
-  rho   : 1060.0     # density               [kg/m³]
-  mu0   : 0.056      # zero-shear viscosity    [Pa·s]
-  mu_inf: 0.0035     # infinite-shear viscosity[Pa·s]
-  lam   : 3.131      # relaxation time         [s]
-  n     : 0.3568     # power-law index
-  # AAA geometry (dimensional, metres)
-  R_vessel  : 0.004    # straight-vessel radius  (d = 8 mm)
-  R_AAA: 0.008    # peak bulge radius (2× vessel)
-  L         : 0.04     # total domain length (10 D)
-  x_lo      : -0.02    # inlet x-coordinate
-  x0        : 0.0      # axial centre of the bulge
-  L_AAA: 0.012    # axial width of the bulge
-  U         : 0.05     # centreline reference velocity [m/s]
+  # Domain + Re — identical to the Newtonian AAA case
+  Re      : 40.0     # Reynolds number (based on μ∞)
+  R_vessel: 0.5      # straight-vessel radius
+  R_AAA   : 1.0      # peak bulge radius
+  L       : 7.0      # total domain length  (x_lo to x_lo + L)
+  x_lo    : -3.5     # inlet x-coordinate → pipe spans x ∈ [-3.5, 3.5]
+  x0      : -2.0     # axial centre of the bulge
+  L_AAA   : 1.5      # full axial width of the bulge region
+  V_max   : 2.0      # inlet centreline velocity (matches Newtonian V_max)
+  # Carreau rheology (blood values from the paper)
+  beta    : 16.0     # viscosity ratio μ0/μ∞   (1 = Newtonian)
+  Cu      : 10.0     # Carreau number (shear-thinning strength)
+  n       : 0.3568   # power-law index
 
 data:
-  n_interior: 60000
-  n_wall    : 12000
-  n_inlet   : 1500
-  n_outlet  : 1500
+  n_interior: 400000
+  n_wall    : 20000
+  n_inlet   : 2000
+  n_outlet  : 2000
 
 training:
-  epochs            : 60000
+  epochs            : 120000
   lr                : 1.0e-3
   lr_alpha          : 0.01
   batch_r           : 2048
-  batch_bc          : 512
-  log_every         : 500
+  batch_bc          : 1024
+  log_every         : 2000
   seed              : 0
-  save_restart_every: 500
+  save_restart_every: 2000
 
 loss:
   w_pde   : 1.0

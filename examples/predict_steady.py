@@ -75,7 +75,18 @@ def _case_setup(cfg) -> dict:
                     radius=lambda x: np.full_like(np.asarray(x, float), R),
                     beta=None, Cu=None, n=None, dim=None)
 
-    if prob == "pipe_flow_rheology":                          # Carreau pipe (non-dim)
+    if prob == "pipe_flow_rheology":                          # Carreau pipe
+        if cfg_get(ph, "beta", default=None) is not None:
+            # New style: same domain/Re as the Newtonian pipe + (β, Cu, n)
+            R    = float(ph.R)
+            L    = float(ph.L)
+            x_lo = float(cfg_get(ph, "x_lo", default=-3.5))
+            return dict(label="Pipe flow (Carreau)", newtonian=False,
+                        Re=float(ph.Re), x_lo=x_lo, x_hi=x_lo + L,
+                        radius=lambda x: np.full_like(np.asarray(x, float), R),
+                        beta=float(ph.beta), Cu=float(ph.Cu), n=float(ph.n),
+                        dim=None)
+        # Legacy style: dimensional blood inputs, trained non-dimensionally
         rho, mu0   = float(ph.rho), float(ph.mu0)
         mu_inf     = float(ph.mu_inf)
         lam, n     = float(ph.lam), float(ph.n)
@@ -99,22 +110,33 @@ def _case_setup(cfg) -> dict:
                     radius=lambda x: np.asarray(geom.radius_at(x), float),
                     beta=None, Cu=None, n=None, dim=None)
 
-    if prob in ("AAA_rheology", "aneurysm_rheology"):         # Carreau bulge (non-dim)
+    if prob in ("AAA_rheology", "aneurysm_rheology"):         # Carreau bulge
+        Rv = float(ph.R_vessel)
+        Ra = float(_get2(ph, "R_AAA", "R_aneurysm"))
+        La = float(_get2(ph, "L_AAA", "L_aneurysm"))
+        if cfg_get(ph, "beta", default=None) is not None:
+            # New style: same domain/Re as the Newtonian AAA + (β, Cu, n)
+            L, x_lo, x0 = float(ph.L), float(ph.x_lo), float(ph.x0)
+            geom = BulgeGeometry(R_vessel=Rv, R_AAA=Ra, L=L,
+                                 x_lo=x_lo, x0=x0, L_AAA=La)
+            return dict(label="AAA (Carreau)", newtonian=False,
+                        Re=float(ph.Re), x_lo=x_lo, x_hi=x_lo + L,
+                        radius=lambda x: np.asarray(geom.radius_at(x), float),
+                        beta=float(ph.beta), Cu=float(ph.Cu), n=float(ph.n),
+                        dim=None)
+        # Legacy style: dimensional blood inputs, trained non-dimensionally
         rho, mu0  = float(ph.rho), float(ph.mu0)
         mu_inf    = float(ph.mu_inf)
         lam, n    = float(ph.lam), float(ph.n)
-        Rvd       = float(ph.R_vessel)
-        Rad       = float(_get2(ph, "R_AAA", "R_aneurysm"))
-        Lad       = float(_get2(ph, "L_AAA", "L_aneurysm"))
         Ld, U     = float(ph.L), float(ph.U)
-        x_lo, x0  = float(ph.x_lo) / Rvd, float(ph.x0) / Rvd
-        geom = BulgeGeometry(R_vessel=1.0, R_AAA=Rad / Rvd, L=Ld / Rvd,
-                             x_lo=x_lo, x0=x0, L_AAA=Lad / Rvd)
+        x_lo, x0  = float(ph.x_lo) / Rv, float(ph.x0) / Rv
+        geom = BulgeGeometry(R_vessel=1.0, R_AAA=Ra / Rv, L=Ld / Rv,
+                             x_lo=x_lo, x0=x0, L_AAA=La / Rv)
         return dict(label="AAA (Carreau)", newtonian=False,
-                    Re=rho * U * Rvd / mu_inf, x_lo=x_lo, x_hi=x_lo + Ld / Rvd,
+                    Re=rho * U * Rv / mu_inf, x_lo=x_lo, x_hi=x_lo + Ld / Rv,
                     radius=lambda x: np.asarray(geom.radius_at(x), float),
-                    beta=mu0 / mu_inf, Cu=lam * U / Rvd, n=n,
-                    dim=dict(mu_inf=mu_inf, U=U, R=Rvd))
+                    beta=mu0 / mu_inf, Cu=lam * U / Rv, n=n,
+                    dim=dict(mu_inf=mu_inf, U=U, R=Rv))
 
     raise ValueError(
         f"Unsupported problem '{prob}'. Expected one of: pipe_flow, "

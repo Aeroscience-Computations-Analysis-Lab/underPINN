@@ -3,10 +3,15 @@
 #   python examples/pipe_flow_rheology/pipe_flow_rheology.py
 #   python -m underPINN run examples/pipe_flow_rheology/config.yaml
 #
-# Carreau model (Nagargoje, Mishra & Gupta, Phys. Fluids 33, 071904 (2021)):
-#   μ(γ̇) = μ∞ + (μ0 − μ∞)[1 + (λγ̇)²]^((n−1)/2)
-# Non-dimensional groups derived from the dimensional inputs below:
-#   Re = ρUR/μ∞,   β = μ0/μ∞,   Cu = λU/R
+# Same domain and Reynolds number as the NEWTONIAN pipe case
+# (examples/pipe_flow/pipe_flow.yaml):  x ∈ [-3.5, 3.5], R = 0.5 (D = 1), Re = 40.
+# Only the constitutive law changes — Carreau shear-thinning viscosity
+# (Nagargoje, Mishra & Gupta, Phys. Fluids 33, 071904 (2021)):
+#   μ*(γ̇) = 1 + (β − 1)[1 + (Cu γ̇)²]^((n−1)/2)
+#   β  = μ0/μ∞ = 0.056/0.0035 = 16   (blood, Table II)
+#   n  = 0.3568                       (blood, Table II)
+#   Cu = Carreau number (non-dim relaxation time λU/R)
+# β = 1 recovers the Newtonian case exactly.
 # ─────────────────────────────────────────────────────────────────────────────
 
 problem: pipe_flow_rheology
@@ -16,33 +21,32 @@ network:
   layers: [3, 128, 128, 128, 128, 4]      # (x, y, z) → (u, v, w, p)
 
 physics:
-  # Carreau / blood properties (paper Table II)
-  rho   : 1060.0     # density            [kg/m³]
-  mu0   : 0.056      # zero-shear viscosity   [Pa·s]
-  mu_inf: 0.0035     # infinite-shear viscosity [Pa·s]
-  lam   : 3.131      # relaxation time      [s]
-  n     : 0.3568     # power-law index
-  # Pipe geometry and reference velocity
-  R     : 0.004      # pipe radius (d = 8 mm)  [m]
-  L     : 0.04       # pipe length (≈ 10 D)    [m]
-  U     : 0.05       # centreline reference velocity [m/s]
-  x_lo  : 0.0        # inlet x-coordinate [m]
+  # Domain + Re — identical to the Newtonian pipe case
+  Re   : 40.0      # Reynolds number (based on μ∞)
+  R    : 0.5       # pipe radius — diameter D = 1.0
+  L    : 7.0       # total length  (x_lo to x_lo + L)
+  x_lo : -3.5      # inlet x-coordinate → pipe spans x ∈ [-3.5, 3.5]
+  U_max: 2.0       # inlet centreline velocity (matches Newtonian U_max)
+  # Carreau rheology (blood values from the paper)
+  beta : 16.0      # viscosity ratio μ0/μ∞   (1 = Newtonian)
+  Cu   : 10.0      # Carreau number (shear-thinning strength)
+  n    : 0.3568    # power-law index
 
 data:
-  n_interior: 400000
+  n_interior: 100000
   n_wall    : 15000
-  n_inlet   : 3000
-  n_outlet  : 3000
+  n_inlet   : 2000
+  n_outlet  : 2000
 
 training:
-  epochs            : 200000
+  epochs            : 70000
   lr                : 1.0e-3
   lr_alpha          : 0.01
   batch_r           : 2048
-  batch_bc          : 512
-  log_every         : 2000
+  batch_bc          : 1024
+  log_every         : 500
   seed              : 0
-  save_restart_every: 2000
+  save_restart_every: 500
 
 loss:
   w_pde   : 1.0

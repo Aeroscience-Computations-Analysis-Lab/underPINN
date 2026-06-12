@@ -14,8 +14,12 @@ axisymmetric **bulge / AAA** geometry:
 
     μ(γ̇) = μ∞ + (μ0 − μ∞)[1 + (λγ̇)²]^((n−1)/2)
 
-Non-dimensional groups (length R_vessel, velocity U, viscosity μ∞):
-    Re = ρ U R_vessel / μ∞,   β = μ0/μ∞,   Cu = λ U / R_vessel
+The domain and Reynolds number are IDENTICAL to the Newtonian AAA case
+(``examples/AAA/config.yaml``): x ∈ [-3.5, 3.5], R_vessel = 0.5, R_AAA = 1.0,
+Re = 40, V_max = 2.0 — only the constitutive law differs:
+
+    μ*(γ̇) = 1 + (β − 1)[1 + (Cu γ̇)²]^((n−1)/2)
+    blood (Table II):  β = μ0/μ∞ = 16,  n = 0.3568;  β = 1 ⇒ Newtonian.
 
 A fully-developed Carreau profile is imposed at the inlet (straight vessel),
 no-slip on the curved wall, p = 0 at the outlet.  There is no analytic solution
@@ -56,31 +60,21 @@ def run_AAA_rheology(cfg) -> dict:
                if out else "outputs/AAA_rheology")
     os.makedirs(out_dir, exist_ok=True)
 
-    # ── Dimensional (paper Table II) → non-dimensional groups ─────────────────
-    rho        = float(cfg_get(ph, "rho",    default=1060.0))
-    mu0        = float(cfg_get(ph, "mu0",    default=0.056))
-    mu_inf     = float(cfg_get(ph, "mu_inf", default=0.0035))
-    lam        = float(cfg_get(ph, "lam",    default=3.131))
-    n          = float(cfg_get(ph, "n",      default=0.3568))
-    R_vessel   = float(cfg_get(ph, "R_vessel",   default=0.004))
-    R_AAA = float(cfg_get(ph, "R_AAA", default=0.008))
-    L_phys     = float(cfg_get(ph, "L",          default=0.04))
-    x_lo_phys  = float(cfg_get(ph, "x_lo",       default=-0.02))
-    x0_phys    = float(cfg_get(ph, "x0",         default=0.0))
-    La_phys    = float(cfg_get(ph, "L_AAA", default=0.012))
-    U          = float(cfg_get(ph, "U",          default=0.05))
+    # ── Physics: SAME domain and Re as the Newtonian AAA case ─────────────────
+    # (examples/AAA/config.yaml) — only the constitutive law differs.
+    Re    = float(cfg_get(ph, "Re",       default=40.0))
+    Rv    = float(cfg_get(ph, "R_vessel", default=0.5))
+    Ra    = float(cfg_get(ph, "R_AAA",    default=1.0))
+    L     = float(cfg_get(ph, "L",        default=7.0))
+    x_lo  = float(cfg_get(ph, "x_lo",     default=-3.5))
+    x0    = float(cfg_get(ph, "x0",       default=-2.0))
+    La    = float(cfg_get(ph, "L_AAA",    default=1.5))
+    V_max = float(cfg_get(ph, "V_max",    default=2.0))
+    # Carreau rheology (blood: β=16, n=0.3568 from the paper Table II)
+    beta  = float(cfg_get(ph, "beta",     default=16.0))
+    Cu    = float(cfg_get(ph, "Cu",       default=10.0))
+    n     = float(cfg_get(ph, "n",        default=0.3568))
 
-    Re   = rho * U * R_vessel / mu_inf
-    beta = mu0 / mu_inf
-    Cu   = lam * U / R_vessel
-
-    # Non-dimensionalise lengths by R_vessel
-    Rv   = 1.0
-    Ra   = R_AAA / R_vessel
-    L    = L_phys     / R_vessel
-    x_lo = x_lo_phys  / R_vessel
-    x0   = x0_phys    / R_vessel
-    La   = La_phys    / R_vessel
     x_hi = x_lo + L
 
     W_PDE    = float(cfg_get(lw, "w_pde",    default=1.0))
@@ -103,14 +97,18 @@ def run_AAA_rheology(cfg) -> dict:
     n_outlet = int(cfg_get(d, "n_outlet",   default=1500))
 
     print("Carreau (shear-thinning) AAA flow")
-    print(f"  Non-dim:  Re={Re:.2f},  β={beta:.2f},  Cu={Cu:.2f},  n={n}")
-    print(f"  Bulge (non-dim):  R_vessel={Rv}, R_AAA={Ra:.2f}, "
-          f"x ∈ [{x_lo:.2f}, {x_hi:.2f}], x0={x0:.2f}, L_AAA={La:.2f}")
+    print(f"  Re={Re},  R_vessel={Rv},  R_AAA={Ra},  x ∈ [{x_lo}, {x_hi}], "
+          f"x0={x0}, L_AAA={La}, V_max={V_max}   (same domain/Re as Newtonian AAA)")
+    print(f"  Carreau:  β={beta},  Cu={Cu},  n={n}")
 
-    # ── Carreau developed inlet profile (centreline = 1) ──────────────────────
-    r_ref, u_ref, _ = carreau_developed_profile(beta, Cu, n, u_center=1.0)
+    # ── Carreau developed inlet profile ────────────────────────────────────────
+    # 1-D solver works in unit coordinates (r*∈[0,1], u*∈[0,1]); the PDE's
+    # Carreau term uses the simulation shear rate γ̇ = (V_max/Rv)·(du*/dr*),
+    # so the unit-profile solver needs Cu_eff = Cu·V_max/Rv.
+    Cu_eff = Cu * V_max / Rv
+    r_ref, u_ref, _ = carreau_developed_profile(beta, Cu_eff, n, u_center=1.0)
 
-    # ── Geometry + collocation (non-dim) ──────────────────────────────────────
+    # ── Geometry + collocation (same units as the Newtonian case) ─────────────
     geom = BulgeGeometry(R_vessel=Rv, R_AAA=Ra, L=L,
                          x_lo=x_lo, x0=x0, L_AAA=La)
     xyz_r   = jnp.array(geom.sample_interior(n_int,  seed=seed))
@@ -119,7 +117,7 @@ def run_AAA_rheology(cfg) -> dict:
     xyz_out = jnp.array(geom.sample_outlet(  n_outlet, seed=seed + 3))
 
     r_in   = np.sqrt(np.asarray(xyz_in[:, 1]) ** 2 + np.asarray(xyz_in[:, 2]) ** 2)
-    u_in_t = jnp.array(np.interp(r_in, r_ref, u_ref).astype(np.float32))
+    u_in_t = jnp.array((V_max * np.interp(r_in / Rv, r_ref, u_ref)).astype(np.float32))
 
     # ── Model + PDE ───────────────────────────────────────────────────────────
     net_type = str(cfg_get(cfg.network, "type", default="gated_mlp")).lower()
@@ -218,10 +216,10 @@ def run_AAA_rheology(cfg) -> dict:
     u_cs  = np.where(YY ** 2 + ZZ ** 2 > R_x0 ** 2, np.nan, u_cs)
     figc, axc = plt.subplots(figsize=(5, 4))
     cf = axc.contourf(yz, yz, u_cs, levels=50, cmap="jet")
-    plt.colorbar(cf, ax=axc, label="u / U")
+    plt.colorbar(cf, ax=axc, label="u")
     axc.set_aspect("equal")
-    axc.set_xlabel("y / R_v")
-    axc.set_ylabel("z / R_v")
+    axc.set_xlabel("y")
+    axc.set_ylabel("z")
     axc.set_title(f"u at bulge centre x={x0:.1f}")
     figc.tight_layout()
     figc.savefig(os.path.join(out_dir, "AAA_crosssection.png"),
@@ -237,14 +235,14 @@ def run_AAA_rheology(cfg) -> dict:
     R_ax  = geom.radius_at(x_ax)
     figa, ax1 = plt.subplots(figsize=(9, 4))
     ax1.plot(x_ax, u_ctr, "b-", lw=2.0, label="u centreline / U")
-    ax1.set_xlabel("x / R_v")
-    ax1.set_ylabel("u / U", color="b")
+    ax1.set_xlabel("x")
+    ax1.set_ylabel("u (centreline)", color="b")
     ax1.tick_params(axis="y", labelcolor="b")
     ax2 = ax1.twinx()
     ax2.plot(x_ax, R_ax, "r--", lw=1.5, label="R(x)")
     ax2.fill_between(x_ax,  R_ax,  Rv, alpha=0.12, color="r")
     ax2.fill_between(x_ax, -R_ax, -Rv, alpha=0.12, color="r")
-    ax2.set_ylabel("R(x) / R_v", color="r")
+    ax2.set_ylabel("R(x)", color="r")
     ax2.tick_params(axis="y", labelcolor="r")
     ax1.set_title(f"Carreau AAA — centreline velocity  (Re={Re:.0f}, Cu={Cu:.1f})")
     ax1.grid(alpha=0.3)
@@ -260,8 +258,8 @@ def run_AAA_rheology(cfg) -> dict:
     cfm = axm.contourf(yz, yz, mu_cs, levels=50, cmap="viridis")
     plt.colorbar(cfm, ax=axm, label="μ* = μ/μ∞")
     axm.set_aspect("equal")
-    axm.set_xlabel("y / R_v")
-    axm.set_ylabel("z / R_v")
+    axm.set_xlabel("y")
+    axm.set_ylabel("z")
     axm.set_title(f"Apparent viscosity at x={x0:.1f}")
     figm.tight_layout()
     figm.savefig(os.path.join(out_dir, "AAA_viscosity.png"),
@@ -292,9 +290,9 @@ def run_AAA_rheology(cfg) -> dict:
     save_checkpoint(params, out_dir, metadata={
         "problem": "AAA_rheology",
         "network": {"type": net_type, "layers": layers},
-        "physics": {"rho": rho, "mu0": mu0, "mu_inf": mu_inf, "lam": lam, "n": n,
-                    "R_vessel": R_vessel, "R_AAA": R_AAA, "U": U,
-                    "Re": Re, "beta": beta, "Cu": Cu},
+        "physics": {"Re": Re, "R_vessel": Rv, "R_AAA": Ra, "L": L,
+                    "x_lo": x_lo, "x0": x0, "L_AAA": La, "V_max": V_max,
+                    "beta": beta, "Cu": Cu, "n": n},
         "results": {"flow_balance": flow_balance, "n_epochs": len(loss_hist)},
     })
     print(f"\nOutputs saved to: {out_dir}/")
