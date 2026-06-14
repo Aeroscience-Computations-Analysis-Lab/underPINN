@@ -27,7 +27,10 @@ physics:
 # ── Time-marching transfer learning ───────────────────────────────────────────
 time_marching:
   T_total          : 4.0    # integrate to long time  (= 4 pulse cycles)
-  dT               : 0.1    # window length  →  n_windows = T_total / dT = 8
+  dT               : 0.1    # length of each window
+  stride           : 0.05   # spacing between window starts (= dT → non-overlapping;
+                            # < dT → OVERLAPPING; e.g. dT=0.1, stride=0.05 gives
+                            # [0,0.1], [0.05,0.15], [0.1,0.2], … with 50% overlap)
   n_first_epochs   : 200000  # epochs for window 0  (cold start)
   n_warm_epochs    : 100000   # epochs per subsequent window  (warm start → fast)
   n_cold_epochs    : 40000  # epochs per window for the no-transfer baseline

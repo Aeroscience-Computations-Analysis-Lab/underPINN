@@ -547,6 +547,7 @@ class TestExamplePipeFlowPulsatileTransfer:
             {
                 "time_marching.T_total": 1.0,
                 "time_marching.dT": 0.5,            # → 2 windows
+                "time_marching.stride": 0.5,        # non-overlapping for the test
                 "time_marching.n_first_epochs": 3,
                 "time_marching.n_warm_epochs": 3,
                 "time_marching.n_cold_epochs": 3,
@@ -575,3 +576,62 @@ class TestExamplePipeFlowPulsatileTransfer:
         result = mod.run_pipe_flow_pulsatile_transfer(cfg)
         assert "transfer_window_final" in result
         assert "cold_window_final" in result
+
+
+# ---------------------------------------------------------------------------
+# 16. AAA + pipe-rheology + AAA-rheology pulsatile cases (same time-marching
+#     framework, but using the AAA bulge geometry and/or Carreau rheology).
+# ---------------------------------------------------------------------------
+
+_PULS_SMALL = {
+    "time_marching.T_total": 1.0,
+    "time_marching.dT": 0.5,                  # → 2 windows
+    "time_marching.n_first_epochs": 3,
+    "time_marching.n_warm_epochs": 3,
+    "time_marching.n_cold_epochs": 3,
+    "time_marching.compare_no_transfer": False,   # keep tests quick
+    "data.n_interior": 80,
+    "data.n_wall": 20,
+    "data.n_inlet": 20,
+    "data.n_outlet": 20,
+    "data.n_ic": 20,
+    "data.batch_r": 32,
+    "data.batch_bc": 8,
+}
+
+
+class TestExampleAAAPulsatileTransfer:
+    def test_runs_and_two_windows(self, tmp_path):
+        mod = _load_module("aaa_puls", "AAA/AAA_pulsatile_transfer.py")
+        cfg = _cfg("AAA/AAA_pulsatile_transfer.yaml", _PULS_SMALL, tmp_path)
+        result = mod.run_AAA_pulsatile_transfer(cfg)
+        assert "loss_hist" in result
+        assert _has_nonempty_loss(result)
+        assert result["n_windows"] == 2
+
+
+class TestExamplePipeFlowRheologyPulsatile:
+    def test_runs_and_two_windows(self, tmp_path):
+        mod = _load_module(
+            "pipe_rheo_puls",
+            "pipe_flow_rheology/pipe_flow_rheology_pulsatile.py")
+        cfg = _cfg(
+            "pipe_flow_rheology/pipe_flow_rheology_pulsatile.yaml",
+            _PULS_SMALL, tmp_path)
+        result = mod.run_pipe_flow_rheology_pulsatile(cfg)
+        assert "loss_hist" in result
+        assert _has_nonempty_loss(result)
+        assert result["n_windows"] == 2
+
+
+class TestExampleAAARheologyPulsatile:
+    def test_runs_and_two_windows(self, tmp_path):
+        mod = _load_module(
+            "aaa_rheo_puls", "AAA_rheology/AAA_rheology_pulsatile.py")
+        cfg = _cfg(
+            "AAA_rheology/AAA_rheology_pulsatile.yaml",
+            _PULS_SMALL, tmp_path)
+        result = mod.run_AAA_rheology_pulsatile(cfg)
+        assert "loss_hist" in result
+        assert _has_nonempty_loss(result)
+        assert result["n_windows"] == 2

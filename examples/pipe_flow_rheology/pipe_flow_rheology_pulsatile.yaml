@@ -1,0 +1,61 @@
+problem: pipe_flow_rheology_pulsatile
+# Run via:
+#   python examples/pipe_flow_rheology/pipe_flow_rheology_pulsatile.py
+#   python -m underPINN run examples/pipe_flow_rheology/pipe_flow_rheology_pulsatile.yaml
+#
+# Same domain/Re as the steady Carreau pipe (examples/pipe_flow_rheology/config.yaml).
+# Pulsatile inlet uses the developed Carreau radial profile modulated in time:
+#   u_inlet(r,t) = (V_max + V_amp·sin(2πt/T_period)) · u_carr(r/R)
+
+network:
+  type  : gated_mlp
+  layers: [4, 128, 128, 128, 128, 4]   # (x, y, z, t) → (u, v, w, p)
+
+physics:
+  Re      : 40.0
+  R       : 0.5
+  L       : 7.0
+  x_lo    : -3.5
+  V_max   : 2.0
+  V_amp   : 1.0
+  T_period: 1.0
+  # Carreau rheology — blood values (Nagargoje et al. 2021, Table II):
+  #   λ = 3.131 s, n = 0.3568, μ0/μ∞ = 16
+  # Diameter-based non-dim:  D = 2R = 1.0,  U_mean = V_max/2 = 1.0
+  #   Re = ρ U_mean D / μ∞ = 40,  Cu = λ U_mean / D = 3.131
+  beta    : 16.0       # μ0/μ∞
+  Cu      : 3.131      # = λ U_mean / D
+  n       : 0.3568
+
+time_marching:
+  T_total            : 4.0
+  dT                 : 0.5
+  stride             : 0.5
+  n_first_epochs     : 12000
+  n_warm_epochs      : 4000
+  n_cold_epochs      : 12000
+  compare_no_transfer: true
+  restart            : true
+  first_lr           : 1.0e-3
+  warm_lr            : 5.0e-4
+  cold_lr            : 1.0e-3
+  lr_alpha           : 0.01
+
+data:
+  n_interior: 30000
+  n_wall    : 6000
+  n_inlet   : 1200
+  n_outlet  : 1200
+  n_ic      : 2500
+  batch_r   : 2048
+  batch_bc  : 512
+
+loss:
+  w_pde   : 1.0
+  w_wall  : 100.0
+  w_inlet : 50.0
+  w_outlet: 20.0
+  w_ic    : 100.0
+
+output:
+  dir: outputs/pipe_flow_rheology_pulsatile

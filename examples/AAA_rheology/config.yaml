@@ -28,9 +28,14 @@ physics:
   x0      : -2.0     # axial centre of the bulge
   L_AAA   : 1.5      # full axial width of the bulge region
   V_max   : 2.0      # inlet centreline velocity (matches Newtonian V_max)
-  # Carreau rheology (blood values from the paper)
+  # Carreau rheology (Nagargoje, Mishra & Gupta 2021, Table II — blood):
+  #   λ = 3.131 s, n = 0.3568, μ0/μ∞ = 16
+  # Non-dim groups in this sim are diameter/mean-velocity based:
+  #   D = 2·R_vessel = 1.0,  U_mean = V_max/2 = 1.0  (parabolic)
+  #   Re = ρ U_mean D / μ∞ = 40
+  #   Cu = λ U_mean / D = 3.131
   beta    : 16.0     # viscosity ratio μ0/μ∞   (1 = Newtonian)
-  Cu      : 10.0     # Carreau number (shear-thinning strength)
+  Cu      : 3.131    # = λ·U_mean/D
   n       : 0.3568   # power-law index
 
 data:

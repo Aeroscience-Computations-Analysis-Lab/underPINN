@@ -2,8 +2,11 @@
 
 The time-marching run saves one checkpoint per window under
 ``<out_dir>/windows/`` plus an index ``<out_dir>/windows_index.json``.  Each
-window k owns absolute time t ∈ [k·dT, (k+1)·dT] and the network takes the
-**local** time τ = t − k·dT as its 4th input.  This module hides that mapping.
+window k starts at absolute time ``k·stride`` and covers a span of length
+``dT`` (``stride == dT`` ⇒ non-overlapping, ``stride < dT`` ⇒ overlapping).
+The network takes the **local** time ``τ = t − k·stride`` as its 4th input.
+For overlapping windows multiple windows cover a given t — this module picks
+the latest window whose start ≤ t (its weights are the freshest).
 
 Usage (as a library)
 --------------------
@@ -43,7 +46,7 @@ class PulsatilePredictor:
         self.win_dir   = os.path.join(out_dir, "windows")
         index_path     = os.path.join(out_dir, "windows_index.json")
 
-        net = dT = n_windows = T_total = None
+        net = dT = stride = n_windows = T_total = None
         physics = {}
 
         # Preferred: the index file written by training.
@@ -52,8 +55,9 @@ class PulsatilePredictor:
                 idx = json.load(f)
             net       = idx["network"]
             dT        = float(idx["dT"])
+            stride    = float(idx.get("stride", dT))    # legacy runs → stride=dT
             n_windows = int(idx["n_windows"])
-            T_total   = float(idx.get("T_total", dT * n_windows))
+            T_total   = float(idx.get("T_total", (n_windows - 1) * stride + dT))
             physics   = idx.get("physics", {})
         else:
             # Fallback: reconstruct from any per-window metadata sidecar.
@@ -68,13 +72,16 @@ class PulsatilePredictor:
             net       = meta["network"]
             tm        = meta.get("time_marching", {})
             dT        = float(tm["dT"])
+            stride    = float(tm.get("stride", dT))     # legacy runs → stride=dT
             n_windows = int(tm["n_windows"])
-            T_total   = float(tm.get("T_total", dT * n_windows))
+            T_total   = float(tm.get("T_total", (n_windows - 1) * stride + dT))
             physics   = meta.get("physics", {})
             print(f"  [predict] windows_index.json missing — reconstructed from "
-                  f"per-window metadata (dT={dT}, n_windows={n_windows}).")
+                  f"per-window metadata (dT={dT}, stride={stride}, "
+                  f"n_windows={n_windows}).")
 
         self.dT        = dT
+        self.stride    = stride
         self.T_total   = T_total
         self.n_windows = n_windows
         self.physics   = physics or {}
@@ -110,13 +117,14 @@ class PulsatilePredictor:
         return None
 
     def _window_for(self, t_abs: float) -> int:
-        k = int(t_abs // self.dT)
+        # Latest window whose start ≤ t_abs (overlapping → freshest weights win)
+        k = int(t_abs // self.stride)
         k = max(0, min(k, self.n_windows - 1))
         if k not in self.available:
             raise FileNotFoundError(
                 f"t={t_abs} maps to window {k}, but its checkpoint is missing. "
                 f"Available windows: {self.available[0]}–{self.available[-1]} "
-                f"(t up to {(self.available[-1] + 1) * self.dT:.3f})."
+                f"(t up to {self.available[-1] * self.stride + self.dT:.3f})."
             )
         return k
 
@@ -130,7 +138,7 @@ class PulsatilePredictor:
         """(u, v, w, p) at absolute time *t_abs* for spatial points xyz (N, 3)."""
         xyz = np.asarray(xyz, dtype=np.float32).reshape(-1, 3)
         k   = self._window_for(t_abs)
-        tau = float(t_abs - k * self.dT)
+        tau = float(t_abs - k * self.stride)
         xyzt = jnp.concatenate(
             [jnp.asarray(xyz), jnp.full((xyz.shape[0], 1), tau, dtype=jnp.float32)],
             axis=1)
@@ -143,7 +151,7 @@ class PulsatilePredictor:
     @property
     def t_max(self) -> float:
         """Largest absolute time covered by the available checkpoints."""
-        return (self.available[-1] + 1) * self.dT
+        return self.available[-1] * self.stride + self.dT
 
     def save_plots(self, t_field: float | None = None) -> list[str]:
         """Save figures (PNG) reconstructed from the window checkpoints.
@@ -175,7 +183,7 @@ class PulsatilePredictor:
         ax.plot(ts, peak, "k--", lw=1.5, label="Inlet peak forcing")
         ax.plot(ts, uc, "b-", lw=1.8, label=f"PINN centreline u @ x={x_mid:.1f}")
         for k in self.available[1:]:
-            ax.axvline(k * self.dT, color="grey", lw=0.5, ls=":", alpha=0.5)
+            ax.axvline(k * self.stride, color="grey", lw=0.5, ls=":", alpha=0.5)
         ax.set_xlabel("t")
         ax.set_ylabel("u (centreline)")
         ax.set_title(f"Pulsatile pipe — centreline velocity  (Re={Re})")
@@ -389,7 +397,7 @@ if __name__ == "__main__":
     if args.t is not None:
         uvwp = pred.predict(args.t, np.array([[args.x, args.y, args.z]]))[0]
         k = pred._window_for(args.t)
-        print(f"t={args.t}  (window {k}, τ={args.t - k*pred.dT:.4f})  "
+        print(f"t={args.t}  (window {k}, τ={args.t - k*pred.stride:.4f})  "
               f"at (x,y,z)=({args.x},{args.y},{args.z})")
         print(f"  u={uvwp[0]:+.5f}  v={uvwp[1]:+.5f}  w={uvwp[2]:+.5f}  p={uvwp[3]:+.5f}")
         did_something = True

@@ -51,11 +51,12 @@ from underPINN.geometry.aaa import BulgeGeometry
 
 
 def _get2(ns, key_new, key_old, default=None):
-    """Read a config key by its current name, falling back to the legacy one."""
+    """Read a config key by its current name, falling back to the legacy one,
+    then to *default* if neither is present."""
     val = cfg_get(ns, key_new, default=None)
     if val is None:
-        val = cfg_get(ns, key_old, default=default)
-    return val
+        val = cfg_get(ns, key_old, default=None)
+    return default if val is None else val
 
 
 # ---------------------------------------------------------------------------
@@ -76,22 +77,30 @@ def _case_setup(cfg) -> dict:
                     beta=None, Cu=None, n=None, dim=None)
 
     if prob == "pipe_flow_rheology":                          # Carreau pipe
-        if cfg_get(ph, "beta", default=None) is not None:
-            # New style: same domain/Re as the Newtonian pipe + (β, Cu, n)
-            R    = float(ph.R)
-            L    = float(ph.L)
+        if cfg_get(ph, "Re", default=None) is not None:
+            # New style: same domain/Re as the Newtonian pipe + (β, Cu, n).
+            # Defaults make this work even on a partial config.
+            R    = float(cfg_get(ph, "R",    default=0.5))
+            L    = float(cfg_get(ph, "L",    default=7.0))
             x_lo = float(cfg_get(ph, "x_lo", default=-3.5))
             return dict(label="Pipe flow (Carreau)", newtonian=False,
                         Re=float(ph.Re), x_lo=x_lo, x_hi=x_lo + L,
                         radius=lambda x: np.full_like(np.asarray(x, float), R),
-                        beta=float(ph.beta), Cu=float(ph.Cu), n=float(ph.n),
+                        beta=float(cfg_get(ph, "beta", default=16.0)),
+                        Cu  =float(cfg_get(ph, "Cu",   default=10.0)),
+                        n   =float(cfg_get(ph, "n",    default=0.3568)),
                         dim=None)
-        # Legacy style: dimensional blood inputs, trained non-dimensionally
-        rho, mu0   = float(ph.rho), float(ph.mu0)
-        mu_inf     = float(ph.mu_inf)
-        lam, n     = float(ph.lam), float(ph.n)
-        Rd, Ld, U  = float(ph.R), float(ph.L), float(ph.U)
-        x_lo       = float(cfg_get(ph, "x_lo", default=0.0)) / Rd
+        # Legacy style: dimensional blood inputs, trained non-dimensionally.
+        # Every key is read via cfg_get so partial configs still resolve.
+        rho    = float(cfg_get(ph, "rho",    default=1060.0))
+        mu0    = float(cfg_get(ph, "mu0",    default=0.056))
+        mu_inf = float(cfg_get(ph, "mu_inf", default=0.0035))
+        lam    = float(cfg_get(ph, "lam",    default=3.131))
+        n      = float(cfg_get(ph, "n",      default=0.3568))
+        Rd     = float(cfg_get(ph, "R",      default=0.004))
+        Ld     = float(cfg_get(ph, "L",      default=0.04))
+        U      = float(cfg_get(ph, "U",      default=0.05))
+        x_lo   = float(cfg_get(ph, "x_lo",   default=0.0)) / Rd
         return dict(label="Pipe flow (Carreau)", newtonian=False,
                     Re=rho * U * Rd / mu_inf, x_lo=x_lo, x_hi=x_lo + Ld / Rd,
                     radius=lambda x: np.full_like(np.asarray(x, float), 1.0),
@@ -99,10 +108,12 @@ def _case_setup(cfg) -> dict:
                     dim=dict(mu_inf=mu_inf, U=U, R=Rd))
 
     if prob in ("AAA_flow", "aneurysm_flow"):                 # Newtonian bulge
-        Rv = float(ph.R_vessel)
-        Ra = float(_get2(ph, "R_AAA", "R_aneurysm"))
-        La = float(_get2(ph, "L_AAA", "L_aneurysm"))
-        L, x_lo, x0 = float(ph.L), float(ph.x_lo), float(ph.x0)
+        Rv   = float(cfg_get(ph, "R_vessel", default=0.5))
+        Ra   = float(_get2(ph, "R_AAA", "R_aneurysm", default=1.0))
+        La   = float(_get2(ph, "L_AAA", "L_aneurysm", default=1.5))
+        L    = float(cfg_get(ph, "L",    default=7.0))
+        x_lo = float(cfg_get(ph, "x_lo", default=-3.5))
+        x0   = float(cfg_get(ph, "x0",   default=-2.0))
         geom = BulgeGeometry(R_vessel=Rv, R_AAA=Ra, L=L,
                              x_lo=x_lo, x0=x0, L_AAA=La)
         return dict(label="AAA (Newtonian)", newtonian=True,
@@ -111,25 +122,34 @@ def _case_setup(cfg) -> dict:
                     beta=None, Cu=None, n=None, dim=None)
 
     if prob in ("AAA_rheology", "aneurysm_rheology"):         # Carreau bulge
-        Rv = float(ph.R_vessel)
-        Ra = float(_get2(ph, "R_AAA", "R_aneurysm"))
-        La = float(_get2(ph, "L_AAA", "L_aneurysm"))
-        if cfg_get(ph, "beta", default=None) is not None:
-            # New style: same domain/Re as the Newtonian AAA + (β, Cu, n)
-            L, x_lo, x0 = float(ph.L), float(ph.x_lo), float(ph.x0)
+        Rv = float(cfg_get(ph, "R_vessel", default=0.5))
+        Ra = float(_get2(ph, "R_AAA", "R_aneurysm", default=1.0))
+        La = float(_get2(ph, "L_AAA", "L_aneurysm", default=1.5))
+        if cfg_get(ph, "Re", default=None) is not None:
+            # New style: same domain/Re as the Newtonian AAA + (β, Cu, n).
+            # Defaults make this work even on a partial config.
+            L    = float(cfg_get(ph, "L",    default=7.0))
+            x_lo = float(cfg_get(ph, "x_lo", default=-3.5))
+            x0   = float(cfg_get(ph, "x0",   default=-2.0))
             geom = BulgeGeometry(R_vessel=Rv, R_AAA=Ra, L=L,
                                  x_lo=x_lo, x0=x0, L_AAA=La)
             return dict(label="AAA (Carreau)", newtonian=False,
                         Re=float(ph.Re), x_lo=x_lo, x_hi=x_lo + L,
                         radius=lambda x: np.asarray(geom.radius_at(x), float),
-                        beta=float(ph.beta), Cu=float(ph.Cu), n=float(ph.n),
+                        beta=float(cfg_get(ph, "beta", default=16.0)),
+                        Cu  =float(cfg_get(ph, "Cu",   default=10.0)),
+                        n   =float(cfg_get(ph, "n",    default=0.3568)),
                         dim=None)
-        # Legacy style: dimensional blood inputs, trained non-dimensionally
-        rho, mu0  = float(ph.rho), float(ph.mu0)
-        mu_inf    = float(ph.mu_inf)
-        lam, n    = float(ph.lam), float(ph.n)
-        Ld, U     = float(ph.L), float(ph.U)
-        x_lo, x0  = float(ph.x_lo) / Rv, float(ph.x0) / Rv
+        # Legacy style: dimensional blood inputs, trained non-dimensionally.
+        rho    = float(cfg_get(ph, "rho",    default=1060.0))
+        mu0    = float(cfg_get(ph, "mu0",    default=0.056))
+        mu_inf = float(cfg_get(ph, "mu_inf", default=0.0035))
+        lam    = float(cfg_get(ph, "lam",    default=3.131))
+        n      = float(cfg_get(ph, "n",      default=0.3568))
+        Ld     = float(cfg_get(ph, "L",      default=0.04))
+        U      = float(cfg_get(ph, "U",      default=0.05))
+        x_lo   = float(cfg_get(ph, "x_lo",   default=-0.02)) / Rv
+        x0     = float(cfg_get(ph, "x0",     default=0.0))   / Rv
         geom = BulgeGeometry(R_vessel=1.0, R_AAA=Ra / Rv, L=Ld / Rv,
                              x_lo=x_lo, x0=x0, L_AAA=La / Rv)
         return dict(label="AAA (Carreau)", newtonian=False,

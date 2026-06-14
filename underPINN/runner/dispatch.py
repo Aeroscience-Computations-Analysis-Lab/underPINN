@@ -63,6 +63,18 @@ _REGISTRY: dict[str, tuple[str, str]] = {
         "examples/pipe_flow/pipe_flow_pulsatile_transfer.py",
         "run_pipe_flow_pulsatile_transfer",
     ),
+    "AAA_pulsatile_transfer": (
+        "examples/AAA/AAA_pulsatile_transfer.py",
+        "run_AAA_pulsatile_transfer",
+    ),
+    "pipe_flow_rheology_pulsatile": (
+        "examples/pipe_flow_rheology/pipe_flow_rheology_pulsatile.py",
+        "run_pipe_flow_rheology_pulsatile",
+    ),
+    "AAA_rheology_pulsatile": (
+        "examples/AAA_rheology/AAA_rheology_pulsatile.py",
+        "run_AAA_rheology_pulsatile",
+    ),
 }
 
 

@@ -181,3 +181,91 @@ class CarreauNS3DPDE(BasePDE):
             return jnp.concatenate([cont[None], mom])              # (4,)
 
         return jax.vmap(_point)(xyz)
+
+
+class UnsteadyCarreauNS3DPDE(BasePDE):
+    """3-D **unsteady** incompressible Carreau (generalized-Newtonian) NS.
+
+    Network maps  (x, y, z, t) → (u, v, w, p).  Build with ``layers[0]=4``,
+    ``layers[-1]=4``.  Same constitutive law as :class:`CarreauNS3DPDE`:
+
+        μ*(γ̇*) = 1 + (β − 1)[1 + (Cu γ̇*)²]^((n−1)/2)
+
+    Non-dimensional system (ρ = 1):
+
+        ∇·u = 0
+        u_t + (u·∇)u = −∇p + (1/Re) ∇·[ μ*(γ̇*) (∇u + ∇uᵀ) ]
+
+    where the spatial gradient operates on (x, y, z) only — time is the 4th
+    input coordinate.  β = 1 recovers Newtonian unsteady NS at this Re.
+    """
+
+    def __init__(self, model, Re: float = 100.0, beta: float = 16.0,
+                 Cu: float = 10.0, n: float = 0.3568):
+        self.model = model
+        self.Re    = float(Re)
+        self.beta  = float(beta)
+        self.Cu    = float(Cu)
+        self.n     = float(n)
+
+    # ------------------------------------------------------------------
+    # Forward helpers
+    # ------------------------------------------------------------------
+
+    def uvwp(self, params, xyzt):
+        out = self.model.apply(params, xyzt)
+        return out[:, 0], out[:, 1], out[:, 2], out[:, 3]
+
+    @staticmethod
+    def _mu_star_from_S(S, beta, Cu, n):
+        gdot = jnp.sqrt(0.5 * jnp.sum(S * S) + 1e-12)
+        return 1.0 + (beta - 1.0) * (1.0 + (Cu * gdot) ** 2) ** ((n - 1.0) / 2.0)
+
+    def apparent_viscosity(self, params, xyzt):
+        """μ*(γ̇*) at each point xyzt (N, 4) → (N,)."""
+        beta, Cu, n = self.beta, self.Cu, self.n
+
+        def _vel(p_in):
+            return self.model.apply(params, p_in[None, :])[0, :3]
+
+        def _mu(p_in):
+            J_full = jax.jacfwd(_vel)(p_in)        # (3, 4) — last col is ∂u/∂t
+            J_sp   = J_full[:, :3]                 # spatial 3×3 part
+            S      = J_sp + J_sp.T
+            return self._mu_star_from_S(S, beta, Cu, n)
+
+        return jax.vmap(_mu)(xyzt)
+
+    # ------------------------------------------------------------------
+    # Residual
+    # ------------------------------------------------------------------
+
+    def residual(self, params, xyzt):
+        """Compute the 4 PDE residuals at xyzt (N, 4) → (N, 4)."""
+        Re, beta, Cu, n = self.Re, self.beta, self.Cu, self.n
+
+        def _vel(p_in):
+            return self.model.apply(params, p_in[None, :])[0, :3]    # (3,)
+
+        def _pre(p_in):
+            return self.model.apply(params, p_in[None, :])[0, 3]     # scalar
+
+        def _tau(p_in):
+            J_full = jax.jacfwd(_vel)(p_in)         # (3, 4)
+            J_sp   = J_full[:, :3]                  # (3, 3) spatial only
+            S      = J_sp + J_sp.T
+            return self._mu_star_from_S(S, beta, Cu, n) * S    # (3, 3)
+
+        def _point(p_in):
+            J_full = jax.jacfwd(_vel)(p_in)         # (3, 4): cols 0,1,2 spatial; 3 = ∂/∂t
+            u      = _vel(p_in)                     # (3,)
+            cont   = J_full[0, 0] + J_full[1, 1] + J_full[2, 2]
+            conv   = J_full[:, :3] @ u              # (u·∇)u  using spatial grad
+            u_t    = J_full[:, 3]                   # ∂u/∂t
+            gp     = jax.jacfwd(_pre)(p_in)[:3]     # ∇p (drop ∂p/∂t)
+            dtau   = jax.jacfwd(_tau)(p_in)         # (3, 3, 4) ∂τ_ij/∂x_k (k=0..3)
+            divt   = dtau[:, 0, 0] + dtau[:, 1, 1] + dtau[:, 2, 2]
+            mom    = u_t + conv + gp - (1.0 / Re) * divt
+            return jnp.concatenate([cont[None], mom])
+
+        return jax.vmap(_point)(xyzt)

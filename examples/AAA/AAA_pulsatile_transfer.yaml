@@ -1,0 +1,61 @@
+problem: AAA_pulsatile_transfer
+# Run via:
+#   python examples/AAA/AAA_pulsatile_transfer.py
+#   python -m underPINN run examples/AAA/AAA_pulsatile_transfer.yaml
+#
+# Same domain and Reynolds number as the steady AAA case
+# (examples/AAA/config.yaml).  Pulsatile inlet:
+#   u_inlet(r,t) = (V_max + V_amp·sin(2πt/T_period))·(1 − r²/R_vessel²)
+# Long-time integration via time-marching transfer learning, optionally with
+# OVERLAPPING windows (set stride < dT).
+
+network:
+  type  : gated_mlp                      # 'mlp' or 'gated_mlp'
+  layers: [4, 128, 128, 128, 128, 4]    # (x, y, z, t) → (u, v, w, p)
+
+physics:
+  Re        : 40.0
+  R_vessel  : 0.5      # straight-vessel radius
+  R_AAA     : 1.0      # peak bulge radius
+  L         : 7.0      # total domain length
+  x_lo      : -3.5     # inlet x
+  x0        : -2.0     # bulge centre
+  L_AAA     : 1.5      # axial bulge width
+  V_max     : 2.0      # mean centreline peak
+  V_amp     : 1.0      # pulsation amplitude
+  T_period  : 1.0      # pulse period
+
+# ── Time-marching transfer learning ──────────────────────────────────────────
+time_marching:
+  T_total            : 4.0    # 4 pulse cycles
+  dT                 : 0.5    # window length
+  stride             : 0.5    # set < dT for overlapping windows
+  n_first_epochs     : 12000
+  n_warm_epochs      : 4000
+  n_cold_epochs      : 12000
+  compare_no_transfer: true
+  restart            : true
+  first_lr           : 1.0e-3
+  warm_lr            : 5.0e-4
+  cold_lr            : 1.0e-3
+  lr_alpha           : 0.01
+
+# ── Collocation data (per window) ────────────────────────────────────────────
+data:
+  n_interior: 30000
+  n_wall    : 6000
+  n_inlet   : 1200
+  n_outlet  : 1200
+  n_ic      : 2500
+  batch_r   : 2048
+  batch_bc  : 512
+
+loss:
+  w_pde   : 1.0
+  w_wall  : 100.0
+  w_inlet : 50.0
+  w_outlet: 20.0
+  w_ic    : 100.0
+
+output:
+  dir: outputs/AAA_pulsatile_transfer
