@@ -16,6 +16,7 @@ dependencies = [
     "scipy>=1.12",
     "matplotlib>=3.8",
     "shapely>=2.0",
+    "trimesh>=4.0",
     "pandas>=2.0",
 ]
 

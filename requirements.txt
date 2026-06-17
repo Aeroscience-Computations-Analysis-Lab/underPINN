@@ -25,5 +25,9 @@ matplotlib>=3.8
 # Geometry (shapely_geom.py — optional, only needed for arbitrary polygon domains)
 shapely>=2.0
 
+# STL geometry (STLVolumeGeometry — needed for the Aneurysm patient-specific case).
+# Pure-Python point-in-mesh is used, so the optional 'rtree' backend is NOT required.
+trimesh>=4.0
+
 # Benchmark reporting (pandas used in LDC / turbulence examples)
 pandas>=2.0
