@@ -18,8 +18,17 @@ Outputs (written into the same directory)
     predict_axial_velocity.png   u contour + streamlines on the axial plane z=0
     predict_axial_pressure.png   pressure contour on the same plane
     predict_pressure_line.png    centreline p(x) and wall p(x)
-    predict_wss.png              wall shear stress along the wall
-    predict_solution.npz         plane fields (u,v,w,p), wall WSS, centreline p
+    predict_wss.png              wall shear stress along the wall (y-slice)
+    predict_solution.npz         everything saved as arrays:
+        2-D axial plane (z=0): x, y, u, v, w, p
+        1-D pressure lines   : x_centreline, p_centreline, p_wall
+        Wall slice           : wall_x, wall_R, wss [+ wss_Pa]
+        3-D WALL distribution (parametrised by x, θ):
+            wall3d_x, wall3d_theta, wall3d_xyz (Nx3, Nth, 3),
+            wall3d_p (Nx3, Nth), wall3d_wss (Nx3, Nth) [+ wall3d_wss_Pa]
+        3-D INTERIOR volume on a structured (x, y, z) grid:
+            vol_x, vol_y, vol_z, vol_u, vol_v, vol_w, vol_p
+        Metadata: Re, label
 
 Wall shear stress
 -----------------
@@ -318,16 +327,82 @@ def predict_steady(out_dir: str) -> dict:
     fig.savefig(p4, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
+    # ── Full 3-D wall distribution: pressure + WSS at every wall point ────────
+    # Parametrize the wall by (x, θ) so coverage is uniform around the
+    # circumference, not just a single y-slice.  This gives a true wall map
+    # of p(x, θ) and τ_w(x, θ) suitable for plotting or comparison with CFD.
+    Nx3, Nth = 120, 64
+    x_3d  = np.linspace(x_lo, x_hi, Nx3).astype(np.float32)
+    th_3d = np.linspace(0.0, 2.0 * np.pi, Nth, endpoint=False).astype(np.float32)
+    R_3d  = radius(x_3d).astype(np.float32)                # (Nx3,)
+    XX3, TT3 = np.meshgrid(x_3d, th_3d, indexing="ij")     # (Nx3, Nth)
+    RR3      = np.broadcast_to(R_3d[:, None], (Nx3, Nth))
+    Y3       = RR3 * np.cos(TT3)
+    Z3       = RR3 * np.sin(TT3)
+    wall3d   = np.stack([XX3.ravel(), Y3.ravel(), Z3.ravel()], axis=1)
+
+    # Outward wall normal: ∂/∂x × ∂/∂θ on (x, R(x)cosθ, R(x)sinθ) gives
+    #    n ∝ (-R'(x), cosθ, sinθ) / sqrt(R'² + 1)
+    dRdx_3d = (radius(x_3d + h) - radius(x_3d - h)) / (2.0 * h)
+    dRdx_full = np.broadcast_to(dRdx_3d[:, None], (Nx3, Nth))
+    nrm3d = np.stack(
+        [-dRdx_full.ravel(), np.cos(TT3).ravel(), np.sin(TT3).ravel()], axis=1)
+    nrm3d /= np.linalg.norm(nrm3d, axis=1, keepdims=True)
+
+    uvwp_wall = np.array(model.apply(
+        params, jnp.asarray(wall3d, dtype=jnp.float32)))   # (N, 4)
+    p_wall_3d = uvwp_wall[:, 3].reshape(Nx3, Nth)
+    wss_wall_3d = wall_shear_stress(
+        model, params, wall3d.astype(np.float32),
+        nrm3d.astype(np.float32), case).reshape(Nx3, Nth)
+    wss_wall_3d_Pa = (wss_wall_3d * (case["dim"]["mu_inf"] * case["dim"]["U"]
+                                      / case["dim"]["R"])
+                      if case["dim"] is not None else None)
+
+    # ── 3-D interior volume on a structured (x, y, z) grid ────────────────────
+    Nx_v, Ny_v, Nz_v = 80, 40, 40
+    xg_v = np.linspace(x_lo, x_hi, Nx_v)
+    yg_v = np.linspace(-R_max, R_max, Ny_v)
+    zg_v = np.linspace(-R_max, R_max, Nz_v)
+    XV, YV, ZV = np.meshgrid(xg_v, yg_v, zg_v, indexing="ij")
+    R_at_xv = radius(xg_v)                                 # (Nx_v,)
+    R_at_xv_full = np.broadcast_to(R_at_xv[:, None, None],
+                                   (Nx_v, Ny_v, Nz_v))
+    outside_v = YV ** 2 + ZV ** 2 > R_at_xv_full ** 2
+    vol_pts = np.stack([XV.ravel(), YV.ravel(), ZV.ravel()],
+                       axis=1).astype(np.float32)
+    uvwp_vol = np.array(model.apply(params, jnp.asarray(vol_pts)))
+    U_v = uvwp_vol[:, 0].reshape(Nx_v, Ny_v, Nz_v)
+    V_v = uvwp_vol[:, 1].reshape(Nx_v, Ny_v, Nz_v)
+    W_v = uvwp_vol[:, 2].reshape(Nx_v, Ny_v, Nz_v)
+    P_v = uvwp_vol[:, 3].reshape(Nx_v, Ny_v, Nz_v)
+    for arr in (U_v, V_v, W_v, P_v):
+        arr[outside_v] = np.nan
+
     # ── Save the solution itself ──────────────────────────────────────────────
     npz_path = os.path.join(out_dir, "predict_solution.npz")
     payload = dict(
-        x=xg, y=yg, u=U, v=V, w=W, p=P,                 # axial-plane fields
-        wall_x=x_l, wall_R=R_l, wss=wss,                # wall shear stress
+        # 2-D axial-plane (z = 0) fields
+        x=xg, y=yg, u=U, v=V, w=W, p=P,
+        # 1-D wall line (y = +R(x), z = 0)  — back-compat
+        wall_x=x_l, wall_R=R_l, wss=wss,
+        # Centreline and wall pressure lines
         x_centreline=x_l, p_centreline=p_ctr, p_wall=p_wall,
+        # Full 3-D WALL distribution  (Nx3, Nth) parametrised by (x, θ)
+        wall3d_x=x_3d, wall3d_theta=th_3d,
+        wall3d_xyz=wall3d.reshape(Nx3, Nth, 3),
+        wall3d_p=p_wall_3d,
+        wall3d_wss=wss_wall_3d,
+        # Full 3-D INTERIOR volume on a structured grid
+        vol_x=xg_v, vol_y=yg_v, vol_z=zg_v,
+        vol_u=U_v, vol_v=V_v, vol_w=W_v, vol_p=P_v,
+        # Metadata
         Re=case["Re"], label=case["label"],
     )
     if wss_Pa is not None:
         payload["wss_Pa"] = wss_Pa
+    if wss_wall_3d_Pa is not None:
+        payload["wall3d_wss_Pa"] = wss_wall_3d_Pa
     np.savez(npz_path, **payload)
 
     for f in (p1, p2, p3, p4, npz_path):

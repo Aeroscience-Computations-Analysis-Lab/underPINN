@@ -1,0 +1,82 @@
+problem: Aneurysm
+# Patient-specific 3-D steady aneurysm flow (intracranial), Re = 40.
+#
+# Geometry is built ENTIRELY from the STL surfaces under stl/, mirroring the
+# NVIDIA PhysicsNeMo aneurysm tutorial's surface decomposition:
+#   aneurysm_closed.stl   → watertight interior (collocation points)
+#   aneurysm_inlet.stl    → inlet cap  (parabolic velocity BC)
+#   aneurysm_outlet.stl   → outlet cap (zero-pressure BC)
+#   aneurysm_noslip.stl   → vessel wall (no-slip BC), sampled directly
+#   aneurysm_integral.stl → mid-stream plane (mass-flow continuity), sampled
+#                           directly (points + unit normal + area from mesh)
+#
+#   python examples/Aneurysm/Aneurysm.py
+#   python -m underPINN run examples/Aneurysm/config.yaml
+
+network:
+  type  : mlp                                       # 'mlp' or 'gated_mlp'
+  layers: [3, 192, 192, 192, 192, 192, 4]           # (x, y, z) → (u, v, w, p)
+
+physics:
+  # NVIDIA PhysicsNeMo aneurysm tutorial uses ν = 0.025  → Re = 1/ν = 40.
+  Re        : 40.0
+  inlet_vel : 1.5         # parabolic peak (matches the tutorial)
+  # Affine map applied to the raw STL coordinates → simulation frame
+  scale     : 0.4
+  center    : [-18.40381048596882, -50.285383353981196, 12.848136936899031]
+  # Inlet parabolic-profile parameters (already in normalised coords).
+  # These could be derived from the inlet STL, but matching the source's
+  # exact numbers keeps the velocity boundary condition stable.
+  inlet_normal   : [ 0.8526, -0.428,  0.299]
+  inlet_center   : [-4.24298030045776, 4.082857101816247, -4.637790193399717]
+  inlet_area_phys: 21.1284     # physical-frame area; scaled by scale² internally
+
+data:
+  n_interior: 50000   # interior collocation points (rejection-sampled in mesh)
+  n_wall    : 10000   # no-slip wall points (sampled from aneurysm_noslip.stl)
+  n_inlet   : 2000    # inlet cap STL
+  n_outlet  : 2000    # outlet cap STL
+
+training:
+  epochs            : 25000
+  lr                : 1.0e-3
+  lr_alpha          : 0.01
+  batch_r           : 10000
+  batch_bc          : 1024
+  log_every         : 500
+  seed              : 0
+  save_restart_every: 500
+
+loss:
+  w_pde     : 1.0
+  w_inlet   : 10.0
+  w_wall    : 10.0
+  w_outlet  : 10.0
+  w_integral: 0.1     # mass-flow conservation (matches the original main.py)
+
+# Mid-stream integral plane.  Points, unit normal and area are read directly
+# from ``aneurysm_integral.stl`` (STL area 2.3158 ≈ the original main.py's
+# 2.315767, centroid ≈ origin below — they are the same plane).  The values
+# here (simulation frame, after the affine center/scale above) are now only:
+#   normal  → an orientation reference: the STL normal is flipped to agree
+#             with this so the downstream flux stays +Q (sign convention).
+#   origin  → used only by the slice fallback if the integral STL is absent.
+#   n_points→ number of points sampled on the plane.
+integral_plane:
+  origin  : [0.3226, 1.2957, -0.3024]
+  normal  : [0.0927, 0.1382, -0.9861]
+  n_points: 2000
+
+# Integral continuity (mass-flow conservation) — STL-only.
+# When ``auto_Q: true`` (default), Q is derived from STL inlet area:
+#   Q = (V_max/2) · A_inlet                (parabolic ⇒ U_mean = V_max/2)
+# Areas (outlet_area, integral_area) are also computed from the STL surfaces.
+# Signs convention here: outlet flux = -Q (normals point into the vessel),
+# mid-stream flux = +Q.  Matches the original main.py sign convention.
+integral_continuity:
+  enabled : true
+  auto_Q  : true        # set false to use the explicit target_Q below
+  target_Q: 2.54        # fallback if auto_Q: false
+
+output:
+  dir: outputs/Aneurysm

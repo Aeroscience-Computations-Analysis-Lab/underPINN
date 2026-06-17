@@ -38,7 +38,8 @@ _REGISTRY: dict[str, tuple[str, str]] = {
         "examples/pipe_flow_rheology/pipe_flow_rheology.py",
         "run_pipe_flow_rheology",
     ),
-    "AAA_flow": ("examples/AAA/AAA_flow.py", "run_AAA_flow"),
+    "AAA_flow":    ("examples/AAA/AAA_flow.py",         "run_AAA_flow"),
+    "Aneurysm":    ("examples/Aneurysm/Aneurysm.py",    "run_Aneurysm"),
     "AAA_rheology": (
         "examples/AAA_rheology/AAA_rheology.py",
         "run_AAA_rheology",

@@ -515,7 +515,32 @@ class TestExampleAAAFlow:
 
 
 # ---------------------------------------------------------------------------
-# 14b. AAA Rheology (3-D steady Carreau through the bulge)
+# 14b. Aneurysm (patient-specific 3-D steady NS, STL geometry)
+# ---------------------------------------------------------------------------
+
+class TestExampleAneurysm:
+    def test_runs_and_returns_loss_hist(self, tmp_path):
+        mod = _load_module("aneurysm", "Aneurysm/Aneurysm.py")
+        cfg = _cfg(
+            "Aneurysm/config.yaml",
+            {"training.epochs": 3,
+             "training.save_restart_every": 0,
+             "training.batch_r": 64,
+             "training.batch_bc": 16,
+             "data.n_interior": 100,
+             "data.n_wall": 20,
+             "data.n_inlet": 20,
+             "data.n_outlet": 20,
+             "integral_plane.n_points": 50},
+            tmp_path,
+        )
+        result = mod.run_Aneurysm(cfg)
+        assert "loss_hist" in result
+        assert _has_nonempty_loss(result)
+
+
+# ---------------------------------------------------------------------------
+# 14c. AAA Rheology (3-D steady Carreau through the bulge)
 # ---------------------------------------------------------------------------
 
 class TestExampleAAARheology:
