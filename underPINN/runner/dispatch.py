@@ -27,6 +27,7 @@ _REGISTRY: dict[str, tuple[str, str]] = {
     "helmholtz":    ("examples/helmholtz/helmholtz.py",      "run_helmholtz"),
     "heat_forward": ("examples/heat/forward.py",             "run_heat_forward"),
     "ode":          ("examples/ode/ode_test.py",             "run_ode"),
+    "fbpinn_ode":   ("examples/fbpinn_ode/fbpinn_ode.py",    "run_fbpinn_ode"),
 
     # Fluid dynamics
     "k_epsilon":    ("examples/K-Epsilon/turbulence.py",    "run_turbulence"),

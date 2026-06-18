@@ -586,6 +586,38 @@ class STLVolumeGeometry:
         self._cache_save("wall", n, seed, xyz)
         return xyz
 
+    def sample_wall_with_normals(self, n: int, seed: int = 0) -> tuple:
+        """*n* wall points together with their outward unit normals.
+
+        Returns ``(xyz, normals)`` — both ``(n, 3)`` float32.  Normals come from
+        the face the sample landed on, so they are exact for the triangulated
+        wall.  Uses the dedicated ``noslip_stl`` surface when available, else
+        the closed surface with the inlet/outlet caps carved out.  Needed for
+        wall-shear-stress (traction · n) post-processing.
+        """
+        trimesh = _need_trimesh()
+        mesh = self.noslip_mesh if self.noslip_mesh is not None else self.mesh
+        carve = self.noslip_mesh is None and (self.inlet_mesh is not None
+                                              or self.outlet_mesh is not None)
+        pts_out: list = []
+        nrm_out: list = []
+        oversample = 2 if carve else 1
+        s = int(seed)
+        while sum(len(a) for a in pts_out) < n:
+            pts, fid = trimesh.sample.sample_surface(mesh, oversample * n, seed=s)
+            nrm = mesh.face_normals[fid]
+            if carve:
+                keep = ~self._is_on_cap(np.asarray(pts))
+                pts, nrm = pts[keep], nrm[keep]
+            pts_out.append(np.asarray(pts))
+            nrm_out.append(np.asarray(nrm))
+            s += 1
+            oversample *= 2
+        xyz = np.concatenate(pts_out, axis=0)[:n].astype(np.float32)
+        normals = np.concatenate(nrm_out, axis=0)[:n].astype(np.float32)
+        normals /= (np.linalg.norm(normals, axis=1, keepdims=True) + 1e-12)
+        return xyz, normals
+
     # ------------------------------------------------------------------
     # Diagnostics
     # ------------------------------------------------------------------

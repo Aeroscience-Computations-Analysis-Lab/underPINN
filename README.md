@@ -53,6 +53,7 @@ underPINN is a research-grade PINN engine that combines classical collocation-ba
 - Unsteady pipe cross-section (`(y, z, t) → u`)
 - Harmonic oscillator (`d²u/dt² + ω²u = 0`)
 - Exponential decay ODE (`du/dt + λu = 0`)
+- **FBPINN ODE** (`du/dx = cos(ω x)`) — domain decomposition into overlapping subdomains; defeats the spectral bias that stalls a single PINN at high ω
 
 ### Geometry
 - **Interval** — 1-D uniform / stratified sampler
@@ -751,6 +752,7 @@ examples/                  # self-contained: each folder holds script + YAML
 │                          inverse.py  +  heat_inverse.yaml      (recover α from noisy data)
 ├── helmholtz/             helmholtz.py + config.yaml            (2-D Helmholtz FourierMLP)
 ├── ode/                   ode_test.py +  config.yaml            (exp decay + harmonic osc.)
+├── fbpinn_ode/            fbpinn_ode.py + config.yaml           (FBPINN subdomains, du/dx=cos ωx)
 ├── inverse/               inverse_diffusion.py + config.yaml    (2-D diffusion inverse)
 ├── LDC/                   run_ldc.py  +  config.yaml            (2-D Lid-Driven Cavity Re=100)
 ├── K-Epsilon/             run_kepsilon.py + config.yaml         (k-ε RANS turbulent channel)
@@ -781,6 +783,7 @@ docs/
 |---|---|---|---|---|
 | Exponential Decay | du/dt + λu = 0 | MLP [1,32,32,1] | `ODESolver`, TrainingConfig, callbacks | `examples/ode/config.yaml` |
 | Harmonic Oscillator | d²u/dt² + ω²u = 0 | MLP [1,32,32,1] | `ODESolver`, IC derivative | `examples/ode/config.yaml` |
+| FBPINN ODE | du/dx = cos(ω x) | FBPINN — 15 subnets [1,16,16,1] | Overlapping subdomains + partition-of-unity windows, hard IC constraint | `examples/fbpinn_ode/config.yaml` |
 | 1-D Burgers | u_t + uu_x = νu_xx | MLP [2,64,64,64,1] | FBPINN, RBA, cosine LR | `examples/burgers/config.yaml` |
 | 1-D Heat — Forward | u_t = αu_xx | MLP [2,64,64,64,1] | `FBPINNSolver`, exact Gaussian IC | `examples/heat/heat_forward.yaml` |
 | 1-D Heat — Inverse | u_t = αu_xx | MLP [2,64,64,64,1] | Recover α from 50 noisy observations | `examples/heat/heat_inverse.yaml` |

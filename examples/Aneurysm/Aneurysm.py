@@ -28,6 +28,14 @@ STL surfaces (under ``stl/``):
   aneurysm_outlet.stl   — outlet cap  (zero-pressure BC)
   aneurysm_noslip.stl   — vessel wall (no-slip BC, sampled directly)
   aneurysm_integral.stl — mid-stream mass-flow plane (points/normal/area)
+
+Outputs (under ``output.dir``):
+  aneurysm_volume.vtu   — ParaView point cloud of the lumen interior with the
+                          velocity vector, pressure and speed
+  aneurysm_wall.vtu     — ParaView wall point cloud with velocity, pressure and
+                          wall-shear-stress magnitude (μ = 1/Re)
+  grid_predictions.npz  — fields on a structured bounding-box grid (legacy)
+  loss.png, loss_hist.npy, params.msgpack, config.yaml
 """
 from __future__ import annotations
 
@@ -53,6 +61,7 @@ from underPINN.utils.checkpoint import save_checkpoint
 from underPINN.utils.io import save_predictions
 from underPINN.utils.restart import RestartManager
 from underPINN.utils.sampling import safe_choice
+from underPINN.utils.vtk_io import save_vtu_points
 
 # Paper / reference geometry constants — physical → normalized coordinate frame
 # (matches the original main.py exactly so the npz points map correctly).
@@ -363,6 +372,47 @@ def run_Aneurysm(cfg) -> dict:
                    "w_pred": uvwp_grid[:, 2], "p_pred": uvwp_grid[:, 3]},
         filename="grid_predictions.npz",
     )
+
+    # ── ParaView VTU export — geometry-faithful flow field ────────────────────
+    # The structured grid above samples the STL *bounding box* (many points lie
+    # outside the lumen).  These VTU files instead carry the flow variables on
+    # points that actually lie inside the vessel / on its wall, so they open
+    # cleanly in ParaView for streamlines, glyphs and surface colouring.
+    #   aneurysm_volume.vtu — interior points: velocity (u,v,w), pressure, speed
+    #   aneurysm_wall.vtu   — wall points:    velocity, pressure, WSS magnitude
+    # Coordinates and fields are in the (nondimensional) simulation frame.
+    uvwp_int = np.array(model.apply(params, xyz_int_j))
+    vel_int  = uvwp_int[:, :3]
+    save_vtu_points(
+        os.path.join(out_dir, "aneurysm_volume.vtu"),
+        np.asarray(xyz_int, dtype=np.float64),
+        {"velocity": vel_int, "pressure": uvwp_int[:, 3],
+         "speed": np.linalg.norm(vel_int, axis=1)},
+    )
+
+    # Wall: velocity, pressure and wall-shear-stress magnitude.
+    # WSS = | (τ·n) − ((τ·n)·n) n |,  τ = μ(∇u + ∇uᵀ),  μ = 1/Re (Newtonian).
+    xyz_wn, n_wn = geom.sample_wall_with_normals(
+        int(cfg_get(cfg.data, "n_wall", default=10_000)), seed=7)
+    mu = 1.0 / Re
+
+    def _grad_u(p, xi):
+        return jax.jacfwd(lambda x: model.apply(p, x.reshape(1, 3))[0, :3])(xi)
+
+    gradu  = jax.vmap(lambda xi: _grad_u(params, xi))(jnp.asarray(xyz_wn))
+    strain = gradu + jnp.transpose(gradu, (0, 2, 1))
+    n_j    = jnp.asarray(n_wn)
+    trac   = mu * jnp.einsum("nij,nj->ni", strain, n_j)          # traction τ·n
+    wss_v  = trac - jnp.sum(trac * n_j, axis=1, keepdims=True) * n_j
+    wss    = np.array(jnp.linalg.norm(wss_v, axis=1))
+    uvwp_w = np.array(model.apply(params, jnp.asarray(xyz_wn)))
+    save_vtu_points(
+        os.path.join(out_dir, "aneurysm_wall.vtu"),
+        np.asarray(xyz_wn, dtype=np.float64),
+        {"velocity": uvwp_w[:, :3], "pressure": uvwp_w[:, 3], "wss": wss},
+    )
+    print(f"  ParaView: aneurysm_volume.vtu ({len(xyz_int)} pts), "
+          f"aneurysm_wall.vtu ({len(xyz_wn)} pts, WSS μ={mu:.4g})")
 
     # ── Loss plot ─────────────────────────────────────────────────────────────
     fig, ax = plt.subplots(figsize=(7, 3))

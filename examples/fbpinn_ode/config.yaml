@@ -1,0 +1,42 @@
+problem: fbpinn_ode
+# Finite Basis PINN (FBPINN) on a MULTISCALE 1-D ODE over a long domain.
+#
+#   du/dx = Σ_i ω_i cos(ω_i x),   u(x_start) = 0   →   exact  u(x) = Σ_i sin(ω_i x)
+#
+# Default ω = {1, 15} (a slow + a fast mode) over [-2π, 2π] ≈ 30 fast
+# oscillations.  The scale separation + long domain make this hopeless for a
+# single global PINN, but easy once the line is split into many overlapping
+# subdomains, each with its own small network blended by a partition-of-unity
+# window.  See examples/fbpinn_ode/fbpinn_ode.py.
+#
+#   python examples/fbpinn_ode/fbpinn_ode.py
+#   python -m underPINN run examples/fbpinn_ode/config.yaml
+
+network:
+  # Per-subdomain subnet.  (1) → hidden → (1).  Keep it small: each subnet only
+  # has to fit a locally low-frequency slice of the solution.
+  layers: [1, 16, 16, 1]
+
+physics:
+  omegas : [1.0, 15.0]   # angular frequencies (multiscale: slow + fast mode)
+  x_start: -6.283185307  # = -2π
+  x_end  :  6.283185307  # =  2π   (long domain; ~30 fast oscillations)
+  u0     : 0.0           # initial condition  u(x_start) = u0  (enforced exactly)
+
+subdomains:
+  n      : 30      # number of overlapping subdomains (≈ one per fast period)
+  overlap: 0.3     # neighbour overlap as a fraction of a cell width
+
+data:
+  n_collocation: 5000   # uniform residual points (dense enough for the fast mode)
+
+training:
+  epochs            : 8000
+  lr                : 1.0e-3
+  lr_alpha          : 0.01
+  log_every         : 500
+  seed              : 0
+  save_restart_every: 1000
+
+output:
+  dir: outputs/fbpinn_ode

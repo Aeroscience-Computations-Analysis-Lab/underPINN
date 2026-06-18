@@ -182,6 +182,25 @@ class TestExampleODE:
 
 
 # ---------------------------------------------------------------------------
+# 5b. FBPINN ODE (domain decomposition into overlapping subdomains)
+# ---------------------------------------------------------------------------
+
+class TestExampleFBPINNODE:
+    def test_runs_and_returns_loss_hist(self, tmp_path):
+        mod = _load_module("fbpinn_ode", "fbpinn_ode/fbpinn_ode.py")
+        cfg = _cfg("fbpinn_ode/config.yaml",
+                   {"training.epochs": 3,
+                    "training.save_restart_every": 0,
+                    "data.n_collocation": 64,
+                    "subdomains.n": 4},
+                   tmp_path)
+        result = mod.run_fbpinn_ode(cfg)
+        assert "loss_hist" in result
+        assert _has_nonempty_loss(result)
+        assert "rel_l2" in result
+
+
+# ---------------------------------------------------------------------------
 # 6. Helmholtz PINN
 # ---------------------------------------------------------------------------
 
@@ -537,6 +556,9 @@ class TestExampleAneurysm:
         result = mod.run_Aneurysm(cfg)
         assert "loss_hist" in result
         assert _has_nonempty_loss(result)
+        # ParaView VTU flow-field export
+        assert (tmp_path / "aneurysm_volume.vtu").exists()
+        assert (tmp_path / "aneurysm_wall.vtu").exists()
 
 
 # ---------------------------------------------------------------------------
