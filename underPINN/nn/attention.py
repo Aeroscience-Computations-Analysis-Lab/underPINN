@@ -45,9 +45,8 @@ class DotProductAttention(nn.Module):
 
 class SimpleGate(nn.Module):
     """
-    Implements the specific gating logic from the user's PyTorch code:
-    out = (1 - h) * U + h * V
-    where h is the input (assumed to be Tanh output).
+    Convex gating:  out = (1 - h) * U + h * V
+    where h is the input (assumed to be a Tanh output).
     """
     dim: int # Unused, kept for API compatibility
 

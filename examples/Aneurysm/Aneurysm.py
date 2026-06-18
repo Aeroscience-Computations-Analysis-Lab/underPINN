@@ -1,9 +1,8 @@
 """Steady 3-D flow through a patient-specific intracranial aneurysm.
 
-Ported from a PyTorch+FBPINN reference (Nagargoje group) to underPINN's
-JAX/Flax standard format.  Geometry is built ENTIRELY from the STL surfaces
-under ``stl/`` at runtime via :class:`STLVolumeGeometry`, mirroring the NVIDIA
-PhysicsNeMo aneurysm tutorial's surface decomposition (no pre-baked npz).
+Geometry is built ENTIRELY from the STL surfaces under ``stl/`` at runtime via
+:class:`STLVolumeGeometry`, mirroring the NVIDIA PhysicsNeMo aneurysm tutorial's
+surface decomposition (no pre-baked npz).
 
 Run directly or via the CLI:
 
@@ -63,8 +62,7 @@ from underPINN.utils.restart import RestartManager
 from underPINN.utils.sampling import safe_choice
 from underPINN.utils.vtk_io import save_vtu_points
 
-# Paper / reference geometry constants — physical → normalized coordinate frame
-# (matches the original main.py exactly so the npz points map correctly).
+# Geometry constants for the affine physical → normalized coordinate frame.
 _DEFAULT_CENTER = np.array(
     [-18.40381048596882, -50.285383353981196, 12.848136936899031], dtype=np.float64)
 _DEFAULT_SCALE  = 0.4
@@ -84,7 +82,7 @@ def _normalize(arr, center, scale):
 
 
 def _circular_parabola(pts, center, normal, radius, max_vel):
-    """Circular parabolic velocity profile at the inlet (matches original)."""
+    """Circular parabolic velocity profile at the inlet."""
     d = np.linalg.norm(pts - center[None, :], axis=1)
     speed = max_vel * np.maximum(1.0 - (d / radius) ** 2, 0.0)
     return speed[:, None] * normal[None, :]
@@ -93,8 +91,8 @@ def _circular_parabola(pts, center, normal, radius, max_vel):
 def _build_geometry(here: pathlib.Path, cfg, center, scale, cache_dir):
     """Build a STLVolumeGeometry and sample all collocation point clouds.
 
-    Single source of truth for the case's geometry — points come exclusively
-    from the STL surfaces (no pre-baked npz fallback).
+    Single source of truth for the case's geometry — all points come from the
+    STL surfaces.
     """
     d = cfg.data
     n_int    = int(cfg_get(d, "n_interior", default=50_000))
@@ -186,16 +184,15 @@ def run_Aneurysm(cfg) -> dict:
     W_INTEGRAL = float(cfg_get(lw, "w_integral", default=0.1))   # mass-flow term
 
     # ── Integral continuity (mass-flow conservation) ──────────────────────────
-    # Original main.py uses Q = ±2.54 on outlet/mid-stream planes with areas
-    # 1.932368 and 2.315767 (after the scale²=0.16 reduction).  Q comes from
-    # mass conservation:  Q = (V_max/2) · A_inlet = 0.75 · 3.38 ≈ 2.54.
+    # Q on the outlet / mid-stream planes follows from mass conservation:
+    #   Q = (V_max/2) · A_inlet = 0.75 · 3.38 ≈ 2.54   (parabolic ⇒ U_mean = V_max/2).
     ic = cfg_get(cfg, "integral_continuity", default=None)
     use_integral  = bool(cfg_get(ic, "enabled", default=True)) if ic else True
     target_Q      = float(cfg_get(ic, "target_Q",      default=2.54))   if ic else 2.54
     outlet_area   = float(cfg_get(ic, "outlet_area",   default=1.932368)) if ic else 1.932368
     integral_area = float(cfg_get(ic, "integral_area", default=2.315767)) if ic else 2.315767
 
-    # ── Build the point clouds from STL surfaces (no npz fallback) ───────────
+    # ── Build the point clouds from the STL surfaces ──────────────────────────
     here = pathlib.Path(__file__).parent
     cache_dir = os.path.join(out_dir, "stl_cache")
     geom, xyz_int, xyz_in, xyz_w, xyz_out, xyz_grid = _build_geometry(

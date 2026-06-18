@@ -34,7 +34,7 @@ class NavierStokesPDE(BasePDE):
         u_xx, u_yy = H[:, 0, 0, 0], H[:, 0, 1, 1]
         v_xx, v_yy = H[:, 1, 0, 0], H[:, 1, 1, 1]
 
-        # Physics Equations (Conservative Form matching PyTorch)
+        # Physics equations (conservative form)
         # cont = u_x + v_y
         cont = u_x + v_y
         

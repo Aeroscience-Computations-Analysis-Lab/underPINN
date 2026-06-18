@@ -1,8 +1,7 @@
 """Pure PINN — 2-D Steady Flow over a NACA Airfoil.
 
-Ported from the reference notebook *PINN_Re40_pure.ipynb* (steady flow over a
-cylinder at Re=40) and adapted to a NACA airfoil.  No training data is used —
-only Navier–Stokes PDE residuals + boundary conditions.
+No training data is used — only Navier–Stokes PDE residuals + boundary
+conditions.
 
 Run directly or via the CLI:
 
