@@ -1,8 +1,15 @@
 """1-D Unsteady Compressible Euler PDE (conservative form).
 
 For Riemann problems such as the Sod shock tube.  The network maps
-(x, t) → (f_ρ, f_u, f_p); physical variables use a softplus positivity
-transform so ρ > 0 and p > 0 throughout training.
+(x, t) → (f_ρ, f_u, f_p); physical variables use a positivity transform so
+ρ > 0 and p > 0 throughout training.  Two transforms are available:
+
+* ``softplus`` (default):  ρ = softplus(f_ρ) + ε,  p = softplus(f_p) + ε.
+* ``exp`` (log-space):     ρ = exp(f_ρ),           p = exp(f_p).
+  The exp / log parameterisation gives a *constant relative* gradient
+  (d log ρ / d f_ρ = 1) across many decades, so it stays well-conditioned for
+  severe Riemann problems like Toro test 3 (p spans 0.01 → 1000), where
+  softplus' gradient collapses (∝ p) in the low-pressure region.
 
 Conservative residual (ε = artificial viscosity):
 
@@ -35,14 +42,23 @@ class Euler1DUnsteadyPDE(BasePDE):
     eps      : small constant added after softplus for positivity.
     art_visc : fixed artificial-viscosity coefficient ε (default 0.0).
                Ignored when the params carry a trainable ``log_av``.
+    transform: positivity map for ρ and p — ``"softplus"`` (default) or
+               ``"exp"`` (log-space; recommended for large dynamic range).
     """
 
     def __init__(self, model, gamma: float = 1.4, eps: float = 1e-6,
-                 art_visc: float = 0.0):
-        self.model    = model
-        self.gamma    = float(gamma)
-        self.eps      = float(eps)
-        self.art_visc = float(art_visc)
+                 art_visc: float = 0.0, transform: str = "softplus"):
+        self.model     = model
+        self.gamma     = float(gamma)
+        self.eps       = float(eps)
+        self.art_visc  = float(art_visc)
+        self.transform = str(transform).lower()
+
+    def _pos(self, x):
+        """Positivity transform applied to the ρ and p network outputs."""
+        if self.transform == "exp":
+            return jnp.exp(jnp.clip(x, -50.0, 50.0))
+        return jax.nn.softplus(x) + self.eps
 
     # ------------------------------------------------------------------
     # Trainable-viscosity helpers
@@ -76,9 +92,9 @@ class Euler1DUnsteadyPDE(BasePDE):
     def apply(self, params, xt):
         """Return physical state (ρ, u, p) as an (N, 3) array."""
         raw = self.model.apply(self._net(params), xt)   # (N, 3)
-        rho = jax.nn.softplus(raw[:, 0]) + self.eps
+        rho = self._pos(raw[:, 0])
         u   = raw[:, 1]
-        p   = jax.nn.softplus(raw[:, 2]) + self.eps
+        p   = self._pos(raw[:, 2])
         return jnp.stack([rho, u, p], axis=1)
 
     # ------------------------------------------------------------------
@@ -88,14 +104,14 @@ class Euler1DUnsteadyPDE(BasePDE):
     def residual(self, params, xt):
         """Conservative residual at points xt (N, 2) = (x, t).  Returns (N, 3)."""
         gamma = self.gamma
-        eps   = self.eps
         net   = self._net(params)
+        pos   = self._pos
 
         def _prim(p_in):
             raw = self.model.apply(net, p_in[None, :])[0]   # (3,)
-            rho = jax.nn.softplus(raw[0]) + eps
+            rho = pos(raw[0])
             u   = raw[1]
-            p   = jax.nn.softplus(raw[2]) + eps
+            p   = pos(raw[2])
             return rho, u, p
 
         def _cons(p_in):

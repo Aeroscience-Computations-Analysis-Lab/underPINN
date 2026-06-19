@@ -17,9 +17,10 @@ Boundary conditions
 -------------------
 * Inlet  — circular parabolic velocity profile aligned with the vessel axis,
            v = max_vel · max(1 − (r/R)², 0) · n̂  with R from the inlet area
-* Outlet — pressure Dirichlet  p = 0
+* Outlet — pressure Dirichlet  p = 0  AND mass-flow rate  ∫_outlet u·n dA = Q
 * Wall   — no-slip  u = v = w = 0
-* Mass-flow — integral continuity on a mid-stream plane (∫ u·n dA = Q)
+* Mass-flow — integral continuity at the outlet and on a mid-stream plane
+              (∫ u·n dA = Q on each, with outward / downstream normals)
 
 STL surfaces (under ``stl/``):
   aneurysm_closed.stl   — watertight interior (rejection-sampled collocation)
@@ -59,7 +60,7 @@ from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.utils.checkpoint import save_checkpoint
 from underPINN.utils.io import save_predictions
 from underPINN.utils.restart import RestartManager
-from underPINN.utils.sampling import safe_choice
+from underPINN.utils.sampling import rad_resample, safe_choice
 from underPINN.utils.vtk_io import save_vtu_points
 
 # Geometry constants for the affine physical → normalized coordinate frame.
@@ -177,11 +178,18 @@ def run_Aneurysm(cfg) -> dict:
     batch_r   = int(cfg_get(tr, "batch_r",     default=10000))
     batch_bc  = int(cfg_get(tr, "batch_bc",    default=1024))
 
+    # RAR (residual-based adaptive resampling) of the interior pool
+    rar_period = int(cfg_get(tr, "rar_period",     default=0))
+    rar_cand   = int(cfg_get(tr, "rar_candidates", default=5))
+    rar_k      = float(cfg_get(tr, "rar_k",        default=1.0))
+    rar_c      = float(cfg_get(tr, "rar_c",        default=1.0))
+
     W_PDE      = float(cfg_get(lw, "w_pde",      default=1.0))
     W_INLET    = float(cfg_get(lw, "w_inlet",    default=10.0))
     W_WALL     = float(cfg_get(lw, "w_wall",     default=10.0))
-    W_OUTLET   = float(cfg_get(lw, "w_outlet",   default=10.0))
-    W_INTEGRAL = float(cfg_get(lw, "w_integral", default=0.1))   # mass-flow term
+    W_OUTLET   = float(cfg_get(lw, "w_outlet",   default=10.0))   # outlet pressure p=0
+    W_MASSFLOW = float(cfg_get(lw, "w_massflow", default=0.1))    # outlet mass flow ∫u·n=Q
+    W_INTEGRAL = float(cfg_get(lw, "w_integral", default=0.1))    # mid-stream mass flow
 
     # ── Integral continuity (mass-flow conservation) ──────────────────────────
     # Q on the outlet / mid-stream planes follows from mass conservation:
@@ -240,12 +248,19 @@ def run_Aneurysm(cfg) -> dict:
                                dtype=np.float64)
         n_ip = int(cfg_get(ip, "n_points", default=2000) if ip else 2000)
 
-        # Outlet flux plane: the inlet/outlet samples already came from STL
-        # caps; use the cap's mean face normal for u·n.
-        n_out_vec = geom.outlet_normal           # (3,)
+        # Outlet mass-flow plane: reuse the outlet cap STL sample, and orient the
+        # cap's mean face normal to point OUTWARD (downstream, out of the domain)
+        # so the outflow rate ∫ u·n dA is +Q regardless of the STL winding.  The
+        # outward direction is taken as outlet-centroid minus vessel-centroid.
+        n_out_vec = np.asarray(geom.outlet_normal, dtype=np.float64)
+        ref_out   = np.asarray(geom.outlet_center) - np.asarray(geom.mesh.centroid)
+        if float(np.dot(n_out_vec, ref_out)) < 0.0:
+            n_out_vec = -n_out_vec
         xyz_out_ic = xyz_out                     # already sampled
         n_out_ic   = np.broadcast_to(n_out_vec.astype(np.float32),
                                      xyz_out_ic.shape).copy()
+        print(f"  Outlet mass-flow plane  A={geom.outlet_area:.4f}  "
+              f"n_out(outward)={n_out_vec.round(3).tolist()}")
 
         if geom.integral_mesh is not None:
             # Mid-stream points / normal / area straight off the integral STL.
@@ -283,18 +298,27 @@ def run_Aneurysm(cfg) -> dict:
     xyz_w_j    = jnp.asarray(xyz_w)
     xyz_out_j  = jnp.asarray(xyz_out)
 
-    # Integral-continuity term:  loss = (A · mean(u·n) − Q_target)²
-    # Two planes (outlet → -Q, mid-stream → +Q) preserve mass through the vessel.
+    # Mass-flow (integral-continuity) terms:  loss = (A · mean(u·n) − Q)².
+    # Both enforce the same volumetric flow Q (= inlet flow, mass conservation):
+    #   • outlet   plane — outward normal ⇒ outflow = +Q
+    #   • mid-stream plane — downstream normal ⇒ +Q
     # Whole-plane reduction (mean over all points), so points are NOT batched
     # — they're captured in the closure as full constants.
-    def _integral_term(p):
+    def _massflow_outlet(p):
+        """Mass-flow-rate condition at the outlet:  ∫_outlet u·n dA = Q."""
         if not use_integral:
             return jnp.array(0.0)
         u_out  = model.apply(p, xyz_out_ic_j)[:, :3]
-        flux_o = outlet_area   * jnp.mean(jnp.sum(u_out * n_out_ic_j, axis=1))
+        flux_o = outlet_area * jnp.mean(jnp.sum(u_out * n_out_ic_j, axis=1))
+        return (flux_o - target_Q) ** 2
+
+    def _massflow_midplane(p):
+        """Mass-flow-rate condition on the mid-stream plane:  ∫ u·n dA = Q."""
+        if not use_integral:
+            return jnp.array(0.0)
         u_mid  = model.apply(p, xyz_mid_ic_j)[:, :3]
         flux_m = integral_area * jnp.mean(jnp.sum(u_mid * n_mid_ic_j, axis=1))
-        return (flux_o + target_Q) ** 2 + (flux_m - target_Q) ** 2
+        return (flux_m - target_Q) ** 2
 
     @jax.jit
     def step(params, state, r_b, in_b, u_in_b, w_b, out_b):
@@ -313,12 +337,13 @@ def run_Aneurysm(cfg) -> dict:
             uvwp_o  = model.apply(p, out_b)
             outlet_l = jnp.mean(uvwp_o[:, 3] ** 2)
 
-            integral_l = _integral_term(p)
+            massflow_l = _massflow_outlet(p)
+            integral_l = _massflow_midplane(p)
 
             total = (W_PDE * pde_l + W_INLET * in_l
                      + W_WALL * wall_l + W_OUTLET * outlet_l
-                     + W_INTEGRAL * integral_l)
-            return total, (pde_l, in_l, wall_l, outlet_l, integral_l)
+                     + W_MASSFLOW * massflow_l + W_INTEGRAL * integral_l)
+            return total, (pde_l, in_l, wall_l, outlet_l, massflow_l, integral_l)
 
         (total, aux), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)
         updates, state = optimizer.update(grads, state)
@@ -334,17 +359,39 @@ def run_Aneurysm(cfg) -> dict:
     logger = ConsoleLogger(log_every=log_every)
     N_r, N_in = xyz_int_j.shape[0], xyz_in_j.shape[0]
     N_w, N_out = xyz_w_j.shape[0], xyz_out_j.shape[0]
+    n_int = N_r
     key = jax.random.PRNGKey(seed + 99)
+
+    # RAR sampler: draw interior candidates from a one-time lumen pool, so the
+    # expensive rejection sampling runs once; each RAR step then re-weights this
+    # pool by the PDE residual (no repeated point-in-mesh raycasting).
+    if rar_period > 0:
+        rar_pool = geom.sample_interior(rar_cand * n_int, seed=4321)
+
+        def _interior_sampler(n, s):
+            rng = np.random.default_rng(s)
+            idx = rng.choice(rar_pool.shape[0], size=n,
+                             replace=rar_pool.shape[0] < n)
+            return rar_pool[idx]
 
     try:
         for ep in range(start_ep, epochs):
+            # RAR: refresh the interior pool toward high-residual regions
+            if rar_period > 0 and ep > 0 and ep % rar_period == 0:
+                xyz_int_j = jnp.asarray(rad_resample(
+                    pde, params, _interior_sampler,
+                    n_keep=n_int, n_candidates=rar_cand * n_int,
+                    k=rar_k, c=rar_c, seed=seed + ep))
+                N_r = xyz_int_j.shape[0]
+                print(f"  [ep {ep:5d}] RAR resampled interior pool ({n_int} pts)")
+
             key, k1, k2, k3, k4 = jax.random.split(key, 5)
             ir   = safe_choice(k1, N_r,   batch_r)
             iin  = safe_choice(k2, N_in,  min(batch_bc, N_in))
             iw   = safe_choice(k3, N_w,   min(batch_bc, N_w))
             iout = safe_choice(k4, N_out, min(batch_bc, N_out))
 
-            params, opt_state, total, (pl, il, wl, ol, intl) = step(
+            params, opt_state, total, (pl, il, wl, ol, ml, intl) = step(
                 params, opt_state,
                 xyz_int_j[ir], xyz_in_j[iin], u_in_j[iin],
                 xyz_w_j[iw], xyz_out_j[iout])
@@ -352,6 +399,7 @@ def run_Aneurysm(cfg) -> dict:
             logger.on_epoch_end(ep, {"loss": float(total), "pde": float(pl),
                                      "inlet": float(il), "wall": float(wl),
                                      "outlet": float(ol),
+                                     "massflow": float(ml),
                                      "integral": float(intl)})
             restart.maybe_save(ep, params, opt_state, {"loss_hist": loss_hist})
     except StopIteration:
@@ -378,11 +426,16 @@ def run_Aneurysm(cfg) -> dict:
     #   aneurysm_volume.vtu — interior points: velocity (u,v,w), pressure, speed
     #   aneurysm_wall.vtu   — wall points:    velocity, pressure, WSS magnitude
     # Coordinates and fields are in the (nondimensional) simulation frame.
-    uvwp_int = np.array(model.apply(params, xyz_int_j))
+    # Use the original uniform interior cloud ``xyz_int`` (NOT ``xyz_int_j``,
+    # which RAR re-weights toward high-residual regions during training) so the
+    # coordinates and the evaluated fields refer to the same points and the
+    # volume is sampled representatively.
+    xyz_vol  = np.asarray(xyz_int, dtype=np.float64)
+    uvwp_int = np.array(model.apply(params, jnp.asarray(xyz_int)))
     vel_int  = uvwp_int[:, :3]
     save_vtu_points(
         os.path.join(out_dir, "aneurysm_volume.vtu"),
-        np.asarray(xyz_int, dtype=np.float64),
+        xyz_vol,
         {"velocity": vel_int, "pressure": uvwp_int[:, 3],
          "speed": np.linalg.norm(vel_int, axis=1)},
     )

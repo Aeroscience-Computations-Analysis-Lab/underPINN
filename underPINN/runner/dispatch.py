@@ -47,6 +47,7 @@ _REGISTRY: dict[str, tuple[str, str]] = {
     ),
     "ramp":          ("examples/ramp/ramp.py",               "run_ramp"),
     "sod_shock":     ("examples/sod_shock/sod_shock.py",     "run_sod_shock"),
+    "toro3":         ("examples/toro3/toro3.py",             "run_toro3"),
 
     # Inverse problems
     "heat_inverse":      ("examples/heat/inverse.py",        "run_heat_inverse"),

@@ -1,0 +1,57 @@
+problem: toro3
+# Toro test 3 — left half of the Woodward–Colella blast wave.
+# 1-D unsteady compressible Euler with a 5-decade pressure jump.
+#
+#   x ∈ [0,1],  x0 = 0.5,  γ = 1.4,  t_final = 0.012
+#   Left  (ρ,u,p) = (1, 0, 1000)     Right (ρ,u,p) = (1, 0, 0.01)
+#
+# Solved non-dimensionally (ρ_ref = max ρ, p_ref = max p, u_ref = √(p_ref/ρ_ref))
+# with an exp/log positivity transform so the huge dynamic range stays
+# well-conditioned.  Learnable artificial viscosity + RAR capture the shock.
+#
+#   python examples/toro3/toro3.py
+#   python -m underPINN run examples/toro3/config.yaml
+
+network:
+  type  : mlp
+  layers: [2, 128, 128, 128, 128, 3]   # (x̃, t̃) → (ρ̃, ũ, p̃)
+
+physics:
+  gamma         : 1.4
+  x_min         : 0.0
+  x_max         : 1.0
+  x0            : 0.5
+  t_final       : 0.012
+  left          : [1.0, 0.0, 1000.0]   # (ρ, u, p)
+  right         : [1.0, 0.0, 0.01]
+  transform     : exp                  # positivity: 'exp' (log-space) or 'softplus'
+  art_visc      : 0.001                 # artificial-viscosity init (non-dimensional)
+  trainable_visc: false
+  # rho_ref / p_ref default to max of the initial data; override here if desired.
+
+data:
+  n_interior: 80000
+  n_ic      : 8000
+  n_bc      : 4500
+
+training:
+  epochs            : 90000
+  lr                : 1.0e-3
+  lr_alpha          : 0.01
+  log_every         : 500
+  seed              : 0
+  batch_r           : 4096
+  batch_bc          : 512
+  save_restart_every: 1000
+  rar_period        : 3000   # RAR: resample interior pool every N epochs (0 = off)
+  rar_candidates    : 5
+  rar_k             : 1.0
+  rar_c             : 1.0
+
+loss:
+  w_pde: 1.0
+  w_ic : 100.0
+  w_bc : 10.0
+
+output:
+  dir: outputs/toro3

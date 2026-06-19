@@ -20,7 +20,7 @@ underPINN is a research-grade PINN engine that combines classical collocation-ba
 - **`lax.scan` fused kernels** — fuse N gradient steps into a single XLA kernel, eliminating Python dispatch between epochs; delivers 50–500× less overhead on GPU compared to a Python for-loop
 - **Cosine LR decay** — via `optax.cosine_decay_schedule`; integrates seamlessly with `TrainingConfig`
 - **RAR-D adaptive collocation resampling** — periodically replaces a fraction of collocation points with samples drawn proportional to `|residual|^k` (Lu et al., 2021); focuses compute on high-error regions without changing the total batch size
-- **RAR/RAD shock-focused resampling** — `rad_resample` (Wu et al., 2023; `p ∝ r^k/E[r^k] + c`) refreshes the interior pool toward shocks/contacts in the compressible cases (`ramp`, `sod_shock`); config knobs `rar_period`, `rar_candidates`, `rar_k`, `rar_c`
+- **RAR/RAD shock-focused resampling** — `rad_resample` (Wu et al., 2023; `p ∝ r^k/E[r^k] + c`) refreshes the interior pool toward shocks/contacts in the compressible cases (`ramp`, `sod_shock`, `toro3`); config knobs `rar_period`, `rar_candidates`, `rar_k`, `rar_c`
 - **Artificial viscosity for shocks** — global Laplacian dissipation `−ε∇²U` on the conserved variables in the compressible Euler cases; ε can be **fixed** (`art_visc`) or **learned** as `ε = softplus(log_av)` jointly with the network (`trainable_visc: true`)
 - **Time-marching transfer learning** — long-horizon unsteady problems split into windows; each window warm-starts from the previous one and chains its end-state as the next initial condition (pulsatile pipe flow), with per-window checkpoints and window-level restart
 - **RBA element-wise loss weighting** — residual-based adaptivity assigns per-point weights so that boundary and collocation losses are automatically balanced during training
@@ -50,6 +50,7 @@ underPINN is a research-grade PINN engine that combines classical collocation-ba
 - 3-D **generalized-Newtonian (Carreau)** Navier-Stokes — shear-thinning blood rheology (`μ(γ̇) = μ∞ + (μ0−μ∞)[1+(λγ̇)²]^((n−1)/2)`); pipe and AAA cases
 - 2-D steady compressible Euler — **conservative flux-divergence form** with optional artificial viscosity (oblique-shock ramp, Mach 3, θ=10°)
 - 1-D **unsteady** compressible Euler — Sod shock tube with learnable artificial viscosity + exact Riemann reference
+- 1-D **unsteady** compressible Euler — **Toro test 3** (Woodward–Colella blast wave, 5-decade pressure jump) with **exp/log positivity** + reference-state **non-dimensionalisation** for the extreme dynamic range
 - Unsteady pipe cross-section (`(y, z, t) → u`)
 - Harmonic oscillator (`d²u/dt² + ω²u = 0`)
 - Exponential decay ODE (`du/dt + λu = 0`)
@@ -767,6 +768,7 @@ examples/                  # self-contained: each folder holds script + YAML
 ├── AAA_rheology/          AAA_rheology.py + config.yaml         (Carreau blood, AAA bulge)
 ├── ramp/                  ramp.py     +  config.yaml            (2-D compressible Euler, M=3, AV + RAR)
 ├── sod_shock/             sod_shock.py + config.yaml            (Sod tube, learnable ε + RAR)
+├── toro3/                  toro3.py + config.yaml                (Toro-3 blast wave, exp positivity + non-dim)
 ├── predict_steady.py                                            (post-process steady pipe/AAA: WSS, contours, NPZ)
 └── transfer/              burgers_transfer.py + yaml            (Burgers param + temp. TL)
                            heat2d_transfer.py  + yaml            (2-D heat transfer)
@@ -794,6 +796,7 @@ docs/
 | 2-D RANS k-ε | Turbulent channel | FBPINN | `RANSSolver`, RBA, Re=10000 | `examples/K-Epsilon/config.yaml` |
 | 2-D Compressible Ramp | Steady Euler (conservative), M=3 | MLP [2,80,80,80,80,80,4] | Oblique shock θ=10°, artificial viscosity (fixed/learnable), RAR | `examples/ramp/config.yaml` |
 | 1-D Sod Shock Tube | Unsteady Euler (conservative) | MLP [2,80×5,3] | **Learnable ε = softplus(log_av)**, exact Riemann reference, RAR | `examples/sod_shock/config.yaml` |
+| 1-D Toro Test 3 (blast wave) | Unsteady Euler (conservative) | MLP [2,128×4,3] | **exp/log positivity**, reference-state **non-dimensionalisation**, learnable ε, RAR | `examples/toro3/config.yaml` |
 | NACA Airfoil | Steady N-S, Re=100 | MLP / GatedMLP [2,128×6,3] | Cambered profiles, AoA via airfoil rotation, surface pressure & Cp | `examples/airfoil/config.yaml` |
 | Cylinder Cross-flow | Steady N-S, Re=40 | MLP [2,128×6,3] | Pure-PINN recipe, Cp(θ) vs inviscid reference, wake pool | `examples/cylinder/config.yaml` |
 | 3-D Pipe Flow | Steady 3-D N-S | MLP / GatedMLP [3,…,4] | Double-jacfwd Hessian, Hagen-Poiseuille exact | `examples/pipe_flow/pipe_flow.yaml` |

@@ -46,13 +46,21 @@ training:
   log_every         : 500
   seed              : 0
   save_restart_every: 500
+  # RAR (residual-based adaptive resampling): periodically rebuild the interior
+  # pool, concentrating points where the PDE residual is large (vessel bends,
+  # the aneurysm sac, the jet impingement region).
+  rar_period        : 2000   # resample interior pool every N epochs (0 = off)
+  rar_candidates    : 5      # candidate pool = N × n_interior
+  rar_k             : 1.0    # RAD residual exponent      p ∝ r^k / E[r^k] + c
+  rar_c             : 1.0    # RAD uniform-coverage constant
 
 loss:
   w_pde     : 1.0
   w_inlet   : 10.0
   w_wall    : 10.0
-  w_outlet  : 10.0
-  w_integral: 0.1     # mass-flow conservation (matches the original main.py)
+  w_outlet  : 10.0    # outlet pressure Dirichlet  p = 0
+  w_massflow: 0.1     # outlet mass-flow-rate condition  ∫_outlet u·n dA = Q
+  w_integral: 0.1     # mid-stream mass-flow-rate condition  ∫ u·n dA = Q
 
 # Mid-stream integral plane.  Points, unit normal and area are read directly
 # from ``aneurysm_integral.stl`` (STL area 2.3158 ≈ the original main.py's
@@ -67,12 +75,12 @@ integral_plane:
   normal  : [0.0927, 0.1382, -0.9861]
   n_points: 2000
 
-# Integral continuity (mass-flow conservation) — STL-only.
-# When ``auto_Q: true`` (default), Q is derived from STL inlet area:
-#   Q = (V_max/2) · A_inlet                (parabolic ⇒ U_mean = V_max/2)
-# Areas (outlet_area, integral_area) are also computed from the STL surfaces.
-# Signs convention here: outlet flux = -Q (normals point into the vessel),
-# mid-stream flux = +Q.  Matches the original main.py sign convention.
+# Integral continuity (mass-flow conservation) — STL-only.  Enforces the same
+# volumetric flow Q on the outlet plane (w_massflow) and the mid-stream plane
+# (w_integral).  When ``auto_Q: true`` (default), Q is derived from STL inlet
+# area:  Q = (V_max/2) · A_inlet            (parabolic ⇒ U_mean = V_max/2).
+# Areas (outlet_area, integral_area) are computed from the STL surfaces.  Both
+# planes use outward / downstream normals, so each flux ∫ u·n dA targets +Q.
 integral_continuity:
   enabled : true
   auto_Q  : true        # set false to use the explicit target_Q below

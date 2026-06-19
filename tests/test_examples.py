@@ -386,6 +386,29 @@ class TestExampleSodShock:
 
 
 # ---------------------------------------------------------------------------
+# 10b. Toro test 3 (blast wave — exp positivity + non-dimensionalisation)
+# ---------------------------------------------------------------------------
+
+class TestExampleToro3:
+    def test_runs_and_returns_loss_hist(self, tmp_path):
+        mod = _load_module("toro3", "toro3/toro3.py")
+        cfg = _cfg("toro3/config.yaml",
+                   {"training.epochs": 3,
+                    "training.save_restart_every": 0,
+                    "training.rar_period": 2,      # exercise RAR path
+                    "training.rar_candidates": 2,
+                    "data.n_interior": 100,
+                    "data.n_ic": 30,
+                    "data.n_bc": 20},
+                   tmp_path)
+        result = mod.run_toro3(cfg)
+        assert "loss_hist" in result
+        assert _has_nonempty_loss(result)
+        assert "eps_final" in result and result["eps_final"] > 0.0
+        assert "rel_l2" in result
+
+
+# ---------------------------------------------------------------------------
 # 11. Burgers Transfer Learning
 # ---------------------------------------------------------------------------
 
@@ -546,6 +569,8 @@ class TestExampleAneurysm:
              "training.save_restart_every": 0,
              "training.batch_r": 64,
              "training.batch_bc": 16,
+             "training.rar_period": 2,      # exercise RAR resampling path
+             "training.rar_candidates": 2,
              "data.n_interior": 100,
              "data.n_wall": 20,
              "data.n_inlet": 20,
