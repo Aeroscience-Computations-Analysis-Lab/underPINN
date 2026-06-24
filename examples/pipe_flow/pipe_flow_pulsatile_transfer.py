@@ -57,7 +57,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from underPINN.config.loader import cfg_get, save_config
-from underPINN.nn.mlp import MLP, GatedMLP
+from underPINN.nn.factory import build_model, network_config
 from underPINN.pde.navier_stokes_3d import UnsteadyNS3DPDE
 from underPINN.geometry.pipe import Pipe
 from underPINN.utils.checkpoint import (
@@ -292,10 +292,12 @@ def run_pipe_flow_pulsatile_transfer(cfg) -> dict:
     seed = int(cfg_get(tm, "seed", default=0))
 
     # ── Model + PDE ───────────────────────────────────────────────────────────
-    net_type = str(cfg_get(cfg.network, "type", default="gated_mlp")).lower()
-    _net_cls = {"mlp": MLP, "gated_mlp": GatedMLP}.get(net_type, MLP)
-    layers   = list(cfg.network.layers)
-    model    = _net_cls(layers=layers)
+    # net_cfg round-trips to prediction (saved as the run's "network" metadata);
+    # for type=temporal_fourier it carries ω = 2π/T_period so the temporal
+    # harmonics are reproduced exactly at predict time.
+    net_cfg  = network_config(cfg)
+    layers   = net_cfg["layers"]
+    model    = build_model(net_cfg)
     pde      = UnsteadyNS3DPDE(model, Re=Re)
     pipe     = Pipe(R=R, L=L, x_lo=x_lo)
 
@@ -303,7 +305,7 @@ def run_pipe_flow_pulsatile_transfer(cfg) -> dict:
           f"x ∈ [{x_lo}, {x_hi}]")
     print(f"  Inlet peak(t) = {V_max} + {V_amp}·sin(2π t/{T_period})  "
           f"(parabolic profile)")
-    print(f"  Network: {_net_cls.__name__}  layers={layers}")
+    print(f"  Network: {type(model).__name__} ({net_cfg['type']})  layers={layers}")
     overlap_pct = 100.0 * max(0.0, (dT - stride)) / dT if dT > 0 else 0.0
     print(f"  Time-marching: T_total={T_total}, dT={dT}, stride={stride}"
           f"  →  {n_windows} windows ({overlap_pct:.0f}% overlap)")
@@ -331,7 +333,7 @@ def run_pipe_flow_pulsatile_transfer(cfg) -> dict:
     base_meta = {
         "problem": "pipe_flow_pulsatile_transfer",
         "method":  "time_marching_transfer",
-        "network": {"type": net_type, "layers": layers},
+        "network": net_cfg,
         "physics": {"Re": Re, "R": R, "L": L, "x_lo": x_lo,
                     "V_max": V_max, "V_amp": V_amp, "T_period": T_period},
         "time_marching": {"T_total": T_total, "dT": dT, "stride": stride,
@@ -344,7 +346,7 @@ def run_pipe_flow_pulsatile_transfer(cfg) -> dict:
         json.dump({
             "n_windows": n_windows, "dT": dT, "stride": stride,
             "T_total": T_total,
-            "network": {"type": net_type, "layers": layers},
+            "network": net_cfg,
             "physics": base_meta["physics"],
             "windows": [
                 {"index": k, "t0": k * stride, "t1": k * stride + dT,

@@ -49,6 +49,7 @@ underPINN is a research-grade PINN engine that combines classical collocation-ba
 - 3-D **unsteady** incompressible Navier-Stokes (`(x,y,z,t) → (u,v,w,p)`; pulsatile pipe via time-marching transfer)
 - 3-D **generalized-Newtonian (Carreau)** Navier-Stokes — shear-thinning blood rheology (`μ(γ̇) = μ∞ + (μ0−μ∞)[1+(λγ̇)²]^((n−1)/2)`); pipe and AAA cases
 - 2-D steady compressible Euler — **conservative flux-divergence form** with optional artificial viscosity (oblique-shock ramp, Mach 3, θ=10°)
+- 2-D steady compressible **Navier–Stokes** — viscous Mach-3 compression ramp / **shock–boundary-layer interaction** (no-slip + isothermal `T=T₀` walls, Newtonian stress + Fourier conduction, Re=10⁴, Pr=0.72)
 - 1-D **unsteady** compressible Euler — Sod shock tube with learnable artificial viscosity + exact Riemann reference
 - 1-D **unsteady** compressible Euler — **Toro test 3** (Woodward–Colella blast wave, 5-decade pressure jump) with **exp/log positivity** + reference-state **non-dimensionalisation** for the extreme dynamic range
 - Unsteady pipe cross-section (`(y, z, t) → u`)
@@ -767,6 +768,7 @@ examples/                  # self-contained: each folder holds script + YAML
 ├── AAA/                   AAA_flow.py + config.yaml             (3-D AAA bulge, Newtonian)
 ├── AAA_rheology/          AAA_rheology.py + config.yaml         (Carreau blood, AAA bulge)
 ├── ramp/                  ramp.py     +  config.yaml            (2-D compressible Euler, M=3, AV + RAR)
+├── ramp_ns/               ramp_ns.py  +  config.yaml            (2-D compressible NS, viscous SBLI, no-slip + isothermal)
 ├── sod_shock/             sod_shock.py + config.yaml            (Sod tube, learnable ε + RAR)
 ├── toro3/                  toro3.py + config.yaml                (Toro-3 blast wave, exp positivity + non-dim)
 ├── predict_steady.py                                            (post-process steady pipe/AAA: WSS, contours, NPZ)
@@ -795,6 +797,7 @@ docs/
 | 2-D Lid-Driven Cavity | Steady N-S, Re=100 | FBPINN + SimpleGate | `LDCSolver`, attention, Re=100 | `examples/LDC/config.yaml` |
 | 2-D RANS k-ε | Turbulent channel | FBPINN | `RANSSolver`, RBA, Re=10000 | `examples/K-Epsilon/config.yaml` |
 | 2-D Compressible Ramp | Steady Euler (conservative), M=3 | MLP [2,80,80,80,80,80,4] | Oblique shock θ=10°, artificial viscosity (fixed/learnable), RAR | `examples/ramp/config.yaml` |
+| 2-D Compressible NS Ramp (SBLI) | Steady Navier–Stokes (conservative), M=3 | MLP [2,128×4,4] | Viscous shock–boundary-layer interaction, **no-slip + isothermal `T=T₀`** walls, Re=10⁴, Pr=0.72, RAR | `examples/ramp_ns/config.yaml` |
 | 1-D Sod Shock Tube | Unsteady Euler (conservative) | MLP [2,80×5,3] | **Learnable ε = softplus(log_av)**, exact Riemann reference, RAR | `examples/sod_shock/config.yaml` |
 | 1-D Toro Test 3 (blast wave) | Unsteady Euler (conservative) | MLP [2,128×4,3] | **exp/log positivity**, reference-state **non-dimensionalisation**, learnable ε, RAR | `examples/toro3/config.yaml` |
 | NACA Airfoil | Steady N-S, Re=100 | MLP / GatedMLP [2,128×6,3] | Cambered profiles, AoA via airfoil rotation, surface pressure & Cp | `examples/airfoil/config.yaml` |
@@ -826,6 +829,7 @@ docs/
 | Pipe unsteady | u_t = G + ν(u_yy + u_zz) | `PipeUnsteadyPDE.residual` | `examples/pipe_flow/` |
 | RANS k-ε | N-S + k + ε transport | `KEpsilonPDE.residual` | `examples/K-Epsilon/` |
 | Compressible Euler (2-D steady) | ∂F/∂x + ∂G/∂y = ε∇²U (conservative) | `CompressibleEulerPDE.residual` | `examples/ramp/` |
+| Compressible Navier–Stokes (2-D steady) | ∂x(F−Fv/Re) + ∂y(G−Gv/Re) = 0 | `CompressibleNS2DPDE.residual` | `examples/ramp_ns/` |
 | Compressible Euler (1-D unsteady) | ∂U/∂t + ∂F/∂x = ε∂²U/∂x² | `Euler1DUnsteadyPDE.residual` | `examples/sod_shock/` |
 | Exponential Decay | du/dt + λu = 0 | `ExpDecayODE.residual` | `examples/ode/` |
 | Harmonic Oscillator | d²u/dt² + ω²u = 0 | `HarmonicODE.residual` | `examples/ode/` |

@@ -186,6 +186,15 @@ def run_sod_shock(cfg) -> dict:
     N_r, N_ic, N_bc = xt_r_j.shape[0], xt_ic_j.shape[0], xt_bcL_j.shape[0]
     key = jax.random.PRNGKey(seed + 7)
 
+    # Restore the RNG key and the (possibly RAR-resampled) interior pool so a
+    # resumed run continues bit-exactly instead of resetting them.
+    saved_state = restart.restore_arrays()
+    if "key" in saved_state:
+        key = jnp.asarray(saved_state["key"], dtype=jnp.uint32)
+    if "xt_r" in saved_state:
+        xt_r_j = jnp.asarray(saved_state["xt_r"])
+        N_r = xt_r_j.shape[0]
+
     try:
         for ep in range(start_ep, epochs):
             # RAR: refresh the interior pool toward high-residual regions (shocks)
@@ -213,7 +222,9 @@ def run_sod_shock(cfg) -> dict:
                 logs["eps"] = eps_hist[-1]
             logger.on_epoch_end(ep, logs)
             restart.maybe_save(ep, params, opt_state,
-                               {"loss_hist": loss_hist, "eps_hist": eps_hist})
+                               {"loss_hist": loss_hist, "eps_hist": eps_hist},
+                               arrays={"xt_r": np.asarray(xt_r_j),
+                                       "key": np.asarray(key)})
     except StopIteration:
         pass
 

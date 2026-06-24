@@ -1,0 +1,64 @@
+problem: pipe_flow_pulsatile_transfer
+# Pulsatile pipe flow with the TEMPORAL-FOURIER network — learns the periodic
+# temporal dynamics far more efficiently than a plain MLP/GatedMLP.
+#
+#   python examples/pipe_flow/pipe_flow_pulsatile_transfer.py \
+#          examples/pipe_flow/pipe_flow_pulsatile_fourier.yaml
+#
+# The inlet is forced at ω = 2π/T_period.  The temporal-Fourier network lifts
+# the time input τ to harmonics [sin(kωτ), cos(kωτ)] of that exact frequency, so
+# the network gets the oscillatory basis for free and only learns the slowly
+# varying spatial amplitude/phase — overcoming the temporal spectral bias that
+# forces a plain MLP to spend hundreds of thousands of epochs per window.
+
+network:
+  type            : temporal_fourier        # 'mlp' | 'gated_mlp' | 'temporal_fourier'
+  layers          : [4, 256, 256, 256, 256, 256, 4]   # (x, y, z, t) → (u, v, w, p)
+  n_time_harmonics: 4                        # (sin,cos) harmonics of ω=2π/T_period
+  gated           : true                     # GatedMLP backbone for the spatial part
+  # omega defaults to 2π/physics.T_period; set network.omega to override.
+
+physics:
+  Re      : 40.0
+  R       : 0.5
+  L       : 7.0
+  x_lo    : -3.5
+  V_max   : 2.0
+  V_amp   : 1.0
+  T_period: 1.0       # → ω = 2π;  the network's temporal basis is tied to this
+
+time_marching:
+  T_total          : 2.0
+  dT               : 0.1
+  stride           : 0.05
+  # Far fewer epochs are needed than the plain-MLP config (which used
+  # 300k / 200k) because the oscillatory basis is built in.  These are
+  # starting points — lower further once you see the per-window loss plateau.
+  n_first_epochs   : 60000
+  n_warm_epochs    : 25000
+  n_cold_epochs    : 40000
+  compare_no_transfer: true
+  restart            : true
+  first_lr         : 1.0e-3
+  warm_lr          : 5.0e-4
+  cold_lr          : 1.0e-3
+  lr_alpha         : 0.01
+
+data:
+  n_interior: 400000
+  n_wall    : 4000
+  n_inlet   : 1000
+  n_outlet  : 1000
+  n_ic      : 2000
+  batch_r   : 2048
+  batch_bc  : 512
+
+loss:
+  w_pde   : 1.0
+  w_wall  : 100.0
+  w_inlet : 50.0
+  w_outlet: 20.0
+  w_ic    : 100.0
+
+output:
+  dir: outputs/pipe_flow_pulsatile_fourier

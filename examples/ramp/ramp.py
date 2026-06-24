@@ -218,6 +218,15 @@ def run_ramp(cfg) -> dict:
 #    stopper  = EarlyStopping(patience=patience)
     key = jax.random.PRNGKey(seed + 7)
 
+    # Restore the RNG key and the (possibly RAR-resampled) interior pool so a
+    # resumed run continues bit-exactly instead of resetting them.
+    saved_state = restart.restore_arrays()
+    if "key" in saved_state:
+        key = jnp.asarray(saved_state["key"], dtype=jnp.uint32)
+    if "xy_r" in saved_state:
+        xy_r = jnp.asarray(saved_state["xy_r"])
+        N_r = xy_r.shape[0]
+
     try:
         for ep in range(start_ep, epochs):
             # RAR: refresh the interior pool toward high-residual regions (shock)
@@ -248,7 +257,9 @@ def run_ramp(cfg) -> dict:
             logger.on_epoch_end(ep, logs)
 #            stopper.on_epoch_end(ep, logs)
             restart.maybe_save(ep, params, opt_state,
-                               {"loss_hist": loss_hist, "pde_hist": pde_hist})
+                               {"loss_hist": loss_hist, "pde_hist": pde_hist},
+                               arrays={"xy_r": np.asarray(xy_r),
+                                       "key": np.asarray(key)})
     except StopIteration:
         pass
 

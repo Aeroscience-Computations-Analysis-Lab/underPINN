@@ -112,6 +112,7 @@ class RestartManager:
     _PARAMS = "params.msgpack"
     _OPT    = "opt_state.msgpack"
     _HISTS  = "hists.npz"
+    _STATE  = "state.npz"
     _META   = "meta.json"
 
     def __init__(self, out_dir, save_every: int = 500, cfg=None):
@@ -195,10 +196,35 @@ class RestartManager:
         params,
         opt_state,
         hists: Optional[Dict[str, List[float]]] = None,
+        arrays: Optional[Dict[str, np.ndarray]] = None,
     ) -> None:
-        """Save snapshot if this epoch aligns with ``save_every``."""
+        """Save snapshot if this epoch aligns with ``save_every``.
+
+        ``arrays`` is an optional dict of extra NumPy arrays persisted with
+        their *native dtype* (e.g. the RNG key and a RAR-resampled collocation
+        pool), so a resumed run continues bit-exactly rather than resetting that
+        state.  Retrieve them on resume with :meth:`restore_arrays`.
+        """
         if (epoch + 1) % self.save_every == 0:
-            self._write(epoch, params, opt_state, hists or {}, done=False)
+            self._write(epoch, params, opt_state, hists or {}, done=False,
+                        arrays=arrays or {})
+
+    def restore_arrays(self) -> Dict[str, np.ndarray]:
+        """Return the extra arrays saved alongside the snapshot (native dtype).
+
+        Empty dict if there is no usable snapshot (same gating as
+        :meth:`maybe_restore`) or none were saved.
+        """
+        if not self.has_checkpoint():
+            return {}
+        p = self._dir / self._STATE
+        if not p.exists():
+            return {}
+        try:
+            npz = np.load(p)
+            return {k: npz[k] for k in npz.files}
+        except Exception:
+            return {}
 
     def done(self) -> None:
         """Mark training as complete.
@@ -222,6 +248,7 @@ class RestartManager:
         opt_state,
         hists: Dict[str, List[float]],
         done: bool,
+        arrays: Optional[Dict[str, np.ndarray]] = None,
     ) -> None:
         from flax import serialization
 
@@ -235,6 +262,11 @@ class RestartManager:
         if hists:
             np.savez(self._dir / self._HISTS,
                      **{k: np.array(v, dtype=np.float32) for k, v in hists.items()})
+
+        if arrays:
+            # native dtype preserved (the RNG key is uint32 — must NOT be cast)
+            np.savez(self._dir / self._STATE,
+                     **{k: np.asarray(v) for k, v in arrays.items()})
 
         meta = {
             "epoch":    epoch,

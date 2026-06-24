@@ -26,13 +26,13 @@ physics:
 
 # ── Time-marching transfer learning ───────────────────────────────────────────
 time_marching:
-  T_total          : 4.0    # integrate to long time  (= 4 pulse cycles)
+  T_total          : 2.0    # integrate to long time  (= 4 pulse cycles)
   dT               : 0.1    # length of each window
   stride           : 0.05   # spacing between window starts (= dT → non-overlapping;
                             # < dT → OVERLAPPING; e.g. dT=0.1, stride=0.05 gives
                             # [0,0.1], [0.05,0.15], [0.1,0.2], … with 50% overlap)
-  n_first_epochs   : 200000  # epochs for window 0  (cold start)
-  n_warm_epochs    : 100000   # epochs per subsequent window  (warm start → fast)
+  n_first_epochs   : 300000  # epochs for window 0  (cold start)
+  n_warm_epochs    : 200000   # epochs per subsequent window  (warm start → fast)
   n_cold_epochs    : 40000  # epochs per window for the no-transfer baseline
   compare_no_transfer: true # also run a cold-start chain for comparison
   restart            : true # resume from completed per-window checkpoints
@@ -43,7 +43,7 @@ time_marching:
 
 # ── Collocation data (per window) ─────────────────────────────────────────────
 data:
-  n_interior: 200000
+  n_interior: 400000
   n_wall    : 4000
   n_inlet   : 1000
   n_outlet  : 1000
@@ -59,4 +59,4 @@ loss:
   w_ic    : 100.0      # initial-condition match (window-to-window continuity)
 
 output:
-  dir: outputs/pipe_flow_pulsatile_transfer
+  dir: outputs/pipe_flow_pulsatile_transfer2

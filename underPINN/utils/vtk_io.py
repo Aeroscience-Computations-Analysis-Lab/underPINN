@@ -17,6 +17,7 @@ rendered directly (Point Gaussian), turned into glyphs, meshed with *Delaunay
 from __future__ import annotations
 
 import io
+import os
 import pathlib
 from typing import Mapping
 
@@ -119,6 +120,32 @@ def save_vtu_points(path, points, point_data: Mapping[str, np.ndarray] | None = 
     types = np.full(n, _VTK_VERTEX, dtype=np.uint8)
     return _write_vtu(path, points, connectivity, offsets, types,
                       point_data or {})
+
+
+def save_pvd(path, entries) -> str:
+    """Write a ParaView ``.pvd`` collection that groups a VTU time-series.
+
+    ``entries`` is an iterable of ``(timestep, vtu_path)`` pairs.  ``vtu_path``
+    is stored relative to the ``.pvd`` file's directory, so ParaView opens the
+    whole series as one time-varying dataset (play it, then *File → Save
+    Animation* to export a video).
+    """
+    path = str(path)
+    base = pathlib.Path(path).parent
+    lines = ['<?xml version="1.0"?>\n',
+             '<VTKFile type="Collection" version="0.1" '
+             'byte_order="LittleEndian">\n',
+             "  <Collection>\n"]
+    for t, vtu in entries:
+        rel = os.path.relpath(str(vtu), str(base))
+        lines.append(f'    <DataSet timestep="{float(t):.8g}" group="" '
+                     f'part="0" file="{rel}"/>\n')
+    lines.append("  </Collection>\n")
+    lines.append("</VTKFile>\n")
+    base.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        f.write("".join(lines))
+    return path
 
 
 def save_vtu_surface(path, points, triangles,

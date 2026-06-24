@@ -34,8 +34,53 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from underPINN.nn.mlp import MLP, GatedMLP
+from underPINN.nn.factory import build_model
 from underPINN.utils.checkpoint import load_checkpoint
+
+
+# ── Figure styling (publication-quality defaults) ─────────────────────────────
+plt.rcParams.update({
+    "figure.dpi":        120,
+    "savefig.dpi":       220,
+    "savefig.bbox":      "tight",
+    "savefig.facecolor": "white",
+    "font.size":         11,
+    "axes.titlesize":    12.5,
+    "axes.titleweight":  "bold",
+    "axes.labelsize":    11,
+    "axes.linewidth":    0.8,
+    "axes.edgecolor":    "#444444",
+    "axes.grid":         False,
+    "grid.alpha":        0.25,
+    "grid.linewidth":    0.6,
+    "lines.linewidth":   1.9,
+    "lines.antialiased": True,
+    "legend.frameon":    False,
+    "legend.fontsize":   9.5,
+    "image.cmap":        "turbo",
+})
+
+_CMAP = "turbo"        # perceptually-ordered replacement for the old "jet"
+_SAVE_DPI = 220
+
+
+def _field(ax, X, Y, C, levels=120, cmap=_CMAP, **kw):
+    """High-quality filled contour for a smooth scalar field."""
+    return ax.contourf(X, Y, C, levels=levels, cmap=cmap, antialiased=True, **kw)
+
+
+def _cbar(fig, mappable, ax, label, **kw):
+    cb = fig.colorbar(mappable, ax=ax, fraction=0.046, pad=0.02, **kw)
+    cb.set_label(label, fontsize=10)
+    cb.ax.tick_params(labelsize=9)
+    cb.outline.set_linewidth(0.6)
+    return cb
+
+
+def _save(fig, path):
+    fig.savefig(path, dpi=_SAVE_DPI, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    return path
 
 
 class PulsatilePredictor:
@@ -86,9 +131,9 @@ class PulsatilePredictor:
         self.n_windows = n_windows
         self.physics   = physics or {}
 
-        layers  = list(net["layers"])
-        net_cls = {"mlp": MLP, "gated_mlp": GatedMLP}.get(net.get("type", "mlp"), MLP)
-        self.model = net_cls(layers=layers)
+        # ``net`` is the full saved network config (carries ω / harmonics for
+        # the temporal-Fourier net), so the factory rebuilds the exact model.
+        self.model = build_model(net)
 
         # Which window checkpoints actually exist on disk
         self.available = sorted(
@@ -180,20 +225,24 @@ class PulsatilePredictor:
                          for t in ts])
         peak = V_max + V_amp * np.sin(omega * ts)
         fig, ax = plt.subplots(figsize=(10, 4))
-        ax.plot(ts, peak, "k--", lw=1.5, label="Inlet peak forcing")
-        ax.plot(ts, uc, "b-", lw=1.8, label=f"PINN centreline u @ x={x_mid:.1f}")
         for k in self.available[1:]:
-            ax.axvline(k * self.stride, color="grey", lw=0.5, ls=":", alpha=0.5)
+            ax.axvline(k * self.stride, color="0.7", lw=0.6, ls=":", alpha=0.7,
+                       zorder=1)
+        ax.plot(ts, peak, "--", color="#444444", lw=1.6,
+                label="Inlet peak forcing", zorder=2)
+        ax.plot(ts, uc, "-", color="#1f6fd6", lw=2.2,
+                label=f"PINN centreline u @ x={x_mid:.1f}", zorder=3)
         ax.set_xlabel("t")
-        ax.set_ylabel("u (centreline)")
-        ax.set_title(f"Pulsatile pipe — centreline velocity  (Re={Re})")
-        ax.legend(fontsize=9)
-        ax.grid(alpha=0.3)
+        ax.set_ylabel("u  (centreline)")
+        ax.set_title(f"Pulsatile pipe — centreline velocity   (Re = {Re:g})")
+        ax.legend(loc="upper right")
+        ax.grid(True, alpha=0.25)
+        ax.margins(x=0.01)
+        for s in ("top", "right"):
+            ax.spines[s].set_visible(False)
         fig.tight_layout()
-        p = os.path.join(self.out_dir, "predict_centreline_timeseries.png")
-        fig.savefig(p, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        saved.append(p)
+        saved.append(_save(fig, os.path.join(
+            self.out_dir, "predict_centreline_timeseries.png")))
 
         # 2) radial profiles at four snapshots
         Nr    = 80
@@ -201,29 +250,33 @@ class PulsatilePredictor:
         xyz_r = np.stack([np.full(Nr, x_mid, np.float32), r_arr,
                           np.zeros(Nr, np.float32)], axis=1)
         snaps = np.linspace(0.0, t_hi, 4, endpoint=False) + 0.25 * self.dT
-        fig, axes = plt.subplots(1, 4, figsize=(15, 4))
+        fig, axes = plt.subplots(1, 4, figsize=(15, 4), sharey=True)
         for ax, tt in zip(np.atleast_1d(axes), snaps):
             u_pred = self.predict(float(tt), xyz_r)[:, 0]
             pk     = V_max + V_amp * np.sin(omega * tt)
             u_qs   = pk * (1.0 - r_arr ** 2 / R ** 2)
-            ax.plot(r_arr, u_qs, "k--", lw=1.3, label="Quasi-steady")
-            ax.plot(r_arr, u_pred, "b-", lw=1.8, label="PINN")
+            ax.plot(r_arr, u_qs, "--", color="#888888", lw=1.5,
+                    label="Quasi-steady")
+            ax.fill_between(r_arr, u_pred, color="#1f6fd6", alpha=0.10, zorder=1)
+            ax.plot(r_arr, u_pred, "-", color="#1f6fd6", lw=2.2, label="PINN")
             ax.set_title(f"t = {tt:.2f}")
             ax.set_xlabel("r")
-            ax.set_ylabel("u")
-            ax.grid(alpha=0.3)
+            ax.grid(True, alpha=0.25)
+            ax.margins(x=0.02)
+            for s in ("top", "right"):
+                ax.spines[s].set_visible(False)
             if tt == snaps[0]:
-                ax.legend(fontsize=8)
-        fig.suptitle(f"Radial velocity profiles at x={x_mid:.1f}  (Re={Re})")
+                ax.set_ylabel("u")
+                ax.legend(loc="lower left")
+        fig.suptitle(f"Radial velocity profiles at x = {x_mid:.1f}   (Re = {Re:g})",
+                     fontsize=13, fontweight="bold")
         fig.tight_layout()
-        p = os.path.join(self.out_dir, "predict_radial_profiles.png")
-        fig.savefig(p, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        saved.append(p)
+        saved.append(_save(fig, os.path.join(
+            self.out_dir, "predict_radial_profiles.png")))
 
         # 3) optional cross-section of axial velocity at a chosen time
         if t_field is not None:
-            N = 80
+            N = 160
             yy = np.linspace(-R, R, N, dtype=np.float32)
             zz = np.linspace(-R, R, N, dtype=np.float32)
             YY, ZZ = np.meshgrid(yy, zz)
@@ -231,18 +284,22 @@ class PulsatilePredictor:
                             YY.ravel(), ZZ.ravel()], axis=1)
             u_cs = self.predict(float(t_field), xyz)[:, 0].reshape(N, N)
             u_cs = np.where(YY ** 2 + ZZ ** 2 > R ** 2, np.nan, u_cs)
-            fig, ax = plt.subplots(figsize=(5, 4))
-            cf = ax.contourf(yy, zz, u_cs, levels=50, cmap="jet")
-            plt.colorbar(cf, ax=ax, label="u")
+            fig, ax = plt.subplots(figsize=(5.4, 4.4))
+            wall = plt.Circle((0, 0), R, fill=False, lw=1.6, edgecolor="#222222")
+            ax.add_patch(wall)
+            cf = _field(ax, yy, zz, u_cs, levels=120)
+            try:                                  # clip the field exactly to the wall
+                cf.set_clip_path(wall)
+            except Exception:
+                pass
+            _cbar(fig, cf, ax, "u  (axial velocity)")
             ax.set_aspect("equal")
             ax.set_xlabel("y")
             ax.set_ylabel("z")
-            ax.set_title(f"Axial velocity u at x={x_mid:.1f}, t={t_field:.2f}")
+            ax.set_title(f"Axial velocity at x = {x_mid:.1f},  t = {t_field:.2f}")
             fig.tight_layout()
-            p = os.path.join(self.out_dir, f"predict_crosssection_t{t_field:.2f}.png")
-            fig.savefig(p, dpi=150, bbox_inches="tight")
-            plt.close(fig)
-            saved.append(p)
+            saved.append(_save(fig, os.path.join(
+                self.out_dir, f"predict_crosssection_t{t_field:.2f}.png")))
 
         # 4) optional streamwise (axial) plane z=0:  u(x, y) + streamlines
         if t_field is not None:
@@ -257,25 +314,26 @@ class PulsatilePredictor:
             U = pred[:, 0].reshape(Ny, Nx)        # streamwise velocity
             V = pred[:, 1].reshape(Ny, Nx)        # transverse (y) velocity
 
-            fig, ax = plt.subplots(figsize=(15, 3.4))
-            cf = ax.contourf(xg, yg, U, levels=60, cmap="jet")
-            plt.colorbar(cf, ax=ax, label="u (streamwise)")
+            fig, ax = plt.subplots(figsize=(15, 3.6))
+            cf = _field(ax, xg, yg, U, levels=120)
+            _cbar(fig, cf, ax, "u  (streamwise)")
             # streamlines show the in-plane flow direction
             ax.streamplot(xg, yg, np.nan_to_num(U), np.nan_to_num(V),
-                          density=(2.4, 0.6), color="k", linewidth=0.5,
-                          arrowsize=0.7)
+                          density=(2.6, 0.6), color=(0, 0, 0, 0.55),
+                          linewidth=0.6, arrowsize=0.8)
+            # pipe walls
+            ax.axhline(R,  color="#222222", lw=1.6)
+            ax.axhline(-R, color="#222222", lw=1.6)
             ax.set_xlim(x_lo, x_hi)
             ax.set_ylim(-R, R)
             ax.set_aspect("equal")
             ax.set_xlabel("x  (streamwise)")
             ax.set_ylabel("y")
-            ax.set_title(f"Streamwise plane z=0 — u & streamlines  "
-                         f"(t={t_field:.2f}, Re={Re})")
+            ax.set_title(f"Streamwise plane z = 0 — u & streamlines   "
+                         f"(t = {t_field:.2f},  Re = {Re:g})")
             fig.tight_layout()
-            p = os.path.join(self.out_dir, f"predict_axial_plane_t{t_field:.2f}.png")
-            fig.savefig(p, dpi=150, bbox_inches="tight")
-            plt.close(fig)
-            saved.append(p)
+            saved.append(_save(fig, os.path.join(
+                self.out_dir, f"predict_axial_plane_t{t_field:.2f}.png")))
 
         return saved
 
@@ -315,16 +373,13 @@ class PulsatilePredictor:
             U[j] = self.predict(float(t), base)[:, 0]
 
         fig, ax = plt.subplots(figsize=(11, 4))
-        cf = ax.contourf(ts, xs, U.T, levels=60, cmap="jet")
-        fig.colorbar(cf, ax=ax, label="u (centreline, r=0)")
+        cf = _field(ax, ts, xs, U.T, levels=120)
+        _cbar(fig, cf, ax, "u  (centreline, r = 0)")
         ax.set_xlabel("t")
         ax.set_ylabel("x  (streamwise)")
-        ax.set_title(f"Centreline axial velocity — space–time  (Re={Re})")
+        ax.set_title(f"Centreline axial velocity — space–time   (Re = {Re:g})")
         fig.tight_layout()
-        out = os.path.join(self.out_dir, filename)
-        fig.savefig(out, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        return out
+        return _save(fig, os.path.join(self.out_dir, filename))
 
     def save_axial_animation(
         self, n_frames: int = 80, fps: int = 12,
@@ -346,22 +401,24 @@ class PulsatilePredictor:
         frames = [self.predict(float(t), base)[:, 0].reshape(Ny, Nx) for t in times]
         vmin = float(min(U.min() for U in frames))
         vmax = float(max(U.max() for U in frames))
-        levels = np.linspace(vmin, vmax, 50)
+        levels = np.linspace(vmin, vmax, 120)
 
         from matplotlib.animation import FuncAnimation, PillowWriter
-        fig, ax = plt.subplots(figsize=(14, 3.2))
-        cf0 = ax.contourf(xg, yg, frames[0], levels=levels, cmap="jet")
-        fig.colorbar(cf0, ax=ax, label="u (streamwise)")
+        fig, ax = plt.subplots(figsize=(14, 3.4))
+        cf0 = _field(ax, xg, yg, frames[0], levels=levels)
+        _cbar(fig, cf0, ax, "u  (streamwise)")
 
         def _draw(i):
             ax.clear()
-            ax.contourf(xg, yg, frames[i], levels=levels, cmap="jet")
+            _field(ax, xg, yg, frames[i], levels=levels)
+            ax.axhline(R,  color="#222222", lw=1.4)
+            ax.axhline(-R, color="#222222", lw=1.4)
             ax.set_aspect("equal")
             ax.set_xlim(x_lo, x_hi)
             ax.set_ylim(-R, R)
             ax.set_xlabel("x  (streamwise)")
             ax.set_ylabel("y")
-            ax.set_title(f"u(x, y)  z=0    t = {times[i]:.3f}    (Re={Re})")
+            ax.set_title(f"u(x, y)  z = 0     t = {times[i]:.3f}     (Re = {Re:g})")
 
         anim = FuncAnimation(fig, _draw, frames=len(times), interval=1000.0 / fps)
         out = os.path.join(self.out_dir, filename)
@@ -369,6 +426,71 @@ class PulsatilePredictor:
         plt.close(fig)
         print(f"  saved animation ({len(times)} frames) → {out}")
         return out
+
+    # ------------------------------------------------------------------
+    # 3-D time-dependent VTU series for ParaView (→ video)
+    # ------------------------------------------------------------------
+
+    def save_vtu_timeseries(
+        self, n_frames: int = 60, n_axial: int = 120, n_radial: int = 12,
+        n_theta: int = 24, t0: float = 0.0, t1: float | None = None,
+        subdir: str = "vtu_series", name: str = "pulsatile_3d",
+    ) -> str:
+        """Write a 3-D time-dependent VTU series (+ a ``.pvd`` collection).
+
+        The full 3-D velocity field (u, v, w), pressure and speed are sampled on
+        a fixed cylindrical point cloud filling the pipe and evaluated at
+        ``n_frames`` times across the covered horizon.  One ``.vtu`` is written
+        per frame, and a ParaView ``.pvd`` collection ties them together with
+        physical time values.
+
+        Open the ``.pvd`` in ParaView, colour by ``speed`` (and *Glyph* the
+        ``velocity`` vectors / apply *Delaunay 3D* for a solid render), then
+        *File → Save Animation* to export an ``.mp4`` / ``.avi`` video.
+
+        Returns the path to the ``.pvd`` file.
+        """
+        from underPINN.utils.vtk_io import save_vtu_points, save_pvd
+
+        ph = self._phys()
+        R, x_lo, L = ph["R"], ph["x_lo"], ph["L"]
+        x_hi = x_lo + L
+        t1   = self.t_max if t1 is None else float(t1)
+        times = np.linspace(t0, t1, n_frames, endpoint=False)
+
+        # Fixed cylindrical point cloud (geometry constant; fields vary in time).
+        # A single axis point per x-station avoids duplicate centre nodes.
+        xg = np.linspace(x_lo, x_hi, n_axial, dtype=np.float32)
+        rg = np.linspace(0.0, R, n_radial, dtype=np.float32)
+        th = np.linspace(0.0, 2.0 * np.pi, n_theta, endpoint=False, dtype=np.float32)
+        yz = [(0.0, 0.0)]                              # axis (r = 0) once
+        for r in rg[1:]:
+            for t in th:
+                yz.append((float(r * np.cos(t)), float(r * np.sin(t))))
+        yz = np.asarray(yz, dtype=np.float32)         # (M, 2)
+        M  = yz.shape[0]
+        xyz = np.empty((n_axial * M, 3), dtype=np.float32)
+        for i, x in enumerate(xg):
+            xyz[i * M:(i + 1) * M, 0] = x
+            xyz[i * M:(i + 1) * M, 1:] = yz
+
+        series_dir = os.path.join(self.out_dir, subdir)
+        os.makedirs(series_dir, exist_ok=True)
+        entries = []
+        for k, t in enumerate(times):
+            uvwp  = self.predict(float(t), xyz)       # (N, 4)
+            vel   = uvwp[:, :3]
+            vtu = save_vtu_points(
+                os.path.join(series_dir, f"{name}_{k:04d}.vtu"),
+                xyz.astype(np.float64),
+                {"velocity": vel, "pressure": uvwp[:, 3],
+                 "speed": np.linalg.norm(vel, axis=1)},
+            )
+            entries.append((float(t), vtu))
+        pvd = save_pvd(os.path.join(self.out_dir, f"{name}.pvd"), entries)
+        print(f"  saved 3-D VTU series: {len(times)} frames × {xyz.shape[0]} pts "
+              f"→ {pvd}")
+        return pvd
 
 
 if __name__ == "__main__":
@@ -386,6 +508,8 @@ if __name__ == "__main__":
                     help="save the centreline u(x, t) space-time map (all times)")
     ap.add_argument("--animate", action="store_true",
                     help="save a GIF of the streamwise-plane u contour over all times")
+    ap.add_argument("--vtu", action="store_true",
+                    help="save a 3-D time-dependent VTU series + .pvd (ParaView → video)")
     ap.add_argument("--frames", type=int, default=80, help="animation frames (default 80)")
     ap.add_argument("--fps", type=int, default=12, help="animation frames per second")
     args = ap.parse_args()
@@ -415,5 +539,9 @@ if __name__ == "__main__":
         print("Saved:", pred.save_axial_animation(n_frames=args.frames, fps=args.fps))
         did_something = True
 
+    if args.vtu:
+        print("Saved:", pred.save_vtu_timeseries(n_frames=args.frames))
+        did_something = True
+
     if not did_something:
-        ap.error("nothing to do — pass --t, --plot, --spacetime, and/or --animate")
+        ap.error("nothing to do — pass --t, --plot, --spacetime, --animate, and/or --vtu")

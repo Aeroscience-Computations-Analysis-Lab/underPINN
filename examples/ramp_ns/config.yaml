@@ -1,0 +1,59 @@
+problem: ramp_ns
+# 2-D compressible Navier–Stokes — Mach-3 viscous compression ramp (SBLI).
+#
+# Supersonic M∞ = 3 flow over a flat bottom wall then a compression ramp.
+# Walls are NO-SLIP and ISOTHERMAL at the total (stagnation) temperature
+# T0 = 1 + ½(γ−1)M² = 2.8 (for M=3, γ=1.4).  Re = 1e4, Pr = 0.72.
+#
+#   python examples/ramp_ns/ramp_ns.py
+#   python -m underPINN run examples/ramp_ns/config.yaml
+
+network:
+  type  : mlp
+  layers: [2, 128, 128, 128, 128, 4]   # (x, y) → (f_ρ, f_u, f_v, f_T)
+
+physics:
+  gamma    : 1.4
+  M_inf    : 3.0      # freestream Mach number
+  Re       : 10000.0  # Reynolds number  ρ∞U∞L/μ∞
+  Pr       : 0.72     # Prandtl number
+  theta_deg: 15.0     # ramp (compression) angle
+  mu_law   : constant # 'constant' (μ*=1) or 'sutherland'
+
+geometry:
+  L         : 2.0     # domain length
+  H         : 1.0     # domain height
+  ramp_start: 0.8     # flat bottom wall on [0, ramp_start]; ramp after it
+  slip_end  : 0.15    # slip wall (v=0 only) on [0, slip_end]; no-slip after it
+                      # — removes the inlet/no-slip leading-edge corner conflict
+
+data:
+  n_interior: 12000
+  n_inlet   : 400
+  n_wall    : 600     # no-slip region points
+  n_slip    : 200     # slip region points
+  n_upper   : 300
+
+training:
+  epochs            : 40000
+  lr                : 1.0e-3
+  lr_alpha          : 0.01
+  batch_r           : 2048
+  batch_bc          : 256
+  log_every         : 500
+  seed              : 0
+  save_restart_every: 1000
+  rar_period        : 4000   # RAR: resample interior pool every N epochs (0 = off)
+  rar_candidates    : 5
+  rar_k             : 1.0
+  rar_c             : 1.0
+
+loss:
+  w_pde  : 1.0
+  w_inlet: 100.0   # supersonic inflow fixes all freestream variables
+  w_wall : 100.0   # no-slip (u=v=0) + isothermal (T=T0)
+  w_slip : 80.0    # slip region — no-penetration (v=0) only
+  w_upper: 20.0    # freestream farfield
+
+output:
+  dir: outputs/ramp_ns

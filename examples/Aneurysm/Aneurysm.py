@@ -262,17 +262,21 @@ def run_Aneurysm(cfg) -> dict:
         print(f"  Outlet mass-flow plane  A={geom.outlet_area:.4f}  "
               f"n_out(outward)={n_out_vec.round(3).tolist()}")
 
+        # Mid-stream mass-flow direction: reverse the plane normal so the
+        # enforced flux ∫ u·n dA = +Q points the opposite way along the vessel
+        # axis (i.e. flip the mid-stream mass-flow direction).
+        mid_normal = -ip_normal
         if geom.integral_mesh is not None:
-            # Mid-stream points / normal / area straight off the integral STL.
-            # ``orient=ip_normal`` keeps the original downstream (+Q) sign.
+            # Mid-stream points / normal / area straight off the integral STL,
+            # oriented to the (flipped) ``mid_normal``.
             xyz_mid_ic, n_mid_ic, area_mid_from_stl = geom.sample_integral(
-                n_ip, seed=42, orient=ip_normal)
+                n_ip, seed=42, orient=mid_normal)
             print(f"  Mid-stream plane from aneurysm_integral.stl  "
                   f"A={area_mid_from_stl:.4f}  n={n_mid_ic[0].round(3).tolist()}")
         else:
             # Fallback: cut a slice through the closed mesh
             xyz_mid_ic, n_mid_ic, area_mid_from_stl = geom.sample_plane(
-                ip_origin, ip_normal, n=n_ip, seed=42)
+                ip_origin, mid_normal, n=n_ip, seed=42)
 
         # Re-derive the target Q from the STL inlet area (mass conservation,
         # parabolic profile → U_mean = V_max / 2).  Overrides the config value.
@@ -374,6 +378,15 @@ def run_Aneurysm(cfg) -> dict:
                              replace=rar_pool.shape[0] < n)
             return rar_pool[idx]
 
+    # Restore the RNG key and the (possibly RAR-resampled) interior pool so a
+    # resumed run continues bit-exactly instead of resetting them.
+    saved_state = restart.restore_arrays()
+    if "key" in saved_state:
+        key = jnp.asarray(saved_state["key"], dtype=jnp.uint32)
+    if "xyz_int" in saved_state:
+        xyz_int_j = jnp.asarray(saved_state["xyz_int"])
+        N_r = xyz_int_j.shape[0]
+
     try:
         for ep in range(start_ep, epochs):
             # RAR: refresh the interior pool toward high-residual regions
@@ -401,7 +414,9 @@ def run_Aneurysm(cfg) -> dict:
                                      "outlet": float(ol),
                                      "massflow": float(ml),
                                      "integral": float(intl)})
-            restart.maybe_save(ep, params, opt_state, {"loss_hist": loss_hist})
+            restart.maybe_save(ep, params, opt_state, {"loss_hist": loss_hist},
+                               arrays={"xyz_int": np.asarray(xyz_int_j),
+                                       "key": np.asarray(key)})
     except StopIteration:
         pass
 

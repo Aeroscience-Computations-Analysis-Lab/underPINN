@@ -37,7 +37,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from underPINN.config.loader import cfg_get, save_config
-from underPINN.nn.mlp import MLP, GatedMLP
+from underPINN.nn.factory import build_model, network_config
 from underPINN.utils.checkpoint import load_checkpoint, read_metadata, save_checkpoint
 from underPINN.utils.sampling import safe_choice
 
@@ -234,8 +234,8 @@ def run_pulsatile_time_march(
 
     # ── Model (already built and wired into pde by the caller) ────────────────
     model    = pde.model
-    net_type = str(cfg_get(cfg.network, "type", default="gated_mlp")).lower()
-    layers   = list(cfg.network.layers)
+    net_cfg  = network_config(cfg)              # round-trips to prediction
+    layers   = net_cfg["layers"]
 
     overlap_pct = 100.0 * max(0.0, (dT - stride)) / dT if dT > 0 else 0.0
     print(f"{label} (3-D unsteady)")
@@ -257,7 +257,7 @@ def run_pulsatile_time_march(
     base_meta = {
         "problem": problem_name,
         "method":  "time_marching_transfer",
-        "network": {"type": net_type, "layers": layers},
+        "network": net_cfg,
         "physics": physics_record,
         "time_marching": {"T_total": T_total, "dT": dT, "stride": stride,
                           "n_windows": n_windows},
@@ -269,7 +269,7 @@ def run_pulsatile_time_march(
         json.dump({
             "n_windows": n_windows, "dT": dT, "stride": stride,
             "T_total": T_total,
-            "network": {"type": net_type, "layers": layers},
+            "network": net_cfg,
             "physics": physics_record,
             "windows": [
                 {"index": k, "t0": k * stride, "t1": k * stride + dT,
@@ -497,11 +497,13 @@ def run_pulsatile_time_march(
 
 
 def make_model_from_cfg(cfg) -> tuple:
-    """Build the MLP/GatedMLP referred to by the config; returns (model, type_str)."""
-    net_type = str(cfg_get(cfg.network, "type", default="gated_mlp")).lower()
-    layers   = list(cfg.network.layers)
-    cls = {"mlp": MLP, "gated_mlp": GatedMLP}.get(net_type, MLP)
-    return cls(layers=layers), net_type
+    """Build the network referred to by the config; returns (model, type_str).
+
+    Supports ``mlp``, ``gated_mlp``, ``fourier_mlp`` and ``temporal_fourier``
+    (the temporal-Fourier network derives ω = 2π/T_period from ``physics``).
+    """
+    net_cfg = network_config(cfg)
+    return build_model(net_cfg), net_cfg["type"]
 
 
 def cosine_squared_inlet_factory(

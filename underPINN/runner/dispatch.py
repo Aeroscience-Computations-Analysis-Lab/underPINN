@@ -46,6 +46,7 @@ _REGISTRY: dict[str, tuple[str, str]] = {
         "run_AAA_rheology",
     ),
     "ramp":          ("examples/ramp/ramp.py",               "run_ramp"),
+    "ramp_ns":       ("examples/ramp_ns/ramp_ns.py",         "run_ramp_ns"),
     "sod_shock":     ("examples/sod_shock/sod_shock.py",     "run_sod_shock"),
     "toro3":         ("examples/toro3/toro3.py",             "run_toro3"),
 

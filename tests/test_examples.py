@@ -354,6 +354,29 @@ class TestExampleRamp:
 
 
 # ---------------------------------------------------------------------------
+# 10a2. Compressible NS ramp (viscous SBLI — no-slip + isothermal walls)
+# ---------------------------------------------------------------------------
+
+class TestExampleRampNS:
+    def test_runs_and_returns_loss_hist(self, tmp_path):
+        mod = _load_module("ramp_ns", "ramp_ns/ramp_ns.py")
+        cfg = _cfg("ramp_ns/config.yaml",
+                   {"training.epochs": 3,
+                    "training.save_restart_every": 0,
+                    "training.rar_period": 2,
+                    "training.rar_candidates": 2,
+                    "data.n_interior": 50,
+                    "data.n_inlet": 10,
+                    "data.n_wall": 10,
+                    "data.n_slip": 10,
+                    "data.n_upper": 10},
+                   tmp_path)
+        result = mod.run_ramp_ns(cfg)
+        assert "loss_hist" in result
+        assert _has_nonempty_loss(result)
+
+
+# ---------------------------------------------------------------------------
 # 10b. Sod Shock Tube (1-D unsteady Euler, learnable artificial viscosity)
 # ---------------------------------------------------------------------------
 
