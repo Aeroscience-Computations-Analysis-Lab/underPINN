@@ -54,15 +54,33 @@ class CompressibleNS2DPDE(BasePDE):
 
     def __init__(self, model, gamma: float = 1.4, M_inf: float = 3.0,
                  Re: float = 1.0e4, Pr: float = 0.72, eps: float = 1e-6,
-                 mu_law: str = "constant", suth_S: float = 0.383):
-        self.model  = model
-        self.gamma  = float(gamma)
-        self.M_inf  = float(M_inf)
-        self.Re     = float(Re)
-        self.Pr     = float(Pr)
-        self.eps    = float(eps)
-        self.mu_law = str(mu_law).lower()
-        self.suth_S = float(suth_S)
+                 mu_law: str = "constant", suth_S: float = 0.383,
+                 art_visc: float = 0.0, av_sensor: str = "ducros",
+                 av_s: float = 0.05):
+        self.model    = model
+        self.gamma    = float(gamma)
+        self.M_inf    = float(M_inf)
+        self.Re       = float(Re)
+        self.Pr       = float(Pr)
+        self.eps      = float(eps)
+        self.mu_law   = str(mu_law).lower()
+        self.suth_S   = float(suth_S)
+        # Artificial viscosity ε on the conserved-variable Laplacian −ε∇²U.
+        # At high Re the physical viscosity is tiny, so the shock is nearly
+        # inviscid and a PINN develops Gibbs oscillations there; a small ε adds
+        # numerical dissipation that stabilises the shock (shock capturing).
+        #
+        # ``av_sensor`` localises that dissipation so it does NOT smear the
+        # boundary layer or smooth flow (which would lower |∇ρ| where you want
+        # it sharp):
+        #   "ducros" (default) — ε_local = ε · θ²/(θ²+ω²) · ½(1−tanh(θ/s)),
+        #                        active only at compression shocks (θ=∇·u<0,
+        #                        dilatation-dominated), ≈0 in the vorticity-
+        #                        dominated boundary layer and in expansions.
+        #   "global"           — uniform ε everywhere (smears ρ globally).
+        self.art_visc  = float(art_visc)
+        self.av_sensor = str(av_sensor).lower()
+        self.av_s      = float(av_s)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -169,7 +187,33 @@ class CompressibleNS2DPDE(BasePDE):
             G_tot = G - Gv / Re
             return jnp.stack([F_tot, G_tot], axis=1)    # (4, 2)
 
-        # Divergence:  ∂F_tot/∂x + ∂G_tot/∂y  (nested jacfwd ⇒ 2nd-order AD)
-        H   = jax.vmap(jax.jacfwd(_flux_pair))(xy)      # (N, 4, 2, 2)
-        res = H[:, :, 0, 0] + H[:, :, 1, 1]             # (N, 4)
-        return res
+        def _cons(p_in):                                # conserved U = (ρ, ρu, ρv, E)
+            rho, u, v, T = _prim(p_in)
+            p = rho * T / (gamma * M2)
+            E = p / (gamma - 1.0) + 0.5 * rho * (u * u + v * v)
+            return jnp.stack([rho, rho * u, rho * v, E])
+
+        av       = self.art_visc
+        ducros   = self.av_sensor == "ducros"
+        av_s     = self.av_s
+
+        def _point_res(p_in):
+            # Divergence  ∂F_tot/∂x + ∂G_tot/∂y  (nested jacfwd ⇒ 2nd-order AD)
+            Hf = jax.jacfwd(_flux_pair)(p_in)           # (4, 2, 2)
+            r  = Hf[:, 0, 0] + Hf[:, 1, 1]              # (4,)
+            if av > 0.0:
+                # Artificial viscosity:  − ε_local ∇²U  (Laplacian of conserved U)
+                Hc  = jax.jacfwd(jax.jacfwd(_cons))(p_in)   # (4, 2, 2)
+                lap = Hc[:, 0, 0] + Hc[:, 1, 1]             # (4,)
+                eps_local = av
+                if ducros:
+                    Jp    = jax.jacfwd(_prim)(p_in)         # (4, 2)
+                    theta = Jp[1, 0] + Jp[2, 1]             # ∇·u (dilatation)
+                    omega = Jp[2, 0] - Jp[1, 1]             # ∂x v − ∂y u (vorticity)
+                    phi   = theta ** 2 / (theta ** 2 + omega ** 2 + 1e-8)
+                    comp  = 0.5 * (1.0 - jnp.tanh(theta / av_s))   # ≈1 for θ<0
+                    eps_local = av * phi * comp             # shock-localised
+                r = r - eps_local * lap
+            return r
+
+        return jax.vmap(_point_res)(xy)                 # (N, 4)

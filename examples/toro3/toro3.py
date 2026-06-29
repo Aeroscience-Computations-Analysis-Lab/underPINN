@@ -44,7 +44,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from underPINN.config.loader import cfg_get, save_config
-from underPINN.nn.mlp import MLP, GatedMLP
+from underPINN.nn.factory import build_model, network_config
 from underPINN.pde.euler_1d_unsteady import Euler1DUnsteadyPDE
 from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.utils.checkpoint import save_checkpoint
@@ -154,13 +154,13 @@ def run_toro3(cfg) -> dict:
     bcR_tgt  = jnp.array(np.array(right_nd, np.float32))
 
     # ── Model + PDE (exp positivity, non-dimensional) ─────────────────────────
-    net_type = str(cfg_get(cfg.network, "type", default="mlp")).lower()
-    _net_cls = {"mlp": MLP, "gated_mlp": GatedMLP}.get(net_type, MLP)
-    layers   = list(cfg.network.layers)
-    model    = _net_cls(layers=layers)
+    net_cfg  = network_config(cfg)
+    net_type = net_cfg["type"]
+    layers   = net_cfg["layers"]
+    model    = build_model(net_cfg)
     pde      = Euler1DUnsteadyPDE(model, gamma=gamma, art_visc=art_visc,
                                   transform=transform)
-    print(f"  Network: {_net_cls.__name__}  layers={layers}")
+    print(f"  Network: {type(model).__name__} ({net_type})  layers={layers}")
 
     key    = jax.random.PRNGKey(seed)
     params = model.init(key, jnp.ones((1, 2)))
@@ -317,7 +317,7 @@ def run_toro3(cfg) -> dict:
     save_config(cfg, os.path.join(out_dir, "config.yaml"))
     save_checkpoint(params, out_dir, metadata={
         "problem": "toro3",
-        "network": {"type": net_type, "layers": layers},
+        "network": net_cfg,
         "physics": {"gamma": gamma, "x0": x0, "t_final": t_final,
                     "left": list(left), "right": list(right),
                     "transform": transform, "rho_ref": rho_ref, "p_ref": p_ref,

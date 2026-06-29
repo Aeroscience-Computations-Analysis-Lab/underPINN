@@ -39,7 +39,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from underPINN.config.loader import cfg_get, save_config
-from underPINN.nn.mlp import MLP, GatedMLP
+from underPINN.nn.factory import build_model, network_config
 from underPINN.pde.carreau_ns_3d import CarreauNS3DPDE, carreau_developed_profile
 from underPINN.geometry.pipe import Pipe
 from underPINN.callbacks.logging import ConsoleLogger
@@ -125,12 +125,12 @@ def run_pipe_flow_rheology(cfg) -> dict:
     u_in_t = jnp.array(inlet_velocity(r_in))
 
     # ── Model + PDE ───────────────────────────────────────────────────────────
-    net_type = str(cfg_get(cfg.network, "type", default="gated_mlp")).lower()
-    _net_cls = {"mlp": MLP, "gated_mlp": GatedMLP}.get(net_type, MLP)
-    layers   = list(cfg.network.layers)
-    model    = _net_cls(layers=layers)
+    net_cfg  = network_config(cfg)
+    net_type = net_cfg["type"]
+    layers   = net_cfg["layers"]
+    model    = build_model(net_cfg)
     pde      = CarreauNS3DPDE(model, Re=Re, beta=beta, Cu=Cu, n=n)
-    print(f"  Network: {_net_cls.__name__}  layers={layers}")
+    print(f"  Network: {type(model).__name__} ({net_type})  layers={layers}")
 
     key    = jax.random.PRNGKey(seed)
     params = model.init(key, jnp.ones((1, 3)))
@@ -279,7 +279,7 @@ def run_pipe_flow_rheology(cfg) -> dict:
     )
     save_checkpoint(params, out_dir, metadata={
         "problem": "pipe_flow_rheology",
-        "network": {"type": net_type, "layers": layers},
+        "network": net_cfg,
         "physics": {"Re": Re, "R": R, "L": L, "x_lo": x_lo, "U_max": U_max,
                     "beta": beta, "Cu": Cu, "n": n},
         "results": {"rel_l2_u": rel_l2, "dpdx_nd": dpdx_nd, "n_epochs": len(loss_hist)},

@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import os
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
-import sys
 
 import numpy as np
 import matplotlib
@@ -33,12 +32,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, PillowWriter
 
-# Reuse the predictor + publication-quality plot helpers from the pipe module.
-_HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_HERE, "..", "pipe_flow"))
-from predict_pulsatile import (  # noqa: E402
-    PulsatilePredictor, _field, _cbar, _save, _CMAP,
-)
+from underPINN.postprocess import PulsatilePredictor, _field, _cbar, _save, _CMAP
 
 _COL = "#1f6fd6"
 

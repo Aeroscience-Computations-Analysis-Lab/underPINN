@@ -46,7 +46,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from underPINN.config.loader import cfg_get, save_config
-from underPINN.nn.mlp import MLP, GatedMLP
+from underPINN.nn.factory import build_model, network_config
 from underPINN.pde.navier_stokes import NavierStokesPDE
 from underPINN.geometry.cylinder import Cylinder2D
 from underPINN.callbacks.logging import ConsoleLogger
@@ -185,13 +185,10 @@ def run_cylinder(cfg) -> dict:
     xy_body_j   = jnp.array(cyl.surface_points(n=n_body), dtype=jnp.float32)
 
     # ── Model + PDE ───────────────────────────────────────────────────────────
-    net_type = str(cfg_get(cfg.network, "type", default="mlp")).lower()
-    _net_cls = {"mlp": MLP, "gated_mlp": GatedMLP}.get(net_type)
-    if _net_cls is None:
-        raise ValueError(f"Unknown network type '{net_type}'. "
-                         f"Choose 'mlp' or 'gated_mlp'.")
-    model = _net_cls(layers=list(cfg.network.layers))
-    print(f"  Network: {_net_cls.__name__}  layers={list(cfg.network.layers)}")
+    net_cfg  = network_config(cfg)
+    net_type = net_cfg["type"]
+    model    = build_model(net_cfg)
+    print(f"  Network: {type(model).__name__} ({net_type})  layers={list(cfg.network.layers)}")
     pde   = NavierStokesPDE(model, Re=Re)
 
     key    = jax.random.PRNGKey(seed)
@@ -409,7 +406,7 @@ def run_cylinder(cfg) -> dict:
 
     save_checkpoint(params, out_dir, metadata={
         "problem": "cylinder",
-        "network": {"type": net_type, "layers": list(cfg.network.layers)},
+        "network": net_cfg,
         "physics": {"Re": Re, "R": R, "U_inf": U_inf, "cx": cx, "cy": cy},
         "results": {"final_loss": loss_hist[-1] if loss_hist else float("nan"),
                     "n_epochs": len(loss_hist)},

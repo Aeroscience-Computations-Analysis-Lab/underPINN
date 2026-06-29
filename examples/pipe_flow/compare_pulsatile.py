@@ -30,18 +30,13 @@ from __future__ import annotations
 
 import os
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
-import sys
 
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# Sibling import: reuse the predictor + the publication-quality plot helpers.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from predict_pulsatile import (  # noqa: E402
-    PulsatilePredictor, _field, _cbar, _save, _CMAP,
-)
+from underPINN.postprocess import PulsatilePredictor, _field, _cbar, _save, _CMAP
 
 _COL_A = "#1f6fd6"      # Newtonian  (blue)
 _COL_B = "#d1495b"      # Carreau / non-Newtonian (warm red)

@@ -83,6 +83,25 @@ class RampGeometry:
     # Boundaries
     # ------------------------------------------------------------------
 
+    def sample_boundary_layer(self, n: int, beta: float = 4.0,
+                              seed: int = 0) -> np.ndarray:
+        """Interior points clustered toward the lower wall (BL resolution).
+
+        For each x the wall-normal coordinate is geometrically **stretched** so
+        the point density is highest at the wall and decays into the freestream
+        — exactly the bias a boundary-layer CFD mesh uses.  ``beta`` controls the
+        clustering (higher ⇒ tighter to the wall).  Guarantees the thin viscous
+        layer is resolved from the first epoch, independent of the residual.
+        """
+        rng = np.random.default_rng(seed)
+        x   = rng.uniform(0.0, self.L, n).astype(np.float32)
+        yw  = self.y_wall(x)
+        xi  = rng.uniform(0.0, 1.0, n)
+        frac = np.expm1(beta * xi) / np.expm1(beta)      # ∈ [0,1], dense near 0
+        frac = np.clip(frac, 0.0, 0.999)                 # keep strictly interior
+        y = (yw + frac * (self.H - yw)).astype(np.float32)
+        return np.stack([x, y], axis=1)
+
     def sample_inlet(self, n: int) -> np.ndarray:
         """Inlet: x = 0, y ∈ [0, H]  (uniform spacing)."""
         y = np.linspace(0.0, self.H, n, dtype=np.float32)

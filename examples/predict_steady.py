@@ -54,7 +54,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from underPINN.config.loader import cfg_get, load_config
-from underPINN.nn.mlp import MLP, GatedMLP
+from underPINN.nn.factory import build_model, network_config
 from underPINN.utils.checkpoint import load_checkpoint
 from underPINN.geometry.aaa import BulgeGeometry
 
@@ -215,10 +215,8 @@ def predict_steady(out_dir: str) -> dict:
     radius     = case["radius"]
 
     # ── Model + checkpoint ────────────────────────────────────────────────────
-    net_type = str(cfg_get(cfg.network, "type", default="mlp")).lower()
-    net_cls  = {"mlp": MLP, "gated_mlp": GatedMLP}.get(net_type, MLP)
-    model    = net_cls(layers=list(cfg.network.layers))
-    params   = load_checkpoint(model, out_dir)
+    model  = build_model(network_config(cfg))
+    params = load_checkpoint(model, out_dir)
     print(f"[predict] {case['label']}   Re={case['Re']:.2f}   "
           f"x ∈ [{x_lo:.2f}, {x_hi:.2f}]")
 

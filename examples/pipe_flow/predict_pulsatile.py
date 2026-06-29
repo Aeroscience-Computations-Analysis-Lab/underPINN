@@ -1,202 +1,34 @@
-"""Load a trained pulsatile-pipe time-marching model and predict at any time.
+"""Pulsatile-pipe post-processing (figures, animation, 3-D VTU) + CLI.
 
-The time-marching run saves one checkpoint per window under
-``<out_dir>/windows/`` plus an index ``<out_dir>/windows_index.json``.  Each
-window k starts at absolute time ``k·stride`` and covers a span of length
-``dT`` (``stride == dT`` ⇒ non-overlapping, ``stride < dT`` ⇒ overlapping).
-The network takes the **local** time ``τ = t − k·stride`` as its 4th input.
-For overlapping windows multiple windows cover a given t — this module picks
-the latest window whose start ≤ t (its weights are the freshest).
+The geometry-agnostic core (window loading + :meth:`predict`) and the shared
+plot helpers now live in the library — ``underPINN.postprocess`` — so they can
+be reused without ``sys.path`` hacks.  This module adds the **pipe-specific**
+views (cylinder cross-sections, radial profiles along y, the z=0 streamwise
+plane, a cylindrical VTU cloud) as a thin subclass, plus the CLI.
 
-Usage (as a library)
---------------------
-    from examples.pipe_flow.predict_pulsatile import PulsatilePredictor
-    import numpy as np
-
-    pred = PulsatilePredictor("outputs/pipe_flow_pulsatile_transfer")
-    xyz  = np.array([[0.0, 0.0, 0.0]])        # pipe centreline at x=0
-    uvwp = pred.predict(t_abs=2.7, xyz=xyz)   # (u, v, w, p) at t=2.7
-    print(uvwp)
+    from underPINN.postprocess import PulsatilePredictor    # generic core
+    from examples.pipe_flow.predict_pulsatile import PipePulsatilePredictor
 
 Usage (CLI)
 -----------
-    python examples/pipe_flow/predict_pulsatile.py outputs/pipe_flow_pulsatile_transfer --t 2.7
+    python examples/pipe_flow/predict_pulsatile.py outputs/pipe_flow_pulsatile_transfer \
+        --plot --t 2.7 --spacetime --animate --vtu
 """
 from __future__ import annotations
 
 import os
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
-import json
 
 import numpy as np
-import jax.numpy as jnp
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from underPINN.nn.factory import build_model
-from underPINN.utils.checkpoint import load_checkpoint
+from underPINN.postprocess import PulsatilePredictor, _field, _cbar, _save, _CMAP  # noqa: F401
 
 
-# ── Figure styling (publication-quality defaults) ─────────────────────────────
-plt.rcParams.update({
-    "figure.dpi":        120,
-    "savefig.dpi":       220,
-    "savefig.bbox":      "tight",
-    "savefig.facecolor": "white",
-    "font.size":         11,
-    "axes.titlesize":    12.5,
-    "axes.titleweight":  "bold",
-    "axes.labelsize":    11,
-    "axes.linewidth":    0.8,
-    "axes.edgecolor":    "#444444",
-    "axes.grid":         False,
-    "grid.alpha":        0.25,
-    "grid.linewidth":    0.6,
-    "lines.linewidth":   1.9,
-    "lines.antialiased": True,
-    "legend.frameon":    False,
-    "legend.fontsize":   9.5,
-    "image.cmap":        "turbo",
-})
-
-_CMAP = "turbo"        # perceptually-ordered replacement for the old "jet"
-_SAVE_DPI = 220
-
-
-def _field(ax, X, Y, C, levels=120, cmap=_CMAP, **kw):
-    """High-quality filled contour for a smooth scalar field."""
-    return ax.contourf(X, Y, C, levels=levels, cmap=cmap, antialiased=True, **kw)
-
-
-def _cbar(fig, mappable, ax, label, **kw):
-    cb = fig.colorbar(mappable, ax=ax, fraction=0.046, pad=0.02, **kw)
-    cb.set_label(label, fontsize=10)
-    cb.ax.tick_params(labelsize=9)
-    cb.outline.set_linewidth(0.6)
-    return cb
-
-
-def _save(fig, path):
-    fig.savefig(path, dpi=_SAVE_DPI, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
-    return path
-
-
-class PulsatilePredictor:
-    """Reconstruct the full-horizon solution from per-window checkpoints."""
-
-    def __init__(self, out_dir: str):
-        self.out_dir   = out_dir
-        self.win_dir   = os.path.join(out_dir, "windows")
-        index_path     = os.path.join(out_dir, "windows_index.json")
-
-        net = dT = stride = n_windows = T_total = None
-        physics = {}
-
-        # Preferred: the index file written by training.
-        if os.path.exists(index_path):
-            with open(index_path) as f:
-                idx = json.load(f)
-            net       = idx["network"]
-            dT        = float(idx["dT"])
-            stride    = float(idx.get("stride", dT))    # legacy runs → stride=dT
-            n_windows = int(idx["n_windows"])
-            T_total   = float(idx.get("T_total", (n_windows - 1) * stride + dT))
-            physics   = idx.get("physics", {})
-        else:
-            # Fallback: reconstruct from any per-window metadata sidecar.
-            # (The index is only written at the very end of a run, but each
-            #  window's *_meta.json carries dT / n_windows / network.)
-            meta = self._first_window_meta()
-            if meta is None:
-                raise FileNotFoundError(
-                    f"No windows_index.json and no window checkpoints found under "
-                    f"{self.win_dir}.  Run the time-marching training first."
-                )
-            net       = meta["network"]
-            tm        = meta.get("time_marching", {})
-            dT        = float(tm["dT"])
-            stride    = float(tm.get("stride", dT))     # legacy runs → stride=dT
-            n_windows = int(tm["n_windows"])
-            T_total   = float(tm.get("T_total", (n_windows - 1) * stride + dT))
-            physics   = meta.get("physics", {})
-            print(f"  [predict] windows_index.json missing — reconstructed from "
-                  f"per-window metadata (dT={dT}, stride={stride}, "
-                  f"n_windows={n_windows}).")
-
-        self.dT        = dT
-        self.stride    = stride
-        self.T_total   = T_total
-        self.n_windows = n_windows
-        self.physics   = physics or {}
-
-        # ``net`` is the full saved network config (carries ω / harmonics for
-        # the temporal-Fourier net), so the factory rebuilds the exact model.
-        self.model = build_model(net)
-
-        # Which window checkpoints actually exist on disk
-        self.available = sorted(
-            int(fn[len("params_window_"):-len(".msgpack")])
-            for fn in os.listdir(self.win_dir)
-            if fn.startswith("params_window_") and fn.endswith(".msgpack")
-        ) if os.path.isdir(self.win_dir) else []
-        if not self.available:
-            raise FileNotFoundError(f"No window checkpoints found in {self.win_dir}.")
-        print(f"  [predict] {len(self.available)} window checkpoint(s) available "
-              f"(windows {self.available[0]}–{self.available[-1]}).")
-
-        # Lazily load each window's params on first use
-        self._params_cache: dict[int, object] = {}
-
-    # ------------------------------------------------------------------
-
-    def _first_window_meta(self):
-        """Read any params_window_XXX_meta.json to recover run settings."""
-        if not os.path.isdir(self.win_dir):
-            return None
-        for fn in sorted(os.listdir(self.win_dir)):
-            if fn.startswith("params_window_") and fn.endswith("_meta.json"):
-                with open(os.path.join(self.win_dir, fn)) as f:
-                    return json.load(f)
-        return None
-
-    def _window_for(self, t_abs: float) -> int:
-        # Latest window whose start ≤ t_abs (overlapping → freshest weights win)
-        k = int(t_abs // self.stride)
-        k = max(0, min(k, self.n_windows - 1))
-        if k not in self.available:
-            raise FileNotFoundError(
-                f"t={t_abs} maps to window {k}, but its checkpoint is missing. "
-                f"Available windows: {self.available[0]}–{self.available[-1]} "
-                f"(t up to {self.available[-1] * self.stride + self.dT:.3f})."
-            )
-        return k
-
-    def _params(self, k: int):
-        if k not in self._params_cache:
-            mp = os.path.join(self.out_dir, "windows", f"params_window_{k:03d}.msgpack")
-            self._params_cache[k] = load_checkpoint(self.model, mp)
-        return self._params_cache[k]
-
-    def predict(self, t_abs: float, xyz: np.ndarray) -> np.ndarray:
-        """(u, v, w, p) at absolute time *t_abs* for spatial points xyz (N, 3)."""
-        xyz = np.asarray(xyz, dtype=np.float32).reshape(-1, 3)
-        k   = self._window_for(t_abs)
-        tau = float(t_abs - k * self.stride)
-        xyzt = jnp.concatenate(
-            [jnp.asarray(xyz), jnp.full((xyz.shape[0], 1), tau, dtype=jnp.float32)],
-            axis=1)
-        return np.array(self.model.apply(self._params(k), xyzt))
-
-    # ------------------------------------------------------------------
-    # Visualisation — regenerate figures from the saved windows
-    # ------------------------------------------------------------------
-
-    @property
-    def t_max(self) -> float:
-        """Largest absolute time covered by the available checkpoints."""
-        return self.available[-1] * self.stride + self.dT
+class PipePulsatilePredictor(PulsatilePredictor):
+    """Pulsatile-pipe figures / animation / VTU on top of the generic core."""
 
     def save_plots(self, t_field: float | None = None) -> list[str]:
         """Save figures (PNG) reconstructed from the window checkpoints.
@@ -338,9 +170,6 @@ class PulsatilePredictor:
         return saved
 
     # ------------------------------------------------------------------
-    # Axial profile over ALL time
-    # ------------------------------------------------------------------
-
     def _phys(self) -> dict:
         p = self.physics
         return {
@@ -357,10 +186,7 @@ class PulsatilePredictor:
         self, n_x: int = 260, n_t: int = 260,
         filename: str = "predict_spacetime_centreline.png",
     ) -> str:
-        """Static 'all-time' view: centreline axial velocity u(x, t) as a map.
-
-        x runs along the pipe (streamwise), t along the full covered horizon.
-        """
+        """Static 'all-time' view: centreline axial velocity u(x, t) as a map."""
         ph   = self._phys()
         x_lo, L, Re = ph["x_lo"], ph["L"], ph["Re"]
         x_hi = x_lo + L
@@ -428,9 +254,6 @@ class PulsatilePredictor:
         return out
 
     # ------------------------------------------------------------------
-    # 3-D time-dependent VTU series for ParaView (→ video)
-    # ------------------------------------------------------------------
-
     def save_vtu_timeseries(
         self, n_frames: int = 60, n_axial: int = 120, n_radial: int = 12,
         n_theta: int = 24, t0: float = 0.0, t1: float | None = None,
@@ -440,15 +263,8 @@ class PulsatilePredictor:
 
         The full 3-D velocity field (u, v, w), pressure and speed are sampled on
         a fixed cylindrical point cloud filling the pipe and evaluated at
-        ``n_frames`` times across the covered horizon.  One ``.vtu`` is written
-        per frame, and a ParaView ``.pvd`` collection ties them together with
-        physical time values.
-
-        Open the ``.pvd`` in ParaView, colour by ``speed`` (and *Glyph* the
-        ``velocity`` vectors / apply *Delaunay 3D* for a solid render), then
-        *File → Save Animation* to export an ``.mp4`` / ``.avi`` video.
-
-        Returns the path to the ``.pvd`` file.
+        ``n_frames`` times.  Open the ``.pvd`` in ParaView (colour by ``speed``,
+        glyph ``velocity``) and *File → Save Animation* to export a video.
         """
         from underPINN.utils.vtk_io import save_vtu_points, save_pvd
 
@@ -459,7 +275,6 @@ class PulsatilePredictor:
         times = np.linspace(t0, t1, n_frames, endpoint=False)
 
         # Fixed cylindrical point cloud (geometry constant; fields vary in time).
-        # A single axis point per x-station avoids duplicate centre nodes.
         xg = np.linspace(x_lo, x_hi, n_axial, dtype=np.float32)
         rg = np.linspace(0.0, R, n_radial, dtype=np.float32)
         th = np.linspace(0.0, 2.0 * np.pi, n_theta, endpoint=False, dtype=np.float32)
@@ -514,7 +329,7 @@ if __name__ == "__main__":
     ap.add_argument("--fps", type=int, default=12, help="animation frames per second")
     args = ap.parse_args()
 
-    pred = PulsatilePredictor(args.out_dir)
+    pred = PipePulsatilePredictor(args.out_dir)
 
     did_something = False
 

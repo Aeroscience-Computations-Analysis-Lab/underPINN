@@ -30,7 +30,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from underPINN.config.loader import cfg_get, save_config
-from underPINN.nn.mlp import MLP, GatedMLP
+from underPINN.nn.factory import build_model, network_config
 from underPINN.pde.navier_stokes_3d import SteadyNS3DPDE
 from underPINN.geometry.aaa import BulgeGeometry
 from underPINN.callbacks.logging import ConsoleLogger
@@ -93,12 +93,10 @@ def run_AAA_flow(cfg) -> dict:
         return V_max * (1.0 - r2 / R_vessel ** 2)
 
     # ── Model + PDE ────────────────────────────────────────────────────────────
-    net_type = str(cfg_get(cfg.network, "type", default="gated_mlp")).lower()
-    _net_cls = {"mlp": MLP, "gated_mlp": GatedMLP}.get(net_type)
-    if _net_cls is None:
-        raise ValueError(f"Unknown network type '{net_type}'. Choose 'mlp' or 'gated_mlp'.")
-    model = _net_cls(layers=list(cfg.network.layers))
-    print(f"  Network: {_net_cls.__name__}  layers={list(cfg.network.layers)}")
+    net_cfg  = network_config(cfg)
+    net_type = net_cfg["type"]
+    model    = build_model(net_cfg)
+    print(f"  Network: {type(model).__name__} ({net_type})  layers={list(cfg.network.layers)}")
 
     pde    = SteadyNS3DPDE(model, Re=Re)
     key    = jax.random.PRNGKey(seed)
@@ -282,7 +280,7 @@ def run_AAA_flow(cfg) -> dict:
     # ── Checkpoint ────────────────────────────────────────────────────────────
     save_checkpoint(params, out_dir, metadata={
         "problem": "AAA_flow",
-        "network": {"type": net_type, "layers": list(cfg.network.layers)},
+        "network": net_cfg,
         "physics": {"Re": Re, "R_vessel": R_vessel, "R_AAA": R_AAA,
                     "L": L, "x_lo": x_lo, "x0": x0, "L_AAA": L_AAA,
                     "V_max": V_max},

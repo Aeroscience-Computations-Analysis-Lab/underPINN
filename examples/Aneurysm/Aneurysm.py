@@ -53,7 +53,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from underPINN.config.loader import cfg_get, save_config
-from underPINN.nn.mlp import MLP, GatedMLP
+from underPINN.nn.factory import build_model, network_config
 from underPINN.pde.navier_stokes_3d import SteadyNS3DPDE
 from underPINN.geometry import STLVolumeGeometry
 from underPINN.callbacks.logging import ConsoleLogger
@@ -215,12 +215,12 @@ def run_Aneurysm(cfg) -> dict:
           f"wall={len(xyz_w)},  outlet={len(xyz_out)}")
 
     # ── Model + PDE ───────────────────────────────────────────────────────────
-    net_type = str(cfg_get(cfg.network, "type", default="mlp")).lower()
-    net_cls  = {"mlp": MLP, "gated_mlp": GatedMLP}.get(net_type, MLP)
-    layers   = list(cfg.network.layers)
-    model    = net_cls(layers=layers)
+    net_cfg  = network_config(cfg)
+    net_type = net_cfg["type"]
+    layers   = net_cfg["layers"]
+    model    = build_model(net_cfg)
     pde      = SteadyNS3DPDE(model, Re=Re)
-    print(f"  Network: {net_cls.__name__}  layers={layers}")
+    print(f"  Network: {type(model).__name__} ({net_type})  layers={layers}")
 
     key    = jax.random.PRNGKey(seed)
     params = model.init(key, jnp.ones((1, 3)))
@@ -493,7 +493,7 @@ def run_Aneurysm(cfg) -> dict:
     save_config(cfg, os.path.join(out_dir, "config.yaml"))
     save_checkpoint(params, out_dir, metadata={
         "problem": "Aneurysm",
-        "network": {"type": net_type, "layers": layers},
+        "network": net_cfg,
         "physics": {"Re": Re, "inlet_vel": max_vel, "inlet_radius": inlet_radius,
                     "scale": scale, "center": center.tolist(),
                     "inlet_normal": inlet_normal.tolist(),
