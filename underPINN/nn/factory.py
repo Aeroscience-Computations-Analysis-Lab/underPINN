@@ -23,28 +23,37 @@ def build_model(net_cfg: Dict[str, Any]):
     """Build a Flax module from a ``network`` config dict.
 
     Recognised ``type`` values: ``mlp``, ``gated_mlp``, ``fourier_mlp``,
-    ``temporal_fourier``.  Unknown types fall back to a plain MLP.
+    ``temporal_fourier``, ``siren``.  Unknown types fall back to a plain MLP.
+
+    Point networks read ``layers`` (``[in, h1, …, out]``); architectures that
+    do not use a flat layer list (e.g. future neural operators) read their own
+    keys, so ``layers`` is only required by the branches that consume it.
     """
-    t      = str(net_cfg.get("type", "mlp")).lower()
-    layers = list(net_cfg["layers"])
+    t = str(net_cfg.get("type", "mlp")).lower()
+
+    def _layers():
+        if "layers" not in net_cfg:
+            raise KeyError(f"network.type='{t}' requires a 'layers' list")
+        return list(net_cfg["layers"])
 
     if t in _TEMPORAL:
         return TemporalFourierMLP(
-            layers=layers,
+            layers=_layers(),
             omega=float(net_cfg.get("omega", 2.0 * math.pi)),
             n_time_harmonics=int(net_cfg.get("n_time_harmonics", 4)),
             time_index=int(net_cfg.get("time_index", -1)),
             gated=bool(net_cfg.get("gated", True)),
         )
     if t == "gated_mlp":
-        return GatedMLP(layers=layers)
+        return GatedMLP(layers=_layers())
     if t == "siren":
-        return SIREN(layers=layers, w0=float(net_cfg.get("w0", 15.0)))
+        return SIREN(layers=_layers(), w0=float(net_cfg.get("w0", 15.0)))
     if t in ("fourier_mlp", "fourier"):
-        return FourierMLP(layers=layers,
+        return FourierMLP(layers=_layers(),
                           n_fourier=int(net_cfg.get("n_fourier", 16)),
                           sigma=float(net_cfg.get("sigma", 1.0)))
-    return MLP(layers=layers)
+    # ── register neural operators here (they read their own config keys) ──
+    return MLP(layers=_layers())
 
 
 def network_config(cfg) -> Dict[str, Any]:
@@ -58,10 +67,10 @@ def network_config(cfg) -> Dict[str, Any]:
     from underPINN.config.loader import cfg_get
 
     nc = cfg.network
-    out: Dict[str, Any] = {
-        "type":   str(cfg_get(nc, "type", default="gated_mlp")).lower(),
-        "layers": list(nc.layers),
-    }
+    out: Dict[str, Any] = {"type": str(cfg_get(nc, "type", default="gated_mlp")).lower()}
+    layers = cfg_get(nc, "layers", default=None)      # operators may omit this
+    if layers is not None:
+        out["layers"] = list(layers)
     if out["type"] in _TEMPORAL:
         out["n_time_harmonics"] = int(cfg_get(nc, "n_time_harmonics", default=4))
         out["time_index"]       = int(cfg_get(nc, "time_index", default=-1))

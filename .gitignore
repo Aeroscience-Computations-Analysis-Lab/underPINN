@@ -1,11 +1,39 @@
-underPINN/__pycache__/
-underPINN/losses/__pycache__/
-underPINN/nn/__pycache__/
-underPINN/utils/__pycache__/
-underPINN/pde/__pycache__/
-underPINN/solver/__pycache__/
-underPINN/geometry/__pycache__/
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+
+# ── Virtual envs ─────────────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── Tooling / caches ─────────────────────────────────────────────────────────
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+coverage.xml
+.coverage
+
+# ── Editors / OS ─────────────────────────────────────────────────────────────
 .vscode/
-underPINN/benchmark_utils/__pycache__/evaluators.cpython-313.pyc
-underPINN/benchmark_utils/__pycache__/__init__.cpython-313.pyc
-underPINN/benchmark_utils/__pycache__/benchmark_suite.cpython-313.pyc
+.idea/
+.DS_Store
+
+# ── Heavy, regenerable run artifacts ─────────────────────────────────────────
+# NOTE: outputs/ directories are intentionally NOT ignored wholesale, so the
+# committed figure images (*.png etc.) stay tracked.  Only the large binary /
+# checkpoint artifacts inside them are ignored.
+**/*.msgpack
+**/restart/
+**/windows/
+**/vtu_*/
+**/*.pvd
+**/*.vtu
+**/*_cache/
+**/stl_cache/
