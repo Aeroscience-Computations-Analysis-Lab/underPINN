@@ -190,6 +190,12 @@ def plot_loss_grid(
         snap = snapshots[prob]
 
         epoch_keys = sorted(snap.keys())
+
+        # Prevent IndexError if no data was recorded
+        if not epoch_keys:
+            ax.set_title(f"{prob} (No data)", fontsize=10, fontweight="bold")
+            continue
+        
         if max_epochs_only:
             epoch_keys = [epoch_keys[-1]]
 
