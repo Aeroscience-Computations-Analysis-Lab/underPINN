@@ -7,7 +7,7 @@ Usage
     from underPINN.benchmark_utils import BenchmarkRunner, EVALUATOR_REGISTRY
 
     runner = BenchmarkRunner(
-        problems=["burgers", "wave", "ode_exp"],
+        problems=["burgers", "wave", "ramp"],
         epoch_budgets=[500, 1000, 2000, 5000],
         seed=0,
         verbose=True,

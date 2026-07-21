@@ -860,11 +860,11 @@ python -m underPINN bench
 
 # Select specific problems and budgets
 python -m underPINN bench \
-    --problems burgers wave helmholtz heat_steady ode_exp ode_harmonic \
+    --problems burgers wave helmholtz heat_steady ode_harmonic ramp toro3 \
     --epochs 500 1000 2000 5000 \
     --output outputs/bench
 
-# Include slow problems (3-D pipe flow, k-ε)
+# Include slow problems (3-D pipe flow, viscous ramp NS)
 python -m underPINN bench --all
 
 # Regenerate plots from a previous run without re-training

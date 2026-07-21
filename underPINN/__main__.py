@@ -397,7 +397,7 @@ examples:
         epilog="""
 examples:
   python -m underPINN bench
-  python -m underPINN bench --problems burgers wave ode_exp --epochs 500 2000 5000
+  python -m underPINN bench --problems burgers wave ramp --epochs 500 2000 5000
   python -m underPINN bench --all --output outputs/bench_full
   python -m underPINN bench --from-json outputs/bench/results.json
 """,
@@ -407,7 +407,7 @@ examples:
     p.add_argument("--epochs", nargs="+", type=int, default=None, metavar="N",
                    help="Epoch budgets (default: 500 1000 2000 5000).")
     p.add_argument("--all", action="store_true",
-                   help="Include slow evaluators (e.g. 3-D pipe flow).")
+                   help="Include slow evaluators (e.g. 3-D pipe flow, viscous ramp NS).")
     p.add_argument("--seed", type=int, default=0, metavar="S",
                    help="Base PRNG seed.")
     p.add_argument("--output", "-o", default="outputs/bench", metavar="DIR",

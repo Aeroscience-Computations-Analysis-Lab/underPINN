@@ -13,6 +13,7 @@ Interface used by :class:`BenchmarkRunner`::
 
 from __future__ import annotations
 
+import math
 import os
 import time
 from abc import ABC, abstractmethod
@@ -306,7 +307,9 @@ class WaveEvaluator(BaseBenchmarkEvaluator):
         @jax.jit
         def step(params, state, xr, tr, xic, uic, xbc, tbc):
             def loss_fn(p):
-                res  = pde.residual(p, xr, tr)
+                # WavePDE.residual takes a packed (N, 2) array [x, t], per the
+                # BasePDE convention — NOT separate x, t positional args.
+                res  = pde.residual(p, jnp.stack([xr, tr], axis=1))
                 pl   = jnp.mean(res ** 2)
                 il   = jnp.mean((pde.u(p, xic, jnp.zeros_like(xic)) - uic) ** 2)
                 dl   = jnp.mean(pde.u_t(p, xic, jnp.zeros_like(xic)) ** 2)
@@ -542,93 +545,6 @@ class SteadyHeatEvaluator(BaseBenchmarkEvaluator):
 
 
 # =============================================================================
-#  ODE — Exponential decay
-# =============================================================================
-
-class ODEExpEvaluator(BaseBenchmarkEvaluator):
-    name  = "ode_exp"
-    label = "ODE Exp Decay (λ=2)"
-
-    def __init__(self, lam: float = 2.0, T: float = 3.0):
-        from underPINN.pde.ode import ExponentialDecayODE
-        from underPINN.losses.ode_loss import ODELoss
-        from underPINN.solver.ode_solver import ODESolver
-        self._lam, self._T = lam, T
-        self._ODE, self._Loss, self._Solver = (
-            ExponentialDecayODE, ODELoss, ODESolver)
-
-    def train(self, epochs: int, seed: int = 0) -> float:
-        T    = self._T
-        t_r  = jnp.linspace(0, T, 500).reshape(-1, 1).astype("f4")
-        t_ic = jnp.array([[0.0]], dtype="f4")
-        u_ic = jnp.array([[1.0]], dtype="f4")
-        model  = MLP(layers=[1, 64, 64, 1])
-        pde    = self._ODE(model, lam=self._lam)
-        loss   = self._Loss(model, pde, ic_weight=50.0)
-        solver = self._Solver(model, pde, loss=loss)
-        solver.init(jax.random.PRNGKey(seed))
-        cfg = TrainingConfig(
-            epochs=epochs, lr=1e-3,
-            lr_schedule=optax.cosine_decay_schedule(1e-3, epochs, alpha=1e-2),
-            log_every=max(1, epochs // 5),
-        )
-        t0 = time.perf_counter()
-        solver.train(t_r, t_ic, u_ic, config=cfg)
-        wall = time.perf_counter() - t0
-        self._model     = model
-        self._pde       = pde
-        self._params    = solver.params
-        self._loss_hist = solver.loss_hist
-        self._pde_hist  = solver.pde_hist
-        return wall
-
-    def evaluate(self) -> dict:
-        t_test  = jnp.linspace(0, self._T, 1000).reshape(-1, 1).astype("f4")
-        u_pred  = self._pde.u(self._params, t_test)
-        u_exact = self._pde.exact(t_test)
-        return {
-            "rel_l2": float(relative_l2_error(u_pred, u_exact)),
-            "max_ae": float(max_absolute_error(u_pred, u_exact)),
-        }
-
-    def plot(self, out_dir: str, suffix: str = "") -> str:
-        t_test  = jnp.linspace(0, self._T, 500).reshape(-1, 1).astype("f4")
-        u_pred  = np.array(self._pde.u(self._params, t_test)).ravel()
-        u_exact = np.array(self._pde.exact(t_test)).ravel()
-        t_np    = np.array(t_test).ravel()
-        err     = np.abs(u_pred - u_exact)
-
-        fig, axes = plt.subplots(1, 3, figsize=(14, 4))
-
-        # Panel 1: solution
-        axes[0].plot(t_np, u_exact, "k-",  lw=2,   label="Exact")
-        axes[0].plot(t_np, u_pred,  "r--", lw=1.8, label="PINN")
-        axes[0].set_xlabel("t")
-        axes[0].set_ylabel("u(t)")
-        axes[0].set_title(f"Exp Decay  u'=−{self._lam}u")
-        axes[0].legend()
-        axes[0].grid(True, alpha=0.3)
-
-        # Panel 2: point-wise error
-        axes[1].plot(t_np, err, "b-", lw=1.5)
-        axes[1].set_xlabel("t")
-        axes[1].set_ylabel("|PINN − Exact|")
-        axes[1].set_title("Absolute Error")
-        axes[1].grid(True, alpha=0.3)
-
-        # Panel 3: loss
-        _loss_ax(axes[2], self._loss_hist, self._pde_hist)
-
-        fig.suptitle(f"ODE Exp Decay  λ={self._lam}", fontsize=13, fontweight="bold")
-        fig.tight_layout()
-        path = os.path.join(out_dir, f"ode_exp{suffix}_solution.png")
-        fig.savefig(path, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        print(f"  plot → {path}")
-        return path
-
-
-# =============================================================================
 #  ODE — Harmonic oscillator
 # =============================================================================
 
@@ -753,8 +669,11 @@ class PipeFlowEvaluator(BaseBenchmarkEvaluator):
         @jax.jit
         def step(params, state, xint, xwall, xin, xout):
             def loss_fn(p):
-                cont, mx, my, mz = pde.residual(p, xint)
-                pde_l  = jnp.mean(cont**2 + mx**2 + my**2 + mz**2)
+                # SteadyNS3DPDE.residual returns a packed (N, 4) array
+                # [cont, mom_x, mom_y, mom_z], per the BasePDE convention —
+                # NOT four separate unpackable values.
+                res    = pde.residual(p, xint)
+                pde_l  = jnp.mean(jnp.sum(res ** 2, axis=-1))
                 u_w, v_w, w_w, _ = pde.uvwp(p, xwall)
                 wall_l = jnp.mean(u_w**2 + v_w**2 + w_w**2)
                 r_in   = jnp.sqrt(xin[:, 1]**2 + xin[:, 2]**2)
@@ -878,6 +797,566 @@ class PipeFlowEvaluator(BaseBenchmarkEvaluator):
 
 
 # =============================================================================
+#  2-D Compressible Euler — Mach-3 oblique-shock ramp
+# =============================================================================
+
+class RampEvaluator(BaseBenchmarkEvaluator):
+    """Steady compressible Euler flow over a wedge; exact oblique-shock state.
+
+    Mirrors ``examples/ramp/ramp.py`` (M∞=3, θ=10°, γ=1.4) but with a smaller
+    network and collocation pool for benchmark-scale epoch budgets.  The
+    reference field is the analytic piecewise-constant oblique-shock solution:
+    freestream above the shock line, the exact post-shock state below it.
+    """
+
+    name  = "ramp"
+    label = "2-D Ramp — Oblique Shock (M=3, θ=10°)"
+
+    def __init__(self, M_inf: float = 3.0, theta_deg: float = 10.0,
+                 gamma: float = 1.4):
+        from underPINN.pde.compressible_euler import CompressibleEulerPDE
+        from underPINN.geometry.ramp import RampGeometry
+        self._M_inf, self._theta_deg, self._gamma = M_inf, theta_deg, gamma
+        self._CompressibleEulerPDE = CompressibleEulerPDE
+        self._RampGeometry         = RampGeometry
+
+    def train(self, epochs: int, seed: int = 0) -> float:
+        M_inf, theta_deg, gamma = self._M_inf, self._theta_deg, self._gamma
+        L, H = 1.0, 0.8
+        geom = self._RampGeometry(theta_deg, L=L, H=H)
+
+        xy_r  = jnp.array(np.array(geom.sample_interior(3000, seed=seed), "f4"))
+        xy_in = jnp.array(np.array(geom.sample_inlet(200),     "f4"))
+        xy_w  = jnp.array(np.array(geom.sample_ramp_wall(250), "f4"))
+        xy_up = jnp.array(np.array(geom.sample_upper(150),     "f4"))
+        nx, ny = geom.ramp_normal()
+
+        model  = MLP(layers=[2, 64, 64, 64, 4])
+        pde    = self._CompressibleEulerPDE(model, gamma=gamma, art_visc=1e-3)
+        rho_inf, u_inf, v_inf, p_inf = pde.freestream(M_inf)
+
+        key    = jax.random.PRNGKey(seed)
+        params = model.init(key, jnp.ones((1, 2)))
+        lr_sched  = optax.cosine_decay_schedule(1e-3, epochs, alpha=1e-2)
+        optimizer = optax.chain(optax.scale_by_adam(),
+                                optax.scale_by_schedule(lr_sched),
+                                optax.scale(-1.0))
+        state = optimizer.init(params)
+        W_PDE, W_INLET, W_WALL, W_UPPER = 1.0, 100.0, 50.0, 20.0
+        N_r, N_in, N_w, N_up = (xy_r.shape[0], xy_in.shape[0],
+                                xy_w.shape[0], xy_up.shape[0])
+        bR, bI, bW, bU = (min(1024, N_r), min(150, N_in),
+                         min(150, N_w), min(100, N_up))
+
+        @jax.jit
+        def step(params, state, r_b, in_b, w_b, up_b):
+            def loss_fn(p):
+                res   = pde.residual(p, r_b)
+                pde_l = jnp.mean(jnp.sum(res ** 2, axis=-1))
+
+                pv_in = pde.apply(p, in_b)
+                in_l  = (jnp.mean((pv_in[:, 0] - rho_inf) ** 2)
+                         + jnp.mean((pv_in[:, 1] - u_inf) ** 2)
+                         + jnp.mean((pv_in[:, 2] - v_inf) ** 2)
+                         + jnp.mean((pv_in[:, 3] - p_inf) ** 2))
+
+                pv_w  = pde.apply(p, w_b)               # slip:  u·n = 0
+                wall_l = jnp.mean((pv_w[:, 1] * nx + pv_w[:, 2] * ny) ** 2)
+
+                pv_up = pde.apply(p, up_b)               # freestream farfield
+                up_l  = (jnp.mean((pv_up[:, 0] - rho_inf) ** 2)
+                         + jnp.mean((pv_up[:, 1] - u_inf) ** 2)
+                         + jnp.mean((pv_up[:, 2] - v_inf) ** 2)
+                         + jnp.mean((pv_up[:, 3] - p_inf) ** 2))
+
+                total = W_PDE*pde_l + W_INLET*in_l + W_WALL*wall_l + W_UPPER*up_l
+                return total, (pde_l, in_l, wall_l, up_l)
+            (total, aux), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)
+            updates, state = optimizer.update(grads, state)
+            params = optax.apply_updates(params, updates)
+            return params, state, total, aux
+
+        loss_hist, pde_hist = [], []
+        key = jax.random.PRNGKey(seed + 11)
+        t0 = time.perf_counter()
+        for ep in range(epochs):
+            key, k1, k2, k3, k4 = jax.random.split(key, 5)
+            ir = jax.random.randint(k1, (bR,), 0, N_r)
+            ii = jax.random.randint(k2, (bI,), 0, N_in)
+            iw = jax.random.randint(k3, (bW,), 0, N_w)
+            iu = jax.random.randint(k4, (bU,), 0, N_up)
+            params, state, total, (pl, *_) = step(
+                params, state, xy_r[ir], xy_in[ii], xy_w[iw], xy_up[iu])
+            loss_hist.append(float(total))
+            pde_hist.append(float(pl))
+        wall = time.perf_counter() - t0
+
+        self._model, self._pde, self._params = model, pde, params
+        self._loss_hist, self._pde_hist = loss_hist, pde_hist
+        self._geom, self._L, self._H = geom, L, H
+        self._shock = pde.oblique_shock(M_inf, theta_deg)
+        return wall
+
+    def _exact_field(self, XX, YY):
+        """Piecewise-exact Mach number: freestream above the shock line,
+        the analytic post-shock state below it."""
+        beta = math.radians(self._shock["beta_deg"])
+        below_shock = YY <= XX * math.tan(beta)
+        M1 = self._M_inf
+        M2 = self._shock["M2"]
+        return np.where(below_shock, M2, M1)
+
+    def _mach_field(self, params, XX, YY):
+        pts  = jnp.array(np.stack([XX.ravel(), YY.ravel()], axis=1), "f4")
+        pv   = np.array(self._pde.apply(params, pts))
+        a    = np.sqrt(self._gamma * pv[:, 3] / np.maximum(pv[:, 0], 1e-9))
+        mach = np.sqrt(pv[:, 1] ** 2 + pv[:, 2] ** 2) / np.maximum(a, 1e-9)
+        return mach.reshape(XX.shape)
+
+    def evaluate(self) -> dict:
+        XX, YY, mask = self._geom.make_grid(Nx=120, Ny=100)
+        mach_pred  = self._mach_field(self._params, XX, YY)
+        mach_exact = self._exact_field(XX, YY)
+        p_ = jnp.array(mach_pred[mask])
+        e_ = jnp.array(mach_exact[mask])
+        return {
+            "rel_l2": float(relative_l2_error(p_, e_)),
+            "max_ae": float(max_absolute_error(p_, e_)),
+        }
+
+    def plot(self, out_dir: str, suffix: str = "") -> str:
+        XX, YY, mask = self._geom.make_grid(Nx=200, Ny=160)
+        mach_pred  = self._mach_field(self._params, XX, YY)
+        mach_exact = self._exact_field(XX, YY)
+        mach_pred  = mach_pred.copy()
+        mach_exact = mach_exact.copy()
+        mach_pred[~mask]  = np.nan
+        mach_exact[~mask] = np.nan
+        x_np, y_np = XX[0, :], YY[:, 0]
+
+        fig, axes = plt.subplots(1, 4, figsize=(18, 4))
+        vmin, vmax = 0.0, self._M_inf + 0.2
+        for ax, data, lbl in zip(axes[:2], [mach_pred, mach_exact],
+                                 ["PINN", "Exact (piecewise)"]):
+            cf = ax.contourf(x_np, y_np, data, levels=50, cmap="jet",
+                             vmin=vmin, vmax=vmax)
+            fig.colorbar(cf, ax=ax)
+            ax.set_title(f"Mach — {lbl}")
+            ax.set_xlabel("x")
+            ax.set_ylabel("y")
+            ax.set_xlim(0, self._L)
+            ax.set_ylim(0, self._H)
+        err = np.abs(mach_pred - mach_exact)
+        cf2 = axes[2].contourf(x_np, y_np, err, levels=50, cmap=_CMAP_ERR)
+        fig.colorbar(cf2, ax=axes[2])
+        beta = math.radians(self._shock["beta_deg"])
+        x_shock = np.array([0.0, min(self._L, self._H / max(math.tan(beta), 1e-9))])
+        y_shock = x_shock * math.tan(beta)
+        axes[2].plot(x_shock, y_shock, "k--", lw=1.5, label="shock")
+        axes[2].set_title("|Mach error|")
+        axes[2].set_xlabel("x")
+        axes[2].set_ylabel("y")
+        axes[2].legend(fontsize=8)
+
+        _loss_ax(axes[3], self._loss_hist, self._pde_hist)
+        fig.suptitle(f"Ramp Euler — M∞={self._M_inf}, θ={self._theta_deg}° "
+                    f"(β={self._shock['beta_deg']:.1f}°)",
+                    fontsize=13, fontweight="bold")
+        fig.tight_layout()
+        path = os.path.join(out_dir, f"ramp{suffix}_solution.png")
+        fig.savefig(path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  plot → {path}")
+        return path
+
+
+# =============================================================================
+#  1-D Unsteady Compressible Euler — Toro test 3 (severe blast wave)
+# =============================================================================
+
+class Toro3Evaluator(BaseBenchmarkEvaluator):
+    """1-D Riemann problem — Toro test 3 (Woodward–Colella blast wave).
+
+    Left (1, 0, 1000) / right (1, 0, 0.01), γ=1.4 — a five-decade pressure
+    jump.  Mirrors ``examples/toro3/toro3.py``: reference-state
+    non-dimensionalisation + log-space (exp) positivity for the extreme
+    dynamic range, evaluated against the exact Riemann solution.
+    """
+
+    name  = "toro3"
+    label = "1-D Toro Test 3 (blast wave)"
+
+    def __init__(self, gamma: float = 1.4):
+        from underPINN.pde.euler_1d_unsteady import Euler1DUnsteadyPDE
+        from underPINN.utils.riemann import exact_riemann_1d
+        self._gamma = gamma
+        self._Euler1DUnsteadyPDE = Euler1DUnsteadyPDE
+        self._exact_riemann_1d   = exact_riemann_1d
+
+    def train(self, epochs: int, seed: int = 0) -> float:
+        gamma = self._gamma
+        x0, t_final = 0.5, 0.012
+        left, right = (1.0, 0.0, 1000.0), (1.0, 0.0, 0.01)
+
+        rho_ref = max(left[0], right[0])
+        p_ref   = max(left[2], right[2])
+        u_ref   = float(np.sqrt(p_ref / rho_ref))
+        t_ref   = 1.0 / u_ref                     # L = 1
+        left_nd  = (left[0] / rho_ref,  left[1] / u_ref,  left[2] / p_ref)
+        right_nd = (right[0] / rho_ref, right[1] / u_ref, right[2] / p_ref)
+        tf_nd = t_final / t_ref
+        self._nd = (rho_ref, u_ref, p_ref, t_ref)
+        self._x0, self._t_final = x0, t_final
+        self._left, self._right = left, right
+
+        rng   = np.random.default_rng(seed)
+        n_int, n_ic, n_bc = 4000, 500, 300
+        xt_r = np.stack([rng.uniform(0.0, 1.0,  n_int),
+                         rng.uniform(0.0, tf_nd, n_int)], axis=1).astype("f4")
+        x_ic = rng.uniform(0.0, 1.0, n_ic).astype("f4")
+        le   = x_ic < x0
+        rho_ic = np.where(le, left_nd[0], right_nd[0]).astype("f4")
+        u_ic   = np.where(le, left_nd[1], right_nd[1]).astype("f4")
+        p_ic   = np.where(le, left_nd[2], right_nd[2]).astype("f4")
+        xt_ic  = np.stack([x_ic, np.zeros(n_ic, "f4")], axis=1)
+        t_bc   = rng.uniform(0.0, tf_nd, n_bc).astype("f4")
+        xt_bcL = np.stack([np.zeros(n_bc, "f4"), t_bc], axis=1)
+        xt_bcR = np.stack([np.ones(n_bc, "f4"),  t_bc], axis=1)
+
+        xt_r_j, xt_ic_j = jnp.array(xt_r), jnp.array(xt_ic)
+        ic_tgt = jnp.array(np.stack([rho_ic, u_ic, p_ic], axis=1))
+        xt_bcL_j, xt_bcR_j = jnp.array(xt_bcL), jnp.array(xt_bcR)
+        bcL_tgt = jnp.array(np.array(left_nd,  "f4"))
+        bcR_tgt = jnp.array(np.array(right_nd, "f4"))
+
+        model = MLP(layers=[2, 64, 64, 64, 3])
+        pde   = self._Euler1DUnsteadyPDE(model, gamma=gamma, art_visc=0.02,
+                                         transform="exp")
+        key    = jax.random.PRNGKey(seed)
+        params = model.init(key, jnp.ones((1, 2)))
+        raw0   = self._Euler1DUnsteadyPDE.inverse_softplus(0.02)
+        params = {"net": params, "log_av": jnp.asarray(raw0, jnp.float32)}
+
+        lr_sched  = optax.cosine_decay_schedule(1e-3, epochs, alpha=1e-2)
+        optimizer = optax.chain(optax.scale_by_adam(),
+                                optax.scale_by_schedule(lr_sched),
+                                optax.scale(-1.0))
+        state = optimizer.init(params)
+        W_PDE, W_IC, W_BC = 1.0, 20.0, 10.0
+        N_r, N_ic_, N_bc_ = xt_r_j.shape[0], xt_ic_j.shape[0], xt_bcL_j.shape[0]
+        bR, bI, bB = min(1024, N_r), min(200, N_ic_), min(150, N_bc_)
+
+        @jax.jit
+        def step(params, state, r_b, ic_b, ic_t, bcL_b, bcR_b):
+            def loss_fn(p):
+                res   = pde.residual(p, r_b)
+                pde_l = jnp.mean(jnp.sum(res ** 2, axis=-1))
+                out_ic = pde.apply(p, ic_b)
+                ic_l   = jnp.mean(jnp.sum((out_ic - ic_t) ** 2, axis=-1))
+                out_l  = pde.apply(p, bcL_b)
+                out_r  = pde.apply(p, bcR_b)
+                bc_l   = (jnp.mean(jnp.sum((out_l - bcL_tgt) ** 2, axis=-1))
+                          + jnp.mean(jnp.sum((out_r - bcR_tgt) ** 2, axis=-1)))
+                total = W_PDE*pde_l + W_IC*ic_l + W_BC*bc_l
+                return total, (pde_l, ic_l, bc_l)
+            (total, aux), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)
+            updates, state = optimizer.update(grads, state)
+            params = optax.apply_updates(params, updates)
+            return params, state, total, aux
+
+        loss_hist, pde_hist = [], []
+        key = jax.random.PRNGKey(seed + 7)
+        t0 = time.perf_counter()
+        for ep in range(epochs):
+            key, k1, k2, k3 = jax.random.split(key, 4)
+            ir = jax.random.randint(k1, (bR,), 0, N_r)
+            ii = jax.random.randint(k2, (bI,), 0, N_ic_)
+            ib = jax.random.randint(k3, (bB,), 0, N_bc_)
+            params, state, total, (pl, *_) = step(
+                params, state, xt_r_j[ir], xt_ic_j[ii], ic_tgt[ii],
+                xt_bcL_j[ib], xt_bcR_j[ib])
+            loss_hist.append(float(total))
+            pde_hist.append(float(pl))
+        wall = time.perf_counter() - t0
+
+        self._model, self._pde, self._params = model, pde, params
+        self._loss_hist, self._pde_hist = loss_hist, pde_hist
+        self._tf_nd = tf_nd
+        return wall
+
+    def _fields(self, Nx=400):
+        rho_ref, u_ref, p_ref, t_ref = self._nd
+        xg = np.linspace(0.0, 1.0, Nx, dtype="f4")
+        pts = jnp.array(np.stack([xg, np.full(Nx, self._tf_nd, "f4")], axis=1))
+        pv_nd = np.array(self._pde.apply(self._params, pts))
+        re_nd, ue_nd, pe_nd = self._exact_riemann_1d(
+            xg, self._tf_nd, self._x0, self._gamma,
+            (self._left[0] / rho_ref,  self._left[1] / u_ref,  self._left[2] / p_ref),
+            (self._right[0] / rho_ref, self._right[1] / u_ref, self._right[2] / p_ref))
+        return xg, pv_nd, np.stack([re_nd, ue_nd, pe_nd], axis=1)
+
+    def evaluate(self) -> dict:
+        _, pv_nd, exact_nd = self._fields()
+        return {
+            "rel_l2": float(relative_l2_error(jnp.array(pv_nd),
+                                              jnp.array(exact_nd))),
+            "max_ae": float(max_absolute_error(jnp.array(pv_nd),
+                                               jnp.array(exact_nd))),
+        }
+
+    def plot(self, out_dir: str, suffix: str = "") -> str:
+        rho_ref, u_ref, p_ref, t_ref = self._nd
+        xg, pv_nd, exact_nd = self._fields()
+        rho_p, u_p, p_p = pv_nd[:, 0]*rho_ref, pv_nd[:, 1]*u_ref, pv_nd[:, 2]*p_ref
+        rho_e, u_e, p_e = (exact_nd[:, 0]*rho_ref, exact_nd[:, 1]*u_ref,
+                          exact_nd[:, 2]*p_ref)
+
+        fig, axes = plt.subplots(1, 4, figsize=(18, 4))
+        for ax, yp, ye, name in zip(axes[:3], [rho_p, u_p, p_p],
+                                    [rho_e, u_e, p_e], ["ρ", "u", "p"]):
+            ax.plot(xg, ye, "k-",  lw=2.0, label="Exact")
+            ax.plot(xg, yp, "r--", lw=1.6, label="PINN")
+            ax.set_xlabel("x")
+            ax.set_ylabel(name)
+            ax.set_title(f"{name}  (t={self._t_final})")
+            ax.legend(fontsize=8)
+            ax.grid(alpha=0.3)
+        _loss_ax(axes[3], self._loss_hist, self._pde_hist)
+        fig.suptitle("Toro Test 3 — blast wave (5-decade pressure jump)",
+                    fontsize=13, fontweight="bold")
+        fig.tight_layout()
+        path = os.path.join(out_dir, f"toro3{suffix}_solution.png")
+        fig.savefig(path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  plot → {path}")
+        return path
+
+
+# =============================================================================
+#  2-D Compressible Navier–Stokes — viscous Mach-3 compression ramp (SBLI)
+# =============================================================================
+
+class RampNSEvaluator(BaseBenchmarkEvaluator):
+    """Viscous compression-ramp SBLI; mirrors ``examples/ramp_ns/ramp_ns.py``.
+
+    Supersonic M∞=3 flow over a flat wall then a θ=15° compression ramp, with
+    a short slip run (no-penetration only) before a no-slip + isothermal
+    (T=T₀) wall — the same slip/no-slip split and hybrid uniform + wall-
+    clustered collocation used in the full example, at benchmark scale.
+
+    Reference: the analytic inviscid oblique-shock Mach state (freestream
+    upstream of the corner shock, the exact post-shock state downstream of
+    it), evaluated only in the **outer** flow — a thin near-wall band is
+    excluded from the metric since the boundary layer there is real viscous
+    physics an inviscid reference cannot capture.
+
+    Uses second-order AD (viscous stresses require gradients of gradients),
+    comparable in cost to the 3-D pipe flow case, so it is marked ``fast=False``
+    (run with ``--all``).
+    """
+
+    name  = "ramp_ns"
+    label = "2-D Ramp NS — Viscous SBLI (M=3, Re=1e4)"
+    fast  = False
+
+    def __init__(self, M_inf: float = 3.0, theta_deg: float = 15.0,
+                 gamma: float = 1.4, Re: float = 1.0e4, Pr: float = 0.72):
+        from underPINN.pde.compressible_ns_2d import CompressibleNS2DPDE
+        from underPINN.pde.compressible_euler import CompressibleEulerPDE
+        from underPINN.geometry.ramp import RampGeometry
+        self._M_inf, self._theta_deg = M_inf, theta_deg
+        self._gamma, self._Re, self._Pr = gamma, Re, Pr
+        self._CompressibleNS2DPDE = CompressibleNS2DPDE
+        self._CompressibleEulerPDE = CompressibleEulerPDE
+        self._RampGeometry = RampGeometry
+
+    def train(self, epochs: int, seed: int = 0) -> float:
+        M_inf, theta_deg, gamma, Re, Pr = (
+            self._M_inf, self._theta_deg, self._gamma, self._Re, self._Pr)
+        L, H, ramp_start, slip_end = 2.0, 1.0, 0.8, 0.15
+        geom = self._RampGeometry(theta_deg, L=L, H=H,
+                                  ramp_start=ramp_start, slip_end=slip_end)
+
+        # Hybrid interior pool: fixed uniform base + wall-clustered (BL) points,
+        # combined once (the full example also RAR-migrates a third pool toward
+        # the shock; omitted here to keep the benchmark loop simple).
+        xy_uniform = geom.sample_interior(1500, seed=seed)
+        xy_bl      = geom.sample_boundary_layer(1500, beta=4.0, seed=seed + 7)
+        xy_r  = jnp.array(np.concatenate([xy_uniform, xy_bl], axis=0))
+        xy_in   = jnp.array(np.array(geom.sample_inlet(200),        "f4"))
+        xy_w    = jnp.array(np.array(geom.sample_noslip_wall(200),  "f4"))
+        xy_slip = jnp.array(np.array(geom.sample_slip_wall(100),    "f4"))
+        xy_up   = jnp.array(np.array(geom.sample_upper(150),        "f4"))
+
+        model = MLP(layers=[2, 96, 96, 96, 4])
+        pde   = self._CompressibleNS2DPDE(model, gamma=gamma, M_inf=M_inf,
+                                          Re=Re, Pr=Pr, art_visc=2e-3)
+        T0 = pde.total_temperature()
+        rho_inf, u_inf, v_inf, T_inf = pde.freestream()
+
+        key    = jax.random.PRNGKey(seed)
+        params = model.init(key, jnp.ones((1, 2)))
+        lr_sched  = optax.cosine_decay_schedule(1e-3, epochs, alpha=1e-2)
+        optimizer = optax.chain(optax.scale_by_adam(),
+                                optax.scale_by_schedule(lr_sched),
+                                optax.scale(-1.0))
+        state = optimizer.init(params)
+        W_PDE, W_INLET, W_WALL, W_SLIP, W_UPPER = 1.0, 100.0, 100.0, 80.0, 20.0
+        N_r, N_in, N_w = xy_r.shape[0], xy_in.shape[0], xy_w.shape[0]
+        N_slip, N_up   = xy_slip.shape[0], xy_up.shape[0]
+        bR  = min(768, N_r)
+        bI  = min(150, N_in)
+        bW  = min(150, N_w)
+        bS  = min(100, N_slip)
+        bU  = min(100, N_up)
+
+        @jax.jit
+        def step(params, state, r_b, in_b, w_b, slip_b, up_b):
+            def loss_fn(p):
+                res   = pde.residual(p, r_b)
+                pde_l = jnp.mean(jnp.sum(res ** 2, axis=-1))
+
+                pv_in = pde.apply(p, in_b)
+                in_l  = (jnp.mean((pv_in[:, 0] - rho_inf) ** 2)
+                         + jnp.mean((pv_in[:, 1] - u_inf) ** 2)
+                         + jnp.mean((pv_in[:, 2] - v_inf) ** 2)
+                         + jnp.mean((pv_in[:, 3] - T_inf) ** 2))
+
+                pv_w  = pde.apply(p, w_b)               # no-slip + isothermal
+                wall_l = (jnp.mean(pv_w[:, 1] ** 2)
+                          + jnp.mean(pv_w[:, 2] ** 2)
+                          + jnp.mean((pv_w[:, 3] - T0) ** 2))
+
+                pv_s  = pde.apply(p, slip_b)            # slip: v = 0 only
+                slip_l = jnp.mean(pv_s[:, 2] ** 2)
+
+                pv_up = pde.apply(p, up_b)               # freestream farfield
+                up_l  = (jnp.mean((pv_up[:, 0] - rho_inf) ** 2)
+                         + jnp.mean((pv_up[:, 1] - u_inf) ** 2)
+                         + jnp.mean((pv_up[:, 2] - v_inf) ** 2)
+                         + jnp.mean((pv_up[:, 3] - T_inf) ** 2))
+
+                total = (W_PDE*pde_l + W_INLET*in_l + W_WALL*wall_l
+                         + W_SLIP*slip_l + W_UPPER*up_l)
+                return total, (pde_l, in_l, wall_l, slip_l, up_l)
+            (total, aux), grads = jax.value_and_grad(loss_fn, has_aux=True)(params)
+            updates, state = optimizer.update(grads, state)
+            params = optax.apply_updates(params, updates)
+            return params, state, total, aux
+
+        loss_hist, pde_hist = [], []
+        key = jax.random.PRNGKey(seed + 11)
+        t0 = time.perf_counter()
+        for ep in range(epochs):
+            key, k1, k2, k3, k4, k5 = jax.random.split(key, 6)
+            ir  = jax.random.randint(k1, (bR,), 0, N_r)
+            ii  = jax.random.randint(k2, (bI,), 0, N_in)
+            iw  = jax.random.randint(k3, (bW,), 0, N_w)
+            isl = jax.random.randint(k4, (bS,), 0, N_slip)
+            iu  = jax.random.randint(k5, (bU,), 0, N_up)
+            params, state, total, (pl, *_) = step(
+                params, state, xy_r[ir], xy_in[ii], xy_w[iw],
+                xy_slip[isl], xy_up[iu])
+            loss_hist.append(float(total))
+            pde_hist.append(float(pl))
+        wall = time.perf_counter() - t0
+
+        self._model, self._pde, self._params = model, pde, params
+        self._loss_hist, self._pde_hist = loss_hist, pde_hist
+        self._geom, self._L, self._H = geom, L, H
+        self._ramp_start = ramp_start
+        # Analytic inviscid oblique-shock state, via a model-free helper PDE
+        # (its oblique_shock()/freestream() are pure closed-form calculations).
+        euler = self._CompressibleEulerPDE(None, gamma=gamma)
+        self._shock = euler.oblique_shock(M_inf, theta_deg)
+        return wall
+
+    def _exact_field(self, XX, YY):
+        """Piecewise-exact outer Mach: freestream upstream of the corner shock,
+        the analytic post-shock state below the shock line downstream of it."""
+        beta = math.radians(self._shock["beta_deg"])
+        dx = np.maximum(XX - self._ramp_start, 0.0)
+        below_shock = (YY <= dx * math.tan(beta)) & (XX >= self._ramp_start)
+        return np.where(below_shock, self._shock["M2"], self._M_inf)
+
+    def _mach_field(self, params, XX, YY):
+        pts  = jnp.array(np.stack([XX.ravel(), YY.ravel()], axis=1), "f4")
+        mach = np.array(self._pde.mach(params, pts))
+        return mach.reshape(XX.shape)
+
+    def _outer_mask(self, XX, YY, mask, band_frac=0.12):
+        """Domain-interior mask, excluding a near-wall band (boundary layer)."""
+        band = band_frac * self._H
+        return mask & (YY > self._geom.y_wall(XX) + band)
+
+    def evaluate(self) -> dict:
+        XX, YY, mask = self._geom.make_grid(Nx=140, Ny=110)
+        outer = self._outer_mask(XX, YY, mask)
+        mach_pred  = self._mach_field(self._params, XX, YY)
+        mach_exact = self._exact_field(XX, YY)
+        p_ = jnp.array(mach_pred[outer])
+        e_ = jnp.array(mach_exact[outer])
+        return {
+            "rel_l2": float(relative_l2_error(p_, e_)),
+            "max_ae": float(max_absolute_error(p_, e_)),
+        }
+
+    def plot(self, out_dir: str, suffix: str = "") -> str:
+        XX, YY, mask = self._geom.make_grid(Nx=200, Ny=160)
+        outer = self._outer_mask(XX, YY, mask)
+        mach_pred  = self._mach_field(self._params, XX, YY)
+        mach_exact = self._exact_field(XX, YY)
+
+        mach_full = mach_pred.copy()
+        mach_full[~mask] = np.nan
+        mach_outer_exact = mach_exact.copy()
+        mach_outer_exact[~outer] = np.nan
+        err = np.abs(mach_pred - mach_exact)
+        err[~outer] = np.nan
+        x_np, y_np = XX[0, :], YY[:, 0]
+
+        fig, axes = plt.subplots(1, 4, figsize=(18, 4))
+        vmin, vmax = 0.0, self._M_inf + 0.2
+        cf0 = axes[0].contourf(x_np, y_np, mach_full, levels=50, cmap="jet",
+                               vmin=vmin, vmax=vmax)
+        fig.colorbar(cf0, ax=axes[0])
+        axes[0].set_title("Mach — PINN (full field)")
+
+        cf1 = axes[1].contourf(x_np, y_np, mach_outer_exact, levels=50,
+                               cmap="jet", vmin=vmin, vmax=vmax)
+        fig.colorbar(cf1, ax=axes[1])
+        axes[1].set_title("Mach — exact outer (inviscid)")
+
+        cf2 = axes[2].contourf(x_np, y_np, err, levels=50, cmap=_CMAP_ERR)
+        fig.colorbar(cf2, ax=axes[2])
+        beta = math.radians(self._shock["beta_deg"])
+        x_shock = np.array([self._ramp_start,
+                            min(self._L, self._ramp_start
+                                + self._H / max(math.tan(beta), 1e-9))])
+        y_shock = (x_shock - self._ramp_start) * math.tan(beta)
+        axes[2].plot(x_shock, y_shock, "k--", lw=1.5, label="shock")
+        axes[2].set_title("|Mach error|  (outer flow only)")
+        axes[2].legend(fontsize=8)
+
+        for ax in axes[:3]:
+            ax.set_xlabel("x")
+            ax.set_ylabel("y")
+            ax.set_xlim(0, self._L)
+            ax.set_ylim(0, self._H)
+
+        _loss_ax(axes[3], self._loss_hist, self._pde_hist)
+        fig.suptitle(f"Ramp NS (SBLI) — M∞={self._M_inf}, θ={self._theta_deg}°, "
+                    f"Re={self._Re:g}  (β={self._shock['beta_deg']:.1f}°)",
+                    fontsize=13, fontweight="bold")
+        fig.tight_layout()
+        path = os.path.join(out_dir, f"ramp_ns{suffix}_solution.png")
+        fig.savefig(path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  plot → {path}")
+        return path
+
+
+# =============================================================================
 #  Registry
 # =============================================================================
 
@@ -886,9 +1365,11 @@ EVALUATOR_REGISTRY: dict[str, type] = {
     "wave":         WaveEvaluator,
     "helmholtz":    HelmholtzEvaluator,
     "heat_steady":  SteadyHeatEvaluator,
-    "ode_exp":      ODEExpEvaluator,
     "ode_harmonic": ODEHarmonicEvaluator,
+    "ramp":         RampEvaluator,
+    "toro3":        Toro3Evaluator,
     "pipe_flow":    PipeFlowEvaluator,
+    "ramp_ns":      RampNSEvaluator,
 }
 
 SLOW_PROBLEMS = {k for k, v in EVALUATOR_REGISTRY.items() if not v.fast}

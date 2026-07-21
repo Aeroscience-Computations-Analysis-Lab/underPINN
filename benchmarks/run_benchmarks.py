@@ -9,11 +9,11 @@ Usage
 
     # Select problems and epoch budgets explicitly
     python benchmarks/run_benchmarks.py \\
-        --problems burgers wave ode_exp ode_harmonic helmholtz heat_steady \\
+        --problems burgers wave ramp toro3 helmholtz heat_steady ode_harmonic \\
         --epochs 500 1000 2000 5000 \\
         --output outputs/bench
 
-    # Include slow problems (3-D pipe flow)
+    # Include slow problems (3-D pipe flow, viscous ramp NS)
     python benchmarks/run_benchmarks.py --all
 
     # Load + replot from a previous JSON run (no training)
@@ -59,7 +59,7 @@ examples:
     )
     parser.add_argument(
         "--all", action="store_true",
-        help="Include slow evaluators (e.g. 3-D pipe flow).",
+        help="Include slow evaluators (e.g. 3-D pipe flow, viscous ramp NS).",
     )
     parser.add_argument(
         "--seed", type=int, default=0, metavar="S",
