@@ -88,6 +88,13 @@ def run_ramp_ns(cfg) -> dict:
     rar_cand   = int(cfg_get(tr, "rar_candidates", default=5))
     rar_k      = float(cfg_get(tr, "rar_k",        default=1.0))
     rar_c      = float(cfg_get(tr, "rar_c",        default=1.0))
+    # The inlet/wall corner (x≈0) is a geometric BC singularity with a much
+    # larger raw residual than any real downstream feature — left unrestricted,
+    # RAR's candidate pool gets dominated by that corner instead of the shock/
+    # SBLI region it's meant to find. Excluding x < rar_x_min keeps RAR focused
+    # on the region actually being resolved for; the corner itself is already
+    # covered by the wall-clustered (BL) pool, so nothing is lost.
+    rar_x_min  = float(cfg_get(tr, "rar_x_min",    default=0.25))
 
     W_PDE   = float(cfg_get(lw, "w_pde",   default=1.0))
     W_INLET = float(cfg_get(lw, "w_inlet", default=100.0))
@@ -219,13 +226,17 @@ def run_ramp_ns(cfg) -> dict:
         xy_adapt = jnp.asarray(saved_state["xy_adapt"])
         N_adp = xy_adapt.shape[0]
 
+    def _rar_candidate_sampler(n, s):
+        return geom.sample_interior(n, seed=s, x_min=rar_x_min)
+
     try:
         for ep in range(start_ep, epochs):
             # RAR: migrate ONLY the adaptive pool toward high-residual regions
             # (mainly the ramp shock / SBLI); uniform + BL pools stay fixed.
+            # Candidates are restricted to x >= rar_x_min (see rar_x_min above).
             if rar_period > 0 and ep > 0 and ep % rar_period == 0:
                 xy_adapt = jnp.array(rad_resample(
-                    pde, params, geom.sample_interior,
+                    pde, params, _rar_candidate_sampler,
                     n_keep=n_adapt, n_candidates=rar_cand * n_adapt,
                     k=rar_k, c=rar_c, seed=seed + ep))
                 N_adp = xy_adapt.shape[0]

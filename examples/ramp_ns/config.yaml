@@ -62,6 +62,13 @@ training:
   rar_candidates    : 5
   rar_k             : 1.0
   rar_c             : 1.0
+  rar_x_min         : 0.25   # exclude x < rar_x_min from RAR candidates — the
+                             # inlet/wall corner (x≈0) is a geometric BC
+                             # singularity with far larger raw residual than
+                             # the shock, so without this RAR's whole budget
+                             # gets pulled onto the corner instead (confirmed
+                             # empirically: measured residual there ~15-30x
+                             # anything found elsewhere in the domain)
 
 loss:
   w_pde  : 1.0

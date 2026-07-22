@@ -60,18 +60,25 @@ class RampGeometry:
     # Interior
     # ------------------------------------------------------------------
 
-    def sample_interior(self, n: int, seed: int = 0) -> np.ndarray:
+    def sample_interior(self, n: int, seed: int = 0, x_min: float = 0.0) -> np.ndarray:
         """Sample *n* points uniformly inside the trapezoidal domain.
 
-        Uses rejection sampling: draw from [0,L]×[0,H], keep those
+        Uses rejection sampling: draw from [x_min,L]×[0,H], keep those
         strictly above the lower wall.
+
+        ``x_min`` restricts the sampled region to ``x >= x_min`` — useful for
+        residual-adaptive resampling, where the inlet/wall corner at x=0 (and
+        any other BC-transition point, e.g. the slip/no-slip switch) is a
+        geometric singularity with a much larger PDE residual than any real
+        downstream feature (a shock), so an unrestricted adaptive pool gets
+        dominated by that corner instead of the feature it's meant to find.
         """
         rng  = np.random.default_rng(seed)
         pts  = []
         need = n
         while need > 0:
             over = max(need * 4, 512)
-            x = rng.uniform(0.0, self.L, over).astype(np.float32)
+            x = rng.uniform(x_min, self.L, over).astype(np.float32)
             y = rng.uniform(0.0, self.H, over).astype(np.float32)
             mask  = y > self.y_wall(x) + 1e-4        # strictly inside
             batch = np.stack([x[mask], y[mask]], axis=1)
