@@ -545,11 +545,27 @@ def carreau_inlet_factory(
     return fn
 
 
-def parabolic_steady_uvw_factory(R: float, V_max: float) -> Callable:
-    """Steady Poiseuille IC at t=0: u = V_max(1 − r²/R²), v = w = 0."""
+def parabolic_steady_uvw_factory(
+    R: float, V_max: float, radius_fn: Callable = None,
+) -> Callable:
+    """Steady Poiseuille IC at t=0: u = V_max(1 − r²/R(x)²), v = w = 0.
+
+    ``radius_fn(x)`` — e.g. ``BulgeGeometry.radius_at`` — gives the *local*
+    vessel radius. Pass it whenever the IC's own interior samples span a
+    geometry whose true radius varies with x (an AAA bulge); without it,
+    every point uses the constant ``R``, so anywhere the local radius
+    actually exceeds ``R`` (the whole bulge, since ``R_AAA > R_vessel``),
+    ``r > R`` and the profile goes negative — a discontinuous, effectively
+    near-zero IC across most of the bulge instead of a smooth locally-
+    developed guess. Plain pipes (constant radius) don't need this — the
+    default (``radius_fn=None``) reproduces the original constant-``R``
+    behaviour exactly.
+    """
     def fn(xyz):
+        x  = np.asarray(xyz[:, 0])
         r2 = np.asarray(xyz[:, 1]) ** 2 + np.asarray(xyz[:, 2]) ** 2
-        u  = V_max * (1.0 - r2 / R ** 2)
+        R_local = radius_fn(x) if radius_fn is not None else R
+        u = V_max * np.clip(1.0 - r2 / R_local ** 2, 0.0, None)
         return np.stack([u, np.zeros_like(u), np.zeros_like(u)],
                         axis=1).astype(np.float32)
     return fn
@@ -557,15 +573,23 @@ def parabolic_steady_uvw_factory(R: float, V_max: float) -> Callable:
 
 def carreau_steady_uvw_factory(
     R: float, V_max: float, beta: float, Cu: float, n: float,
+    radius_fn: Callable = None,
 ) -> Callable:
-    """Steady Carreau-developed IC at t=0 (host-side; NumPy/SciPy)."""
+    """Steady Carreau-developed IC at t=0 (host-side; NumPy/SciPy).
+
+    ``radius_fn`` — see :func:`parabolic_steady_uvw_factory` — normalizes
+    each point by the *local* vessel radius instead of the constant ``R``,
+    needed for the same reason in a bulge geometry.
+    """
     from underPINN.pde.carreau_ns_3d import carreau_developed_profile
     Cu_eff = Cu * V_max / R
     r_ref, u_ref, _ = carreau_developed_profile(beta, Cu_eff, n, u_center=1.0)
 
     def fn(xyz):
+        x = np.asarray(xyz[:, 0])
         r = np.sqrt(np.asarray(xyz[:, 1]) ** 2 + np.asarray(xyz[:, 2]) ** 2)
-        u = V_max * np.interp(r / R, r_ref, u_ref)
+        R_local = radius_fn(x) if radius_fn is not None else R
+        u = V_max * np.interp(r / R_local, r_ref, u_ref)
         z = np.zeros_like(u)
         return np.stack([u, z, z], axis=1).astype(np.float32)
     return fn

@@ -68,7 +68,7 @@ def run_AAA_rheology_pulsatile(cfg) -> dict:
             inlet_target_fn=carreau_inlet_factory(
                 R_vessel, V_max, V_amp, T_period, beta, Cu, n),
             steady_uvw_fn=carreau_steady_uvw_factory(
-                R_vessel, V_max, beta, Cu, n),
+                R_vessel, V_max, beta, Cu, n, radius_fn=geom.radius_at),
             physics_dict={"Re": Re, "R_vessel": R_vessel, "R_AAA": R_AAA,
                           "L": L, "x_lo": x_lo, "x0": x0, "L_AAA": L_AAA,
                           "V_max": V_max, "V_amp": V_amp, "T_period": T_period,
