@@ -35,5 +35,9 @@ where   = ["."]
 include = ["underPINN*"]
 
 [tool.ruff.lint]
+# N999 (invalid module name) flags every __init__.py in the tree because the
+# top-level package itself is "underPINN" (mixed case) — that's the project's
+# established name, not fixable per-file, so it's ignored project-wide.
+ignore = ["N999"]
 # Star imports in the top-level __init__ are intentional public-API re-exports.
 per-file-ignores = {"underPINN/__init__.py" = ["F403", "F405"]}
