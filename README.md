@@ -92,6 +92,7 @@ underPINN is a research-grade PINN engine that combines classical collocation-ba
 
 ### Benchmark Suite
 - One command (`python -m underPINN bench`) runs all registered problems across multiple epoch budgets
+- Two-tier epoch budgets: smooth PDEs (Burgers, wave, Helmholtz, …) use the default `[500, 1000, 2000, 5000]`; problems marked `complex=True` on their evaluator (shocks / viscous SBLI / 3-D N-S — `ramp`, `toro3`, `pipe_flow`, `ramp_ns`) automatically get a much larger `[2000, 5000, 15000, 40000]` — they converge far slower and the shared small budget was under-training them. Both are overridable (`--epochs`, `--complex-epochs`)
 - Outputs include PNG accuracy plots, convergence grids, CSV tables, wall-time charts, and a Markdown summary report
 - `--from-json` replays plotting from a previous JSON result without re-training
 
@@ -855,17 +856,23 @@ docs/
 ## Benchmark Suite
 
 ```bash
-# Run all fast problems with default epoch budgets [500, 1000, 2000, 5000]
+# Run all fast problems — smooth PDEs get [500, 1000, 2000, 5000] epochs;
+# problems marked complex=True (ramp, toro3) get [2000, 5000, 15000, 40000]
 python -m underPINN bench
 
-# Select specific problems and budgets
+# Select specific problems and a custom budget for the simple ones
 python -m underPINN bench \
     --problems burgers wave helmholtz heat_steady ode_harmonic ramp toro3 \
     --epochs 500 1000 2000 5000 \
     --output outputs/bench
 
-# Include slow problems (3-D pipe flow, viscous ramp NS)
+# Include slow problems (3-D pipe flow, viscous ramp NS — also complex=True)
 python -m underPINN bench --all
+
+# Override the complex-problem budget directly (shocks / viscous SBLI / 3-D
+# N-S converge far slower than smooth PDEs — the default 40k-epoch top budget
+# reflects that; drop it for a quicker, coarser pass)
+python -m underPINN bench --all --complex-epochs 2000 5000 15000
 
 # Regenerate plots from a previous run without re-training
 python -m underPINN bench --from-json outputs/bench/results.json

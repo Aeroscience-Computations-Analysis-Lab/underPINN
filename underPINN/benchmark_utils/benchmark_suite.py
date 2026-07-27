@@ -133,7 +133,14 @@ class BenchmarkRunner:
         List of evaluator keys from :data:`EVALUATOR_REGISTRY`.
         Pass ``None`` to use all registered problems.
     epoch_budgets :
-        List of epoch counts to test per problem.
+        List of epoch counts to test per "simple" problem (smooth PDEs —
+        Burgers, wave, Helmholtz, steady heat, harmonic ODE).
+    complex_epoch_budgets :
+        List of epoch counts for problems marked ``complex=True`` on their
+        evaluator class (shocks, viscous SBLI, 3-D N-S — ``ramp``, ``toro3``,
+        ``pipe_flow``, ``ramp_ns``). These converge much more slowly than the
+        smooth PDEs, so the default ``epoch_budgets`` badly under-trains them;
+        defaults to a budget an order of magnitude higher.
     seed :
         Base PRNG seed forwarded to every evaluator.
     fast_only :
@@ -147,6 +154,7 @@ class BenchmarkRunner:
         self,
         problems: Optional[List[str]] = None,
         epoch_budgets: Optional[List[int]] = None,
+        complex_epoch_budgets: Optional[List[int]] = None,
         seed: int = 0,
         fast_only: bool = True,
         verbose: bool = True,
@@ -155,6 +163,8 @@ class BenchmarkRunner:
             EVALUATOR_REGISTRY, SLOW_PROBLEMS)
 
         self.epoch_budgets = epoch_budgets or [500, 1000, 2000, 5000]
+        self.complex_epoch_budgets = (
+            complex_epoch_budgets or [2000, 5000, 15000, 40000])
         self.seed = seed
         self.verbose = verbose
         self.results: List[BenchmarkResult] = []
@@ -191,15 +201,22 @@ class BenchmarkRunner:
         List[BenchmarkResult]
             Also stored in ``self.results``.
         """
-        n_total = len(self._problems) * len(self.epoch_budgets)
+        budgets_by_problem = {
+            prob: (self.complex_epoch_budgets
+                  if getattr(self._registry[prob], "complex", False)
+                  else self.epoch_budgets)
+            for prob in self._problems
+        }
+        n_total = sum(len(b) for b in budgets_by_problem.values())
         counter = 0
-        max_epochs = max(self.epoch_budgets)
 
         for prob in self._problems:
             cls = self._registry[prob]
             self._loss_snapshots[prob] = {}
+            budgets = budgets_by_problem[prob]
+            max_epochs = max(budgets)
 
-            for epochs in self.epoch_budgets:
+            for epochs in budgets:
                 counter += 1
                 if self.verbose:
                     print(

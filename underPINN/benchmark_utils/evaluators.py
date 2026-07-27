@@ -108,6 +108,11 @@ class BaseBenchmarkEvaluator(ABC):
     name:  str        #: machine-readable key, used as file-stem
     label: str        #: human label for legends
     fast:  bool = True
+    #: Harder-to-converge physics (shocks, viscous SBLI, 3-D N-S) that need a
+    #: bigger epoch budget than smooth PDEs (Burgers/wave/heat/ODE) to reach
+    #: comparable accuracy — independent of ``fast`` (whether it's cheap
+    #: enough per-epoch to run by default at all).
+    complex: bool = False
 
     @abstractmethod
     def train(self, epochs: int, seed: int = 0) -> float:
@@ -636,9 +641,10 @@ class ODEHarmonicEvaluator(BaseBenchmarkEvaluator):
 # =============================================================================
 
 class PipeFlowEvaluator(BaseBenchmarkEvaluator):
-    name  = "pipe_flow"
-    label = "3-D Pipe Flow (Re=10)"
-    fast  = False
+    name    = "pipe_flow"
+    label   = "3-D Pipe Flow (Re=10)"
+    fast    = False
+    complex = True
 
     def __init__(self, Re: float = 10.0):
         from underPINN.pde.navier_stokes_3d import SteadyNS3DPDE
@@ -809,8 +815,9 @@ class RampEvaluator(BaseBenchmarkEvaluator):
     freestream above the shock line, the exact post-shock state below it.
     """
 
-    name  = "ramp"
-    label = "2-D Ramp — Oblique Shock (M=3, θ=10°)"
+    name    = "ramp"
+    label   = "2-D Ramp — Oblique Shock (M=3, θ=10°)"
+    complex = True
 
     def __init__(self, M_inf: float = 3.0, theta_deg: float = 10.0,
                  gamma: float = 1.4):
@@ -983,8 +990,9 @@ class Toro3Evaluator(BaseBenchmarkEvaluator):
     dynamic range, evaluated against the exact Riemann solution.
     """
 
-    name  = "toro3"
-    label = "1-D Toro Test 3 (blast wave)"
+    name    = "toro3"
+    label   = "1-D Toro Test 3 (blast wave)"
+    complex = True
 
     def __init__(self, gamma: float = 1.4):
         from underPINN.pde.euler_1d_unsteady import Euler1DUnsteadyPDE
@@ -1155,9 +1163,10 @@ class RampNSEvaluator(BaseBenchmarkEvaluator):
     (run with ``--all``).
     """
 
-    name  = "ramp_ns"
-    label = "2-D Ramp NS — Viscous SBLI (M=3, Re=1e4)"
-    fast  = False
+    name    = "ramp_ns"
+    label   = "2-D Ramp NS — Viscous SBLI (M=3, Re=1e4)"
+    fast    = False
+    complex = True
 
     def __init__(self, M_inf: float = 3.0, theta_deg: float = 15.0,
                  gamma: float = 1.4, Re: float = 1.0e4, Pr: float = 0.72):
