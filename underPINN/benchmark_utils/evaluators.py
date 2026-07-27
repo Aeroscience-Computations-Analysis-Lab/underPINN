@@ -194,7 +194,7 @@ class BurgersEvaluator(BaseBenchmarkEvaluator):
         t_bc = jnp.array(np.tile(t_bc, 2))
         u_bc = jnp.zeros(2 * N_bc, dtype="f4")
 
-        model  = MLP(layers=[2, 64, 64, 64, 1])
+        model  = MLP(layers=[2, 64, 64, 64, 64, 64, 1])
         pde    = self._BurgersPDE(model, nu=self._nu)
         loss   = self._PINNLoss(model, pde, ic_weight=100.0, bc_weight=10.0, rba=True)
         solver = self._FBPINNSolver(model, pde, loss=loss)
@@ -414,7 +414,7 @@ class HelmholtzEvaluator(BaseBenchmarkEvaluator):
         u_b  = jnp.zeros(4 * N_b, dtype="f4")
 
         sigma  = max(3.0, float(self._k) * np.pi * 1.5)
-        model  = FourierMLP(layers=[2, 64, 64, 64, 1], n_fourier=16, sigma=sigma)
+        model  = FourierMLP(layers=[2, 64, 64, 64, 64, 64,1], n_fourier=16, sigma=sigma)
         pde    = self._HelmholtzPDE(model, k=self._k)
         loss   = self._SteadyLoss(model, pde, bc_weight=20.0)
         solver = self._SteadySolver(model, pde, loss=loss)
@@ -496,7 +496,7 @@ class SteadyHeatEvaluator(BaseBenchmarkEvaluator):
         def source(x, y):
             return 2.0 * jnp.pi**2 * jnp.sin(jnp.pi * x) * jnp.sin(jnp.pi * y)
 
-        model  = MLP(layers=[2, 64, 64, 64, 1])
+        model  = MLP(layers=[2, 64, 64, 64, 64, 64, 1])
         pde    = SteadyHeatPDE(model, source_fn=source)
         loss   = SteadyLoss(model, pde, bc_weight=20.0)
         solver = SteadySolver(model, pde, loss=loss)
@@ -570,7 +570,7 @@ class ODEHarmonicEvaluator(BaseBenchmarkEvaluator):
         t_r  = jnp.linspace(0, T, 500).reshape(-1, 1).astype("f4")
         t_ic = jnp.array([[0.0]], dtype="f4")
         u_ic = jnp.array([[1.0]], dtype="f4")
-        model  = FourierMLP(layers=[1, 64, 64, 1], n_fourier=16,
+        model  = FourierMLP(layers=[1, 64, 64, 64, 64, 64, 1], n_fourier=16,
                             sigma=float(self._omega))
         pde    = self._ODE(model, omega=self._omega)
         loss   = self._Loss(model, pde, ic_weight=50.0, ic_derivative_weight=50.0)
@@ -662,7 +662,7 @@ class PipeFlowEvaluator(BaseBenchmarkEvaluator):
         xyz_out  = jnp.array(np.array(pipe.sample_outlet(200),    dtype="f4"))
         W_PDE, W_WALL, W_IN, W_OUT = 1.0, 100.0, 50.0, 20.0
 
-        model    = MLP(layers=[3, 64, 64, 64, 64, 4])
+        model    = MLP(layers=[3, 128, 128, 128, 128, 128, 4])
         pde      = self._SteadyNS3DPDE(model, Re=self._Re)
         key      = jax.random.PRNGKey(seed)
         params   = model.init(key, jnp.ones((1, 3)))
@@ -838,7 +838,7 @@ class RampEvaluator(BaseBenchmarkEvaluator):
         xy_up = jnp.array(np.array(geom.sample_upper(150),     "f4"))
         nx, ny = geom.ramp_normal()
 
-        model  = MLP(layers=[2, 64, 64, 64, 4])
+        model  = MLP(layers=[2, 128, 128, 128, 128, 128, 4])
         pde    = self._CompressibleEulerPDE(model, gamma=gamma, art_visc=1e-3)
         rho_inf, u_inf, v_inf, p_inf = pde.freestream(M_inf)
 
@@ -1037,7 +1037,7 @@ class Toro3Evaluator(BaseBenchmarkEvaluator):
         bcL_tgt = jnp.array(np.array(left_nd,  "f4"))
         bcR_tgt = jnp.array(np.array(right_nd, "f4"))
 
-        model = MLP(layers=[2, 64, 64, 64, 3])
+        model = MLP(layers=[2, 128, 128, 128, 128, 128, 3])
         pde   = self._Euler1DUnsteadyPDE(model, gamma=gamma, art_visc=0.02,
                                          transform="exp")
         key    = jax.random.PRNGKey(seed)
@@ -1197,7 +1197,7 @@ class RampNSEvaluator(BaseBenchmarkEvaluator):
         xy_slip = jnp.array(np.array(geom.sample_slip_wall(100),    "f4"))
         xy_up   = jnp.array(np.array(geom.sample_upper(150),        "f4"))
 
-        model = MLP(layers=[2, 96, 96, 96, 4])
+        model = MLP(layers=[2, 128, 128, 128, 128, 128, 4])
         pde   = self._CompressibleNS2DPDE(model, gamma=gamma, M_inf=M_inf,
                                           Re=Re, Pr=Pr, art_visc=2e-3)
         T0 = pde.total_temperature()
