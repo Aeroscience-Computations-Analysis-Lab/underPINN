@@ -102,7 +102,7 @@ def _cmd_show(args):
 def _cmd_bench(args):
     """Delegate to benchmarks/run_benchmarks.py main() with the parsed args."""
     from underPINN.benchmark_utils import (
-        BenchmarkRunner, generate_report)
+        BenchmarkRunner, generate_report, generate_report_pgf)
     from underPINN.benchmark_utils.benchmark_suite import BenchmarkRunner as BR
 
     if args.list_problems:
@@ -124,6 +124,7 @@ def _cmd_bench(args):
     if args.from_json:
         print(f"Loading results from {args.from_json} …")
         results = BR.load_json(args.from_json)
+        generate_report_pgf(results, runner=None, out_dir=os.path.join(out_dir, "pgf"))
         generate_report(results, runner=None, out_dir=out_dir)
         return
 
@@ -149,6 +150,7 @@ def _cmd_bench(args):
     results = runner.run(out_dir=out_dir)
     runner.save_json(os.path.join(out_dir, "results.json"))
     runner.save_loss_npz(os.path.join(out_dir, "loss_hists.npz"))
+    generate_report_pgf(results, runner=runner, out_dir=os.path.join(out_dir, "pgf"))
     generate_report(results, runner=runner, out_dir=out_dir)
 
 

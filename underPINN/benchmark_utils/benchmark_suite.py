@@ -186,15 +186,18 @@ class BenchmarkRunner:
         """Run all (problem, epochs) combinations.
 
         Each evaluator is constructed fresh per problem so state does not
-        leak across epoch budgets for the same problem.  For the largest
-        epoch budget, a final PDE solution plot is saved to *out_dir* (when
-        provided) via ``ev.plot(out_dir)``.
+        leak across epoch budgets for the same problem. For the largest
+        epoch budget (per-problem — simple and complex problems use different
+        budget lists), a final PDE solution is saved both as a matplotlib
+        ``.png`` via ``ev.plot(out_dir)`` and as PGFPlots ``.dat`` data via
+        ``ev.plot_pgf({out_dir}/pgf/)`` — the two are independent outputs, so
+        a failure in one doesn't block the other.
 
         Parameters
         ----------
         out_dir :
-            Directory where artefacts (plots, JSON, CSV) are written.
-            When ``None`` no plots are saved.
+            Directory where artefacts (plots, PGF exports, JSON, CSV) are
+            written. When ``None`` no plots are saved.
 
         Returns
         -------
@@ -235,18 +238,27 @@ class BenchmarkRunner:
                     pde_final  = ev.pde_hist[-1]  if ev.pde_hist  else float("nan")
                     self._loss_snapshots[prob][epochs] = list(ev.loss_hist)
 
-                    # --- solution plot for the largest epoch run only ----------
+                    # --- solution plot(s) for the largest epoch run only ---
                     if out_dir is not None and epochs == max_epochs:
                         os.makedirs(out_dir, exist_ok=True)
+                        _plot_ctx = (contextlib.nullcontext()
+                                    if self.verbose
+                                    else contextlib.redirect_stdout(io.StringIO()))
                         try:
-                            _plot_ctx = (contextlib.nullcontext()
-                                         if self.verbose
-                                         else contextlib.redirect_stdout(io.StringIO()))
                             with _plot_ctx:
                                 ev.plot(out_dir)
                         except Exception as plot_exc:  # noqa: BLE001
                             if self.verbose:
                                 print(f"  plot failed: {plot_exc}")
+
+                        pgf_dir = os.path.join(out_dir, "pgf")
+                        os.makedirs(pgf_dir, exist_ok=True)
+                        try:
+                            with _plot_ctx:
+                                ev.plot_pgf(pgf_dir)
+                        except Exception as plot_exc:  # noqa: BLE001
+                            if self.verbose:
+                                print(f"  plot_pgf failed: {plot_exc}")
 
                 except Exception as exc:  # noqa: BLE001
                     print(f"  ERROR: {exc}")

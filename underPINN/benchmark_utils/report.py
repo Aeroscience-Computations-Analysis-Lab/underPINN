@@ -333,6 +333,154 @@ def save_markdown(
 
 
 # =============================================================================
+#  PGFPlots data exports (companions to the matplotlib plots above)
+# =============================================================================
+
+def pgf_accuracy_vs_epochs(
+    results: List[BenchmarkResult],
+    out_dir: str,
+    *,
+    prefix: str = "accuracy_vs_epochs",
+) -> List[str]:
+    """One ``.dat`` file per problem (columns: epoch, rel_l2).
+
+    Kept as separate per-problem files rather than one wide table: different
+    problems test different (and now, with complex-vs-simple epoch tiers,
+    differently-*shaped*) epoch budget lists, so there's no single shared x
+    column to align them on — matching how PGFPlots documents typically pull
+    in one ``\\addplot table`` per data file anyway.
+    """
+    from underPINN.utils.pgf_export import save_lines_dat
+    groups: Dict[str, list] = {}
+    for r in results:
+        if not math.isnan(r.rel_l2):
+            groups.setdefault(r.problem, []).append(r)
+
+    paths = []
+    for prob, rlist in sorted(groups.items()):
+        rlist = sorted(rlist, key=lambda r: r.epochs)
+        path = os.path.join(out_dir, f"{prefix}_{prob}.dat")
+        save_lines_dat(path, epoch=[r.epochs for r in rlist],
+                       rel_l2=[r.rel_l2 for r in rlist])
+        paths.append(path)
+    print(f"Saved: {len(paths)} accuracy-vs-epochs .dat file(s) → {out_dir}/")
+    return paths
+
+
+def pgf_wall_time_vs_epochs(
+    results: List[BenchmarkResult],
+    out_dir: str,
+    *,
+    prefix: str = "wall_time_vs_epochs",
+) -> List[str]:
+    """One ``.dat`` file per problem (columns: epoch, wall_time_s)."""
+    from underPINN.utils.pgf_export import save_lines_dat
+    groups: Dict[str, list] = {}
+    for r in results:
+        groups.setdefault(r.problem, []).append(r)
+
+    paths = []
+    for prob, rlist in sorted(groups.items()):
+        rlist = sorted(rlist, key=lambda r: r.epochs)
+        path = os.path.join(out_dir, f"{prefix}_{prob}.dat")
+        save_lines_dat(path, epoch=[r.epochs for r in rlist],
+                       wall_time_s=[r.wall_time_s for r in rlist])
+        paths.append(path)
+    print(f"Saved: {len(paths)} wall-time-vs-epochs .dat file(s) → {out_dir}/")
+    return paths
+
+
+def pgf_ms_per_epoch(
+    results: List[BenchmarkResult],
+    out_dir: str,
+    *,
+    filename: str = "ms_per_epoch.dat",
+) -> str:
+    """Bar-chart data: ms/epoch at the *largest* tested budget, per problem."""
+    from underPINN.utils.pgf_export import format_xticklabels, save_bar_dat
+    best: Dict[str, BenchmarkResult] = {}
+    for r in results:
+        if r.label not in best or r.epochs > best[r.label].epochs:
+            best[r.label] = r
+
+    labels = sorted(best.keys())
+    path = os.path.join(out_dir, filename)
+    save_bar_dat(path, [best[lb].problem for lb in labels],
+                value=[best[lb].ms_per_epoch for lb in labels])
+    print(f"Saved: {path}  (xticklabels={format_xticklabels(labels)})")
+    return path
+
+
+def pgf_summary_bar(
+    results: List[BenchmarkResult],
+    out_dir: str,
+    *,
+    filename: str = "accuracy_summary_bar.dat",
+) -> str:
+    """Grouped-bar data: rel-L2 at each epoch budget, per problem.
+
+    One column per epoch budget *value* seen anywhere in ``results`` — with
+    per-problem epoch tiers (simple vs. complex), most problems will have
+    ``nan`` in the columns for budgets they didn't actually run; PGFPlots
+    skips ``nan`` bars automatically.
+    """
+    from underPINN.utils.pgf_export import format_xticklabels, save_bar_dat
+    groups: Dict[str, list] = {}
+    for r in results:
+        if not math.isnan(r.rel_l2):
+            groups.setdefault(r.problem, []).append(r)
+    if not groups:
+        return ""
+
+    problems = sorted(groups.keys())
+    epoch_budgets = sorted({r.epochs for r in results})
+    series = {}
+    for ep in epoch_budgets:
+        col = []
+        for prob in problems:
+            hit = [r for r in groups[prob] if r.epochs == ep]
+            col.append(hit[0].rel_l2 if hit else float("nan"))
+        series[f"epoch_{ep}"] = col
+
+    path = os.path.join(out_dir, filename)
+    save_bar_dat(path, problems, **series)
+    labels = [groups[p][0].label for p in problems]
+    print(f"Saved: {path}  (xticklabels={format_xticklabels(labels)})")
+    return path
+
+
+def generate_report_pgf(
+    results: List[BenchmarkResult],
+    runner=None,
+    out_dir: str = "outputs/bench/pgf",
+) -> None:
+    """PGFPlots-data companion to :func:`generate_report`.
+
+    Writes the same comparisons (accuracy vs. epochs, wall time vs. epochs,
+    accuracy summary bar, ms/epoch) as plain-text ``.dat`` tables instead of
+    matplotlib PNGs, for paper-quality LaTeX-native figures. Per-problem
+    solution field/loss data is exported separately by each evaluator's own
+    ``plot_pgf()`` (called from :meth:`BenchmarkRunner.run`), so it isn't
+    duplicated here — this only covers the cross-problem aggregate views.
+    ``runner`` is accepted for a uniform call signature with
+    :func:`generate_report` but isn't currently used (no PGF equivalent of
+    the loss grid: individual per-problem loss curves already come from
+    ``plot_pgf()``).
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    print(f"\n{'='*55}")
+    print(f"  Generating PGF benchmark data → {out_dir}/")
+    print(f"{'='*55}")
+
+    pgf_accuracy_vs_epochs(results, out_dir)
+    pgf_summary_bar(results, out_dir)
+    pgf_wall_time_vs_epochs(results, out_dir)
+    pgf_ms_per_epoch(results, out_dir)
+
+    print(f"\nAll PGF data in: {out_dir}/\n")
+
+
+# =============================================================================
 #  All-in-one
 # =============================================================================
 
