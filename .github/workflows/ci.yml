@@ -18,7 +18,14 @@ jobs:
           python-version: "3.10"
 
       - name: Install Ruff
-        run: python -m pip install ruff
+        # Pinned: an unpinned "pip install ruff" grabs whatever is newest at
+        # CI run time, and ruff has changed its *default* enabled-rule set
+        # between releases (0.15.x -> 0.16.0 alone went from ~60 to ~410
+        # enabled rules) — that turns a routine dependency refresh into a
+        # sudden, unrelated CI failure across the whole codebase. Bump this
+        # deliberately, review the diff in enabled rules, and update
+        # pyproject.toml's [tool.ruff.lint] select/ignore to match.
+        run: python -m pip install ruff==0.15.15
 
       - name: Lint with Ruff
         run: ruff check underPINN/
