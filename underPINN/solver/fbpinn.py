@@ -347,7 +347,7 @@ class FBPINNSolver(BaseSolver):
                     "bc":   float(bc_l),
                 }
 
-                if not callbacks and (ep_offset + ep) % 10 == 0:
+                if not callbacks and ep == epochs - 1:
                     elapsed = time.time() - start
                     print(
                         f"Epoch {ep_offset + ep:5d} | "

@@ -351,19 +351,28 @@ def pgf_accuracy_vs_epochs(
     in one ``\\addplot table`` per data file anyway.
     """
     from underPINN.utils.pgf_export import save_lines_dat
+    from underPINN.utils.pgf_tex import PALETTE, multi_line_tex, sanitize_label
     groups: Dict[str, list] = {}
     for r in results:
         if not math.isnan(r.rel_l2):
             groups.setdefault(r.problem, []).append(r)
 
     paths = []
-    for prob, rlist in sorted(groups.items()):
+    series = []
+    for i, (prob, rlist) in enumerate(sorted(groups.items())):
         rlist = sorted(rlist, key=lambda r: r.epochs)
         path = os.path.join(out_dir, f"{prefix}_{prob}.dat")
         save_lines_dat(path, epoch=[r.epochs for r in rlist],
                        rel_l2=[r.rel_l2 for r in rlist])
         paths.append(path)
+        series.append((os.path.basename(path), "rel_l2",
+                      f"{PALETTE[i % len(PALETTE)]}, thick",
+                      sanitize_label(rlist[0].label)))
     print(f"Saved: {len(paths)} accuracy-vs-epochs .dat file(s) → {out_dir}/")
+    if series:
+        multi_line_tex(os.path.join(out_dir, f"{prefix}.tex"), series,
+                      ylabel="relative $L^2$ error",
+                      title="Accuracy vs. epoch budget")
     return paths
 
 
@@ -375,18 +384,27 @@ def pgf_wall_time_vs_epochs(
 ) -> List[str]:
     """One ``.dat`` file per problem (columns: epoch, wall_time_s)."""
     from underPINN.utils.pgf_export import save_lines_dat
+    from underPINN.utils.pgf_tex import PALETTE, multi_line_tex, sanitize_label
     groups: Dict[str, list] = {}
     for r in results:
         groups.setdefault(r.problem, []).append(r)
 
     paths = []
-    for prob, rlist in sorted(groups.items()):
+    series = []
+    for i, (prob, rlist) in enumerate(sorted(groups.items())):
         rlist = sorted(rlist, key=lambda r: r.epochs)
         path = os.path.join(out_dir, f"{prefix}_{prob}.dat")
         save_lines_dat(path, epoch=[r.epochs for r in rlist],
                        wall_time_s=[r.wall_time_s for r in rlist])
         paths.append(path)
+        series.append((os.path.basename(path), "wall_time_s",
+                      f"{PALETTE[i % len(PALETTE)]}, thick",
+                      sanitize_label(rlist[0].label)))
     print(f"Saved: {len(paths)} wall-time-vs-epochs .dat file(s) → {out_dir}/")
+    if series:
+        multi_line_tex(os.path.join(out_dir, f"{prefix}.tex"), series,
+                      ylabel="training time (s)", logy=False,
+                      title="Training wall time vs. epoch budget")
     return paths
 
 
@@ -398,16 +416,22 @@ def pgf_ms_per_epoch(
 ) -> str:
     """Bar-chart data: ms/epoch at the *largest* tested budget, per problem."""
     from underPINN.utils.pgf_export import format_xticklabels, save_bar_dat
+    from underPINN.utils.pgf_tex import bar_tex
     best: Dict[str, BenchmarkResult] = {}
     for r in results:
         if r.label not in best or r.epochs > best[r.label].epochs:
             best[r.label] = r
 
     labels = sorted(best.keys())
+    categories = [best[lb].problem for lb in labels]
     path = os.path.join(out_dir, filename)
-    save_bar_dat(path, [best[lb].problem for lb in labels],
-                value=[best[lb].ms_per_epoch for lb in labels])
+    save_bar_dat(path, categories, value=[best[lb].ms_per_epoch for lb in labels])
     print(f"Saved: {path}  (xticklabels={format_xticklabels(labels)})")
+
+    tex_path = os.path.splitext(path)[0] + ".tex"
+    bar_tex(tex_path, os.path.basename(path), categories,
+           [("value", "ms/epoch")], xticklabels=labels,
+           ylabel="ms / epoch", title="Training throughput")
     return path
 
 
@@ -425,6 +449,7 @@ def pgf_summary_bar(
     skips ``nan`` bars automatically.
     """
     from underPINN.utils.pgf_export import format_xticklabels, save_bar_dat
+    from underPINN.utils.pgf_tex import bar_tex
     groups: Dict[str, list] = {}
     for r in results:
         if not math.isnan(r.rel_l2):
@@ -446,6 +471,12 @@ def pgf_summary_bar(
     save_bar_dat(path, problems, **series)
     labels = [groups[p][0].label for p in problems]
     print(f"Saved: {path}  (xticklabels={format_xticklabels(labels)})")
+
+    tex_path = os.path.splitext(path)[0] + ".tex"
+    value_cols = [(f"epoch_{ep}", f"{ep} epochs") for ep in epoch_budgets]
+    bar_tex(tex_path, os.path.basename(path), problems, value_cols,
+           xticklabels=labels, ylabel="relative $L^2$ error",
+           title="Accuracy summary", logy=True)
     return path
 
 
@@ -457,15 +488,16 @@ def generate_report_pgf(
     """PGFPlots-data companion to :func:`generate_report`.
 
     Writes the same comparisons (accuracy vs. epochs, wall time vs. epochs,
-    accuracy summary bar, ms/epoch) as plain-text ``.dat`` tables instead of
-    matplotlib PNGs, for paper-quality LaTeX-native figures. Per-problem
-    solution field/loss data is exported separately by each evaluator's own
-    ``plot_pgf()`` (called from :meth:`BenchmarkRunner.run`), so it isn't
-    duplicated here — this only covers the cross-problem aggregate views.
-    ``runner`` is accepted for a uniform call signature with
-    :func:`generate_report` but isn't currently used (no PGF equivalent of
-    the loss grid: individual per-problem loss curves already come from
-    ``plot_pgf()``).
+    accuracy summary bar, ms/epoch) as plain-text ``.dat`` tables *plus* a
+    standalone, compilable ``.tex`` figure for each
+    (see :mod:`underPINN.utils.pgf_tex`) — paper-quality LaTeX-native
+    figures, not matplotlib PNGs. Per-problem solution field/loss data is
+    exported separately by each evaluator's own ``plot_pgf()`` (called from
+    :meth:`BenchmarkRunner.run`), so it isn't duplicated here — this only
+    covers the cross-problem aggregate views. ``runner`` is accepted for a
+    uniform call signature with :func:`generate_report` but isn't currently
+    used (no PGF equivalent of the loss grid: individual per-problem loss
+    curves already come from ``plot_pgf()``).
     """
     os.makedirs(out_dir, exist_ok=True)
     print(f"\n{'='*55}")

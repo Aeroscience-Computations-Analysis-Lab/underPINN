@@ -1,0 +1,444 @@
+"""underPINN.utils.pgf_tex — generate standalone, research-quality LaTeX
+(TikZ/pgfplots) figures from the data files written by
+:mod:`underPINN.utils.pgf_export`.
+
+Two data shapes need two different rendering strategies:
+
+* **Dense 2-D fields** (Mach/u/T heatmaps, tens of thousands of grid points)
+  compile fine as matplotlib PNGs but blow pgfplots' ``surf``/mesh path (each
+  point becomes a macro expansion — a 200x160 grid alone exhausts TeX's
+  default main memory). So fields are rasterized once with
+  :func:`underPINN.utils.pgf_export.save_heatmap_png` and placed with
+  ``\\addplot graphics``, with a *real* vector axis/colorbar/labels drawn on
+  top — the standard "rasterize the data, vectorize the typography" approach
+  used throughout the CFD/ML literature for exactly this reason.
+* **Line/scatter data** (loss curves, RAR collocation scatter, 1-D profiles —
+  at most a few thousand rows) compiles fine as plain vector
+  ``\\addplot table``, so those go straight through.
+
+Every function here writes a fully self-contained
+``\\documentclass[tikz]{standalone}`` file that compiles on its own
+(``pdflatex figure.tex`` -> ``figure.pdf``, ready for ``\\includegraphics``).
+Convergence (loss) curves are always their own standalone figure, never
+combined with a solution/field figure — training diagnostics and physics
+results belong in different figures.
+"""
+from __future__ import annotations
+
+from typing import Optional, Sequence, Tuple
+
+# ---------------------------------------------------------------------------
+# Shared preamble / style
+# ---------------------------------------------------------------------------
+
+_PREAMBLE = r"""\documentclass[tikz]{standalone}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepgfplotslibrary{groupplots,colormaps}
+\usepackage{amsmath}
+\pgfplotsset{
+    every axis/.append style={
+        line width=0.7pt,
+        axis line style={line width=0.6pt},
+        tick align=outside,
+        tick label style={font=\footnotesize},
+        label style={font=\small},
+        title style={font=\small},
+        legend style={font=\footnotesize, draw=none, fill=none, row sep=1pt},
+        legend cell align=left,
+    },
+}
+% Custom colormaps matching the matplotlib palettes used elsewhere in the
+% benchmark suite (RdBu_r / Reds), so the LaTeX and PNG renderings agree.
+\pgfplotsset{
+    colormap={divRdBu}{rgb255=(5,48,97) rgb255=(247,247,247) rgb255=(103,0,31)},
+    colormap={seqReds}{rgb255=(255,245,240) rgb255=(103,0,13)},
+}
+% Built-in colormaps (jet, viridis, ...) must be invoked once via their
+% colormap/<name> style before `colormap name=<name>` can find them --
+% otherwise pgfplots fails with a cryptic "Missing number" error.
+\pgfplotsset{colormap/jet, colormap/viridis}
+\definecolor{cInit}{RGB}{184,196,208}
+\definecolor{cFinal}{RGB}{209,73,91}
+\definecolor{cPinn}{RGB}{204,0,0}
+\definecolor{cExact}{RGB}{20,20,20}
+% Colorblind-safe qualitative palette (Okabe-Ito) for multi-series plots
+% (e.g. one line per problem) -- pgfplots' automatic color cycling isn't
+% reliable across all axis configurations, so cPalette0..7 are assigned
+% explicitly by callers instead of left to chance.
+\definecolor{cPalette0}{RGB}{0,114,178}
+\definecolor{cPalette1}{RGB}{230,159,0}
+\definecolor{cPalette2}{RGB}{0,158,115}
+\definecolor{cPalette3}{RGB}{204,121,167}
+\definecolor{cPalette4}{RGB}{86,180,233}
+\definecolor{cPalette5}{RGB}{213,94,0}
+\definecolor{cPalette6}{RGB}{240,228,66}
+\definecolor{cPalette7}{RGB}{153,153,153}
+\begin{document}
+"""
+
+_POSTAMBLE = r"""\end{document}
+"""
+
+# A fixed, always-valid way to put the legend outside the axis to the right
+# ("legend pos=outer/outside north east" is NOT a valid pgfplots enum value
+# in every version, so don't rely on it -- this form always works).
+_LEGEND_OUTSIDE_RIGHT = r"legend style={at={(1.03,1)}, anchor=north west}"
+
+#: Colorblind-safe 8-color palette (matches the ``cPalette0..7`` colors
+#: defined in the preamble). Index into this with ``PALETTE[i % len(PALETTE)]``
+#: to assign an explicit, distinguishable color per series in a multi-line
+#: plot -- pgfplots' automatic color cycling isn't reliably triggered in
+#: every axis configuration, so don't depend on it for >1 series.
+PALETTE = [f"cPalette{i}" for i in range(8)]
+
+
+_TEX_SPECIAL = str.maketrans({
+    "_": r"\_", "%": r"\%", "&": r"\&", "#": r"\#",
+})
+
+
+def escape_tex(s) -> str:
+    """Escape LaTeX-special characters in a *plain identifier* string (e.g. a
+    raw problem key like ``ramp_ns``) before it's typeset as visible text.
+
+    Only use this on programmatic strings, never on titles/labels you author
+    by hand elsewhere in this module — those intentionally contain real
+    LaTeX/math markup (``"$x$"``, ``"relative $L^2$"``, ...) that this would
+    mangle. ``bar_tex`` applies it to tick labels internally since those
+    routinely come straight from a raw ``problem`` key.
+    """
+    return str(s).translate(_TEX_SPECIAL)
+
+
+# Plain pdflatex (used here rather than lualatex/xelatex, for the widest
+# compatibility with journal build systems) chokes on raw UTF-8 Greek letters
+# and a few other symbols that show up in the evaluators' human-readable
+# `label` strings (e.g. "1-D Burgers (ν=0.01)"). Sanitize those specific,
+# known characters into proper LaTeX rather than pulling in extra Unicode
+# packages -- this is not a general Unicode transliterator.
+_UNICODE_TO_TEX = {
+    "α": r"$\alpha$", "β": r"$\beta$", "γ": r"$\gamma$",
+    "λ": r"$\lambda$", "μ": r"$\mu$", "ν": r"$\nu$",
+    "ρ": r"$\rho$", "θ": r"$\theta$", "ω": r"$\omega$",
+    "°": r"$^\circ$", "∞": r"$\infty$",
+    "—": "--", "–": "-",
+}
+
+
+def sanitize_label(s: str) -> str:
+    """Replace the Greek letters/symbols found in evaluator ``label`` strings
+    with plain-pdflatex-safe LaTeX equivalents (e.g. ``ν`` -> ``$\\nu$``).
+    Apply this to any human-readable label before using it as a title/legend
+    entry -- titles/labels you author yourself with intentional LaTeX math
+    markup don't need it (they're already plain ASCII)."""
+    for uni, tex in _UNICODE_TO_TEX.items():
+        s = s.replace(uni, tex)
+    return s
+
+
+def _opts(*items: str) -> str:
+    """Join non-empty option strings as ``opt1,\\n    opt2,\\n    ...`` —
+    guarantees no line is ever left blank/whitespace-only, which breaks
+    pgfplots' key-value parser mid-argument (a blank line inside ``[...]``
+    triggers a stray ``\\par`` that pgfkeys can't recover from)."""
+    parts = [it.strip().rstrip(",") for it in items if it and it.strip()]
+    return ",\n    ".join(parts)
+
+
+def _write(path: str, body: str) -> str:
+    with open(path, "w") as f:
+        f.write(_PREAMBLE)
+        f.write(body)
+        f.write(_POSTAMBLE)
+    print(f"  tex → {path}")
+    return path
+
+
+# ---------------------------------------------------------------------------
+# Heatmap / field panels (PNG-backed — see module docstring)
+# ---------------------------------------------------------------------------
+
+def _heatmap_axis(
+    png_rel: str,
+    extent: Tuple[float, float, float, float],
+    vmin: float, vmax: float,
+    cmap: str, title: str, cbar_label: str,
+    *, xlabel: str = "$x$", ylabel: str = "$y$",
+    width: str = "5.6cm", height: Optional[str] = None,
+    aspect_equal: bool = False, extra_opts: str = "",
+    overlay: str = "", show_ylabel: bool = True,
+) -> str:
+    """One ``\\nextgroupplot``/``axis`` body for a single rasterized field.
+
+    ``show_ylabel=False`` blanks this panel's own y-axis label and tick
+    labels -- for panels that share their y-domain with a panel to their
+    left (e.g. PINN | Exact | Error, all on the same grid), each panel's
+    y-axis text otherwise renders directly on top of its left neighbor's
+    colorbar (the colorbar's declared ``width`` doesn't reserve room for
+    the next panel's tick-label text, only ``horizontal sep`` does, and
+    that gap is sized for the axis, not for text plus a colorbar).
+    """
+    xmin, xmax, ymin, ymax = extent
+    h = height or width
+    opts = _opts(
+        f"width={width}", f"height={h}",
+        "axis equal image" if aspect_equal else "",
+        f"xlabel={{{xlabel}}}",
+        f"ylabel={{{ylabel if show_ylabel else ''}}}",
+        "yticklabels={}" if not show_ylabel else "",
+        f"title={{{title}}}",
+        f"xmin={xmin}", f"xmax={xmax}", f"ymin={ymin}", f"ymax={ymax}",
+        "axis on top",
+        "colorbar", f"colormap name={{{cmap}}}",
+        f"point meta min={vmin}", f"point meta max={vmax}",
+        f"colorbar style={{ylabel={{{cbar_label}}}, width=2.5mm}}",
+        extra_opts,
+    )
+    out = (f"[\n    {opts}\n]\n"
+          f"\\addplot graphics[xmin={xmin}, xmax={xmax}, ymin={ymin}, ymax={ymax}] "
+          f"{{{png_rel}}};\n")
+    if overlay:
+        out += overlay + "\n"
+    return out
+
+
+def single_heatmap_tex(
+    path: str, png_rel: str, extent, vmin: float, vmax: float,
+    cmap: str, title: str, cbar_label: str, *, overlay: str = "",
+    xlabel: str = "$x$", ylabel: str = "$y$", aspect_equal: bool = False,
+) -> str:
+    """Standalone one-panel field figure — used where there's no reference
+    to compare against (e.g. the viscous ramp_ns case)."""
+    axis_opts = _heatmap_axis(png_rel, extent, vmin, vmax, cmap, title,
+                              cbar_label, xlabel=xlabel, ylabel=ylabel,
+                              width="7.4cm", height="5.4cm",
+                              aspect_equal=aspect_equal, overlay=overlay)
+    body = "\\begin{tikzpicture}\n\\begin{axis}" + axis_opts + "\\end{axis}\n\\end{tikzpicture}\n"
+    return _write(path, body)
+
+
+def field_comparison_tex(
+    path: str,
+    panels: Sequence[dict],
+    *, ncols: int = 3, width: str = "5.4cm", height: str = "4.6cm",
+    aspect_equal: bool = False,
+    line_panels: Optional[Sequence[dict]] = None,
+) -> str:
+    """Groupplot of 2-3 heatmap panels (e.g. PINN | Exact | |Error|) sharing
+    one row, no convergence data mixed in.
+
+    Each entry in ``panels`` is a dict with keys: ``png_rel``, ``extent``,
+    ``vmin``, ``vmax``, ``cmap``, ``title``, ``cbar_label``, and optionally
+    ``overlay`` (raw TikZ drawn on top, e.g. a shock line).
+
+    ``line_panels`` (optional) appends plain vector line-plot panels to the
+    same group -- e.g. a radial profile alongside a 2-D cross-section field,
+    both being facets of the same solution (unlike loss/convergence, which
+    stays in its own standalone figure per ``loss_tex``). Each entry is a
+    dict with keys: ``dat_rel``, ``series`` (list of ``(ycol, style,
+    label)`` tuples), ``title``, and optionally ``xcol`` (default ``"x"``),
+    ``xlabel``, ``ylabel``, ``logy``.
+    """
+    line_panels = line_panels or []
+    n = len(panels) + len(line_panels)
+    nrows = 1 if n <= ncols else -(-n // ncols)
+    group_opts = _opts(
+        f"group style={{group size={ncols} by {nrows}, "
+        f"horizontal sep=3.2cm, vertical sep=2.2cm}}")
+    body = f"\\begin{{tikzpicture}}\n\\begin{{groupplot}}[\n    {group_opts}\n]\n"
+    for p in panels:
+        axis_opts = _heatmap_axis(
+            p["png_rel"], p["extent"], p["vmin"], p["vmax"], p["cmap"],
+            p["title"], p["cbar_label"], xlabel=p.get("xlabel", "$x$"),
+            ylabel=p.get("ylabel", "$y$"), width=width, height=height,
+            aspect_equal=aspect_equal, overlay=p.get("overlay", ""),
+            show_ylabel=p.get("show_ylabel", True))
+        body += "\\nextgroupplot" + axis_opts
+    for lp in line_panels:
+        show_legend = lp.get("show_legend", True)
+        legend_opt = ((lp["legend_style"] if "legend_style" in lp
+                      else f"legend pos={lp.get('legend_pos', 'north east')}")
+                     if show_legend else "")
+        axis_opts = _opts(
+            f"width={width}", f"height={height}",
+            f"xlabel={{{lp.get('xlabel', '$x$')}}}",
+            f"ylabel={{{lp.get('ylabel', '$u$')}}}",
+            f"title={{{lp.get('title', '')}}}",
+            "ymode=log" if lp.get("logy") else "",
+            legend_opt,
+        )
+        body += f"\\nextgroupplot[\n    {axis_opts}\n]\n"
+        for ycol, style, label in lp["series"]:
+            body += f"\\addplot[{style}] table[x={lp.get('xcol', 'x')}, y={ycol}] {{{lp['dat_rel']}}};\n"
+            if show_legend:
+                body += f"\\addlegendentry{{{label}}}\n"
+    body += "\\end{groupplot}\n\\end{tikzpicture}\n"
+    return _write(path, body)
+
+
+# ---------------------------------------------------------------------------
+# Line / scatter figures (vector \addplot table — safe at benchmark scale)
+# ---------------------------------------------------------------------------
+
+def line_comparison_tex(
+    path: str,
+    dat_rel: str,
+    series: Sequence[Tuple[str, str, str]],
+    *, xcol: str = "x", xlabel: str = "$x$", ylabel: str = "$u$", title: str = "",
+    logy: bool = False, width: str = "8cm", height: str = "5.6cm",
+    extra_opts: str = "",
+) -> str:
+    """Standalone line plot from one ``save_lines_dat``-format table.
+
+    ``series``: list of ``(y_column, style, legend_label)`` tuples, all
+    sharing the table's x-column ``xcol`` (some evaluators name it ``t`` or
+    ``r`` rather than ``x`` — pass the actual column name from the file).
+    """
+    opts = _opts(
+        f"width={width}", f"height={height}",
+        f"xlabel={{{xlabel}}}", f"ylabel={{{ylabel}}}", f"title={{{title}}}",
+        "ymode=log" if logy else "",
+        "legend pos=north east", extra_opts,
+    )
+    body = f"\\begin{{tikzpicture}}\n\\begin{{axis}}[\n    {opts}\n]\n"
+    for ycol, style, label in series:
+        body += (rf"\addplot[{style}] table[x={xcol}, y={ycol}] {{{dat_rel}}};" "\n"
+                rf"\addlegendentry{{{label}}}" "\n")
+    body += "\\end{axis}\n\\end{tikzpicture}\n"
+    return _write(path, body)
+
+
+def loss_tex(
+    path: str, loss_dat_rel: str, title: str = "Training loss",
+    *, has_pde: bool = True, width: str = "7.5cm", height: str = "5.2cm",
+) -> str:
+    """Standalone convergence figure — always separate from the solution
+    figure (see module docstring)."""
+    opts = _opts(
+        f"width={width}", f"height={height}",
+        "xlabel={epoch}", "ylabel={loss}", f"title={{{title}}}",
+        "ymode=log", "legend pos=north east",
+    )
+    body = f"\\begin{{tikzpicture}}\n\\begin{{axis}}[\n    {opts}\n]\n"
+    body += (r"\addplot[cPinn, thick] table[x=epoch, y=total] "
+            f"{{{loss_dat_rel}}};\n\\addlegendentry{{total}}\n")
+    if has_pde:
+        body += (r"\addplot[cExact, thick, dashed] table[x=epoch, y=pde] "
+                f"{{{loss_dat_rel}}};\n\\addlegendentry{{PDE}}\n")
+    body += "\\end{axis}\n\\end{tikzpicture}\n"
+    return _write(path, body)
+
+
+def scatter_migration_tex(
+    path: str, init_rel: str, final_rel: str,
+    *, xlabel: str = "$x$", ylabel: str = "$y$",
+    title: str = "RAR-D adaptive collocation: initial "
+                "$\\rightarrow$ final",
+    xlim: Optional[Tuple[float, float]] = None,
+    ylim: Optional[Tuple[float, float]] = None,
+    overlay: str = "", width: str = "7.5cm", height: str = "6cm",
+    aspect_equal: bool = True,
+) -> str:
+    """Standalone before/after scatter for a residual-adaptive (RAR-D) pool."""
+    opts = _opts(
+        f"width={width}", f"height={height}",
+        "axis equal image" if aspect_equal else "",
+        f"xlabel={{{xlabel}}}", f"ylabel={{{ylabel}}}", f"title={{{title}}}",
+        f"xmin={xlim[0]}, xmax={xlim[1]}" if xlim is not None else "",
+        f"ymin={ylim[0]}, ymax={ylim[1]}" if ylim is not None else "",
+        _LEGEND_OUTSIDE_RIGHT,
+    )
+    body = f"\\begin{{tikzpicture}}\n\\begin{{axis}}[\n    {opts}\n]\n"
+    body += (r"\addplot[only marks, mark size=0.5pt, cInit, opacity=0.6] "
+            f"table[x=x,y=y] {{{init_rel}}};\n\\addlegendentry{{initial}}\n")
+    body += (r"\addplot[only marks, mark size=0.5pt, cFinal, opacity=0.6] "
+            f"table[x=x,y=y] {{{final_rel}}};\n\\addlegendentry{{final}}\n")
+    if overlay:
+        body += overlay + "\n"
+    body += "\\end{axis}\n\\end{tikzpicture}\n"
+    return _write(path, body)
+
+
+# ---------------------------------------------------------------------------
+# Aggregate summary figures (cross-problem comparisons)
+# ---------------------------------------------------------------------------
+
+def multi_line_tex(
+    path: str,
+    series: Sequence[Tuple[str, str, str, str]],
+    *, xlabel: str = "epoch budget", ylabel: str = "value",
+    title: str = "", logx: bool = True, logy: bool = True,
+    width: str = "8.5cm", height: str = "6cm",
+) -> str:
+    """One line per problem, each from its own ``.dat`` file (used for
+    accuracy-vs-epochs / wall-time-vs-epochs, where different problems may
+    have entirely different epoch budgets, so there's no shared table).
+
+    ``series``: list of ``(dat_rel, ycol, style, legend_label)``.
+    """
+    opts = _opts(
+        f"width={width}", f"height={height}",
+        f"xlabel={{{xlabel}}}", f"ylabel={{{ylabel}}}", f"title={{{title}}}",
+        "xmode=log" if logx else "", "ymode=log" if logy else "",
+        _LEGEND_OUTSIDE_RIGHT,
+    )
+    body = f"\\begin{{tikzpicture}}\n\\begin{{axis}}[\n    {opts}\n]\n"
+    for dat_rel, ycol, style, label in series:
+        body += (rf"\addplot[{style}, mark=*, mark size=1.2pt] "
+                f"table[x=epoch, y={ycol}] {{{dat_rel}}};" "\n"
+                rf"\addlegendentry{{{label}}}" "\n")
+    body += "\\end{axis}\n\\end{tikzpicture}\n"
+    return _write(path, body)
+
+
+def bar_tex(
+    path: str,
+    dat_rel: str,
+    categories: Sequence[str],
+    value_cols: Sequence[Tuple[str, str]],
+    *, xticklabels: Optional[Sequence[str]] = None,
+    ylabel: str = "value", title: str = "", logy: bool = False,
+    width: str = "13cm", height: str = "6cm",
+) -> str:
+    """(Grouped) bar chart from a ``save_bar_dat``-format table.
+
+    ``value_cols``: list of ``(column_name, legend_label)`` — one bar series
+    per column; a single entry gives a plain (non-grouped) bar chart.
+    """
+    labels = xticklabels if xticklabels is not None else categories
+    symbolic = ",".join(categories)   # raw keys: must match the data file exactly
+    xtl = "{" + ",".join(
+        "{" + escape_tex(sanitize_label(lb)) + "}" for lb in labels) + "}"
+    # Bar width must fit within each category's own slot, not just be split
+    # across series: with N categories crammed into a fixed axis width,
+    # a single-series chart (e.g. throughput) still needs a narrower bar
+    # per category as N grows, or neighboring bars start touching/
+    # overlapping -- using only `0.8 / n_series` (ignoring category count)
+    # was the bug (fine for a handful of categories, broken at 9).
+    width_cm = float(str(width).replace("cm", "").strip())
+    enlarge_frac = 0.15  # matches "enlarge x limits=0.15" below
+    n_cats = max(len(categories), 1)
+    n_series = max(len(value_cols), 1)
+    usable_cm = width_cm * (1.0 - 2.0 * enlarge_frac)
+    bar_w = min(0.8 / n_series, 0.7 * usable_cm / n_cats / n_series)
+    opts = _opts(
+        f"width={width}", f"height={height}",
+        "ybar", f"bar width={bar_w:.4f}cm",
+        f"symbolic x coords={{{symbolic}}}",
+        # NOTE: explicit `xtick={symbolic}`, not `xtick=data` -- with sparse
+        # per-series data (e.g. some categories only populated from a later
+        # column onward), `xtick=data` silently drops any category whose
+        # *first*-plotted series is NaN instead of scanning all series.
+        f"xtick={{{symbolic}}}", f"xticklabels={xtl}",
+        r"x tick label style={rotate=25, anchor=east, font=\scriptsize}",
+        f"ylabel={{{ylabel}}}", f"title={{{title}}}",
+        "ymode=log" if logy else "",
+        "enlarge x limits=0.15", _LEGEND_OUTSIDE_RIGHT,
+    )
+    body = f"\\begin{{tikzpicture}}\n\\begin{{axis}}[\n    {opts}\n]\n"
+    for col, label in value_cols:
+        body += (rf"\addplot table[x=category, y={col}] {{{dat_rel}}};" "\n"
+                rf"\addlegendentry{{{label}}}" "\n")
+    body += "\\end{axis}\n\\end{tikzpicture}\n"
+    return _write(path, body)
