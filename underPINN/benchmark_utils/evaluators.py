@@ -579,23 +579,28 @@ class HelmholtzEvaluator(BaseBenchmarkEvaluator):
         u_pred  = np.array(self._pde.u(self._params, xy)).reshape(N, N)
         u_exact = np.array(self._pde.exact(xy)).reshape(N, N)
         err = np.abs(u_pred - u_exact)
-        vlim = float(max(abs(u_pred.min()), abs(u_pred.max()),
-                        abs(u_exact.min()), abs(u_exact.max())))
+        # exact(x,y) = sin(pi*x)*sin(pi*y) is non-negative everywhere on
+        # [0,1]^2 -- a sequential colormap over the true [min,max] range, not
+        # a symmetric +-vlim diverging one, matches what the field actually
+        # does (a diverging map here just wastes half the color range on
+        # negative values that never occur and mislabels the colorbar).
+        vmin = float(min(u_pred.min(), u_exact.min()))
+        vmax = float(max(u_pred.max(), u_exact.max()))
 
         pinn_png = os.path.join(out_dir, f"helmholtz{suffix}_pinn.png")
         exact_png = os.path.join(out_dir, f"helmholtz{suffix}_exact.png")
         err_png = os.path.join(out_dir, f"helmholtz{suffix}_err.png")
-        ext = save_heatmap_png(pinn_png, x, x, u_pred, "RdBu_r", -vlim, vlim)
-        save_heatmap_png(exact_png, x, x, u_exact, "RdBu_r", -vlim, vlim)
+        ext = save_heatmap_png(pinn_png, x, x, u_pred, "viridis", vmin, vmax)
+        save_heatmap_png(exact_png, x, x, u_exact, "viridis", vmin, vmax)
         save_heatmap_png(err_png, x, x, err, "Reds", 0.0, float(err.max()))
 
         fig_path = field_comparison_tex(
             os.path.join(out_dir, f"helmholtz{suffix}_fields.tex"),
             [
-                dict(png_rel=os.path.basename(pinn_png), extent=ext, vmin=-vlim,
-                    vmax=vlim, cmap="divRdBu", title="PINN", cbar_label="$u$"),
-                dict(png_rel=os.path.basename(exact_png), extent=ext, vmin=-vlim,
-                    vmax=vlim, cmap="divRdBu", title="Exact", cbar_label="$u$"),
+                dict(png_rel=os.path.basename(pinn_png), extent=ext, vmin=vmin,
+                    vmax=vmax, cmap="viridis", title="PINN", cbar_label="$u$"),
+                dict(png_rel=os.path.basename(exact_png), extent=ext, vmin=vmin,
+                    vmax=vmax, cmap="viridis", title="Exact", cbar_label="$u$"),
                 dict(png_rel=os.path.basename(err_png), extent=ext, vmin=0.0,
                     vmax=float(err.max()), cmap="seqReds", title="$|$Error$|$",
                     cbar_label=""),
@@ -1559,7 +1564,13 @@ class RampNSEvaluator(BaseBenchmarkEvaluator):
             params = optax.apply_updates(params, updates)
             return params, state, total, aux
 
-        rar_period = max(1, epochs // 5)  # 5 resamples over the whole run
+        # Fixed 5000-epoch cadence (rather than epochs // 5, which gave only
+        # ~4-5 resamples total and left the pool frozen for a long stretch
+        # before the run ended -- e.g. at 60000 epochs the last resample
+        # landed at epoch 48000, so the "final" positions in the migration
+        # plot reflected the model's state 12000 epochs before convergence,
+        # understating how far points had actually migrated by the end).
+        rar_period = 5000
         loss_hist, pde_hist = [], []
         key = jax.random.PRNGKey(seed + 11)
         t0 = time.perf_counter()
@@ -1592,6 +1603,8 @@ class RampNSEvaluator(BaseBenchmarkEvaluator):
         self._ramp_start = ramp_start
         self._xy_adapt_init  = xy_adapt_init
         self._xy_adapt_final = np.array(xy_adapt)
+        self._rho_inf = float(rho_inf)
+        self._p_inf   = float(rho_inf) * float(T_inf) / (gamma * M_inf ** 2)
         # Analytic inviscid oblique-shock state, via a model-free helper PDE
         # (its oblique_shock()/freestream() are pure closed-form calculations).
         euler = self._CompressibleEulerPDE(None, gamma=gamma)
@@ -1601,15 +1614,39 @@ class RampNSEvaluator(BaseBenchmarkEvaluator):
     def _exact_field(self, XX, YY):
         """Piecewise-exact outer Mach: freestream upstream of the corner shock,
         the analytic post-shock state below the shock line downstream of it."""
-        beta = math.radians(self._shock["beta_deg"])
-        dx = np.maximum(XX - self._ramp_start, 0.0)
-        below_shock = (YY <= dx * math.tan(beta)) & (XX >= self._ramp_start)
-        return np.where(below_shock, self._shock["M2"], self._M_inf)
+        return np.where(self._below_shock(XX, YY), self._shock["M2"], self._M_inf)
 
     def _mach_field(self, params, XX, YY):
         pts  = jnp.array(np.stack([XX.ravel(), YY.ravel()], axis=1), "f4")
         mach = np.array(self._pde.mach(params, pts))
         return mach.reshape(XX.shape)
+
+    def _below_shock(self, XX, YY):
+        beta = math.radians(self._shock["beta_deg"])
+        dx = np.maximum(XX - self._ramp_start, 0.0)
+        return (YY <= dx * math.tan(beta)) & (XX >= self._ramp_start)
+
+    def _exact_density_field(self, XX, YY):
+        """Piecewise-exact outer density: freestream (rho_inf) upstream of
+        the corner shock, the analytic post-shock density downstream."""
+        return np.where(self._below_shock(XX, YY), self._shock["rho2"],
+                        self._rho_inf)
+
+    def _exact_pressure_field(self, XX, YY):
+        """Piecewise-exact outer pressure: freestream (p_inf) upstream of
+        the corner shock, the analytic post-shock pressure downstream."""
+        return np.where(self._below_shock(XX, YY), self._shock["p2"],
+                        self._p_inf)
+
+    def _density_field(self, params, XX, YY):
+        pts = jnp.array(np.stack([XX.ravel(), YY.ravel()], axis=1), "f4")
+        rho = np.array(self._pde.apply(params, pts)[:, 0])
+        return rho.reshape(XX.shape)
+
+    def _pressure_field(self, params, XX, YY):
+        pts = jnp.array(np.stack([XX.ravel(), YY.ravel()], axis=1), "f4")
+        p = np.array(self._pde.pressure(params, pts))
+        return p.reshape(XX.shape)
 
     def _outer_mask(self, XX, YY, mask, band_frac=0.12):
         """Domain-interior mask, excluding a near-wall band (boundary layer)."""
@@ -1706,6 +1743,31 @@ class RampNSEvaluator(BaseBenchmarkEvaluator):
         save_surf_dat(
             os.path.join(out_dir, f"ramp_ns{suffix}_err.dat"), x_np, y_np, err.T)
 
+        # Density and pressure fields, same PINN | outer-exact | |error|
+        # treatment as Mach above (freestream upstream of the corner shock,
+        # analytic post-shock state downstream).
+        for field_name, pred_fn, exact_fn in (
+            ("density", self._density_field, self._exact_density_field),
+            ("pressure", self._pressure_field, self._exact_pressure_field),
+        ):
+            pred = pred_fn(self._params, XX, YY)
+            exact = exact_fn(XX, YY)
+            pred_full = pred.copy()
+            pred_full[~mask] = np.nan
+            exact_outer = exact.copy()
+            exact_outer[~outer] = np.nan
+            field_err = np.abs(pred - exact)
+            field_err[~outer] = np.nan
+            save_surf_dat(
+                os.path.join(out_dir, f"ramp_ns{suffix}_{field_name}_pinn.dat"),
+                x_np, y_np, pred_full.T)
+            save_surf_dat(
+                os.path.join(out_dir, f"ramp_ns{suffix}_{field_name}_exact.dat"),
+                x_np, y_np, exact_outer.T)
+            save_surf_dat(
+                os.path.join(out_dir, f"ramp_ns{suffix}_{field_name}_err.dat"),
+                x_np, y_np, field_err.T)
+
         beta = math.radians(self._shock["beta_deg"])
         x_shock = np.array([self._ramp_start,
                            min(self._L, self._ramp_start
@@ -1720,12 +1782,24 @@ class RampNSEvaluator(BaseBenchmarkEvaluator):
             epoch=np.arange(1, len(self._loss_hist) + 1),
             total=self._loss_hist, pde=self._pde_hist)
 
+        # Subsample for the figure only -- a plain vector \addplot table of
+        # the full n_adapt=6000 points (2 series = 12000 marks) exceeds
+        # pdflatex's default main memory (confirmed: 6000 fails, 2500
+        # compiles fine). The migration pattern is a spatial density plot,
+        # not a precise per-point record, so thinning is visually lossless.
+        _MAX_RAR_PTS = 2000
+        rar_rng = np.random.default_rng(0)
+        n_pts = self._xy_adapt_init.shape[0]
+        if n_pts > _MAX_RAR_PTS:
+            idx = rar_rng.choice(n_pts, _MAX_RAR_PTS, replace=False)
+        else:
+            idx = slice(None)
         save_lines_dat(
             os.path.join(out_dir, f"ramp_ns{suffix}_rar_init.dat"),
-            x=self._xy_adapt_init[:, 0], y=self._xy_adapt_init[:, 1])
+            x=self._xy_adapt_init[idx, 0], y=self._xy_adapt_init[idx, 1])
         save_lines_dat(
             os.path.join(out_dir, f"ramp_ns{suffix}_rar_final.dat"),
-            x=self._xy_adapt_final[:, 0], y=self._xy_adapt_final[:, 1])
+            x=self._xy_adapt_final[idx, 0], y=self._xy_adapt_final[idx, 1])
         print(f"  plot_pgf → {out_dir}/ramp_ns{suffix}_*.dat")
         return rows, cols
 
