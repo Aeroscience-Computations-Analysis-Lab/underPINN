@@ -1,0 +1,60 @@
+problem: cvit2d_burgers
+
+network:
+  type          : cvit
+  patch_size    : [1, 8, 8]
+  grid_size     : [32, 32]
+  latent_dim    : 128
+  emb_dim       : 128
+  depth         : 3
+  num_heads     : 8
+  dec_emb_dim   : 128
+  dec_num_heads : 8
+  dec_depth     : 1
+  num_mlp_layers: 1
+  mlp_ratio     : 1
+  out_dim       : 1
+  eps           : 100000.0
+  layer_norm_eps: 0.00001
+  embedding_type: fourier   # unconditionally stable; "grid" needs queries
+                            # to lie exactly on the reference grid
+
+physics:
+  nu_lo: 0.01
+  nu_hi: 0.05
+
+data:
+  Nx            : 32
+  Nt            : 300
+  T             : 1.0
+  Lx            : 6.283185307
+  Ly            : 6.283185307
+  n_train       : 200
+  n_test        : 40
+  prev_steps    : 4     # CViT input context frames
+  pred_steps    : 1
+  pairs_per_traj: 4
+  early_frac    : 0.6
+  seed          : 0
+
+loss:
+  # The scaled-increment trick (predict u_prev + delta_scale * raw) is what
+  # makes CViT rollout accurate — delta_scale is set from the training data's
+  # own std(u_next - u_prev) once it's built (see run_cvit2d_burgers).
+  pde_weight       : 0.1
+  pde_warmup_epochs: 50
+  scheme           : upwind   # matched to the datagen's upwind advection stencil
+  rba              : false
+
+training:
+  epochs            : 400
+  lr                : 1.0e-3
+  lr_alpha          : 0.01
+  batch_size        : 16
+  log_every         : 50
+  seed              : 0
+  save_restart_every: 0
+
+output:
+  dir        : outputs/cvit2d_burgers
+  save_params: true

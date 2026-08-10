@@ -27,3 +27,4 @@ matplotlib>=3.8
 shapely>=2.0
 trimesh>=4.0
 pandas>=2.0
+einops>=0.7

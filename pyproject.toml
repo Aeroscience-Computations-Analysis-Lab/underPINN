@@ -18,6 +18,7 @@ dependencies = [
     "shapely>=2.0",
     "trimesh>=4.0",
     "pandas>=2.0",
+    "einops>=0.7",
 ]
 
 # Calendar versioning: YYMM — e.g. May 2026 → "2605"

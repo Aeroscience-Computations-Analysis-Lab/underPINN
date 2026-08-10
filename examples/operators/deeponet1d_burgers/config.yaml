@@ -1,0 +1,40 @@
+problem: deeponet1d_burgers
+
+network:
+  type         : deeponet
+  branch_layers: [101, 128, 128, 128]   # m=101 sensors -> latent dim p=128
+  trunk_layers : [2, 128, 128, 128]     # (x, t) -> latent dim p=128
+  gated        : true
+
+physics:
+  nu: 0.01
+
+data:
+  m           : 101      # sensor count (also the branch input width)
+  x_lo        : -1.0
+  x_hi        : 1.0
+  n_ic_pool   : 2000      # sampled ICs held device-resident for training
+  seed        : 0
+
+loss:
+  pde_weight       : 1.0
+  pde_warmup_epochs: 0
+  ics_weight       : 20.0
+  bcs_weight       : 1.0
+  periodic         : false   # Dirichlet: u(+-1, t) = 0
+  n_bc             : 100
+  n_r              : 2000    # fresh residual points sampled each step
+  t_hi             : 1.0
+  rba              : false
+
+training:
+  epochs    : 20000
+  lr        : 1.0e-3
+  lr_alpha  : 0.01
+  batch_size: 64
+  log_every : 500
+  seed      : 0
+
+output:
+  dir        : outputs/deeponet1d_burgers
+  save_params: true

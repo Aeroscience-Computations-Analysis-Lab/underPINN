@@ -79,6 +79,32 @@ _REGISTRY: dict[str, tuple[str, str]] = {
         "examples/AAA_rheology/AAA_rheology_pulsatile.py",
         "run_AAA_rheology_pulsatile",
     ),
+
+    # Neural operators (PINO / DeepONet / CViT)
+    "fno1d_periodic": (
+        "examples/operators/fno1d_periodic/fno1d_periodic.py",
+        "run_fno1d_periodic",
+    ),
+    "fno1d_dirichlet": (
+        "examples/operators/fno1d_dirichlet/fno1d_dirichlet.py",
+        "run_fno1d_dirichlet",
+    ),
+    "fno2d_burgers": (
+        "examples/operators/fno2d_burgers/fno2d_burgers.py",
+        "run_fno2d_burgers",
+    ),
+    "deeponet1d_burgers": (
+        "examples/operators/deeponet1d_burgers/deeponet1d_burgers.py",
+        "run_deeponet1d_burgers",
+    ),
+    "cvit2d_burgers": (
+        "examples/operators/cvit2d_burgers/cvit2d_burgers.py",
+        "run_cvit2d_burgers",
+    ),
+    "fno2d_cylinder": (
+        "examples/operators/fno2d_cylinder/fno2d_cylinder.py",
+        "run_fno2d_cylinder",
+    ),
 }
 
 
