@@ -14,6 +14,13 @@ from underPINN.nn.mlp import (
     SIREN,
 )
 from underPINN.nn.fbpinn import FBPINN
+from underPINN.nn.operators import (
+    FNO1D,
+    FNO2D,
+    DeepONet1D,
+    CVit,
+    cvit_grid_predict,
+)
 
 __all__ = [
     "build_model",
@@ -24,4 +31,9 @@ __all__ = [
     "TemporalFourierMLP",
     "SIREN",
     "FBPINN",
+    "FNO1D",
+    "FNO2D",
+    "DeepONet1D",
+    "CVit",
+    "cvit_grid_predict",
 ]

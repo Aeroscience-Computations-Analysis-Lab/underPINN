@@ -1,0 +1,47 @@
+problem: fno2d_burgers
+
+network:
+  type              : fno2d
+  modes1            : 12
+  modes2            : 12
+  width             : 32
+  depth             : 4
+  channels_last_proj: 128
+  padding           : 0        # periodic domain
+
+physics:
+  nu_lo: 0.01
+  nu_hi: 0.05
+
+data:
+  Nx            : 32     # spatial grid points per axis
+  Nt            : 300    # time steps (CFL-limited by solve_burgers2d)
+  T             : 1.0
+  Lx            : 6.283185307   # 2*pi
+  Ly            : 6.283185307
+  n_train       : 200
+  n_test        : 40
+  prev_steps    : 1
+  pred_steps    : 1
+  pairs_per_traj: 4
+  early_frac    : 0.6
+  seed          : 0
+
+loss:
+  pde_weight       : 0.1
+  pde_warmup_epochs: 50
+  scheme           : central   # advection stencil for the residual (matches datagen)
+  rba              : false
+
+training:
+  epochs            : 400
+  lr                : 1.0e-3
+  lr_alpha          : 0.01
+  batch_size        : 16
+  log_every         : 50
+  seed              : 0
+  save_restart_every: 0
+
+output:
+  dir        : outputs/fno2d_burgers
+  save_params: true

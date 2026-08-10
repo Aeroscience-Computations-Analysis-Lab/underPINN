@@ -56,7 +56,8 @@ class ConsoleLogger(Callback):
         if epoch % self.log_every == 0:
             elapsed = time.time() - self._start
             parts = [f"Epoch {epoch:5d}"]
-            for key in ("loss", "pde", "ic", "bc", "ic_dot"):
+            for key in ("loss", "pde", "ic", "bc", "ic_dot",
+                       "data", "ics", "bcs", "res"):
                 if key in logs:
                     parts.append(f"{key.upper()} {logs[key]:.3e}")
             parts.append(f"Time {elapsed:.2f}s")

@@ -1,0 +1,55 @@
+problem: fno2d_cylinder
+
+network:
+  type              : fno2d
+  modes1            : 12
+  modes2            : 8
+  width             : 32
+  depth             : 4
+  channels_last_proj: 128
+  out_channels      : 3     # (u, v, p)
+  padding           : 0
+
+physics:
+  Re_lo : 40.0
+  Re_hi : 150.0
+  U_in  : 1.0
+  radius: 0.5
+
+geometry:
+  Lx: 8.0
+  Ly: 4.0
+  cx: 2.0
+  cy: 2.0
+
+data:
+  Nx            : 64
+  Ny            : 32
+  Nt            : 400
+  T             : 4.0
+  n_train_re    : 6
+  n_test_re     : 2
+  prev_steps    : 2
+  pred_steps    : 1
+  pairs_per_traj: 8
+  early_frac    : 0.8
+  poisson_iters : 80
+  seed          : 0
+
+loss:
+  pde_weight       : 0.05
+  pde_warmup_epochs: 50
+  rba              : false
+
+training:
+  epochs            : 400
+  lr                : 1.0e-3
+  lr_alpha          : 0.01
+  batch_size        : 16
+  log_every         : 50
+  seed              : 0
+  save_restart_every: 0
+
+output:
+  dir        : outputs/fno2d_cylinder
+  save_params: true

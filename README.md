@@ -16,6 +16,14 @@ underPINN is a research-grade PINN engine that combines classical collocation-ba
 - **FBPINN** — overlapping subdomain decomposition with sigmoid partition-of-unity windows; each subdomain gets its own network so training is never dominated by one region
 - **HybridAttention + SimpleGate** — gated residual blocks inside each FBPINN subdomain; SimpleGate multiplies the hidden state element-wise by a learnable gate for compact, expressive feature modulation
 
+### Neural Operators (PINO / DeepONet / CViT)
+Unlike the point networks above (one collocation point in, one value out), these map an entire **function** — sampled on a grid or at sensors — to another function, so one trained model generalizes across a *distribution* of ICs / PDE parameters instead of re-solving from scratch each time.
+- **FNO1D / FNO2D** — Fourier Neural Operator (Li et al., 2020): truncated-spectrum convolution (`SpectralConv1d`/`SpectralConv2d`) + a pointwise skip path per stage; `padding` zero-pads non-periodic (Dirichlet) domains before the FFT and trims after
+- **DeepONet1D** — branch/trunk operator (Lu et al., 2021): `s(u)(y) = branch(u) · trunk(y)`; reuses `MLP`/`GatedMLP` for both sub-networks
+- **CViT** — Continuous Vision Transformer for Operator Learning (Wang et al., ICLR 2025): patch embed → learned sincos positions → latent time-aggregation → self-attention encoder → cross-attention decoder that queries continuous coordinates; `cvit_grid_predict` queries it on a regular grid (with a scaled-increment prediction trick) so it can pair with the same finite-difference residual used by FNO2D
+- Selectable via `network.type: fno1d | fno2d | deeponet | cvit` in any case's YAML — registered once in `underPINN/nn/factory.py`
+- Trained with `OperatorLoss` (data MSE + weighted PDE grid-residual, optional warmup + RBA) or `DeepONetLoss` (IC/BC + autodiff residual, no full-field ground truth needed) via `OperatorSolver` / `DeepONetSolver` — see the six examples under `examples/operators/`
+
 ### Training
 - **`lax.scan` fused kernels** — fuse N gradient steps into a single XLA kernel, eliminating Python dispatch between epochs; delivers 50–500× less overhead on GPU compared to a Python for-loop
 - **Cosine LR decay** — via `optax.cosine_decay_schedule`; integrates seamlessly with `TrainingConfig`
@@ -56,6 +64,10 @@ underPINN is a research-grade PINN engine that combines classical collocation-ba
 - Harmonic oscillator (`d²u/dt² + ω²u = 0`)
 - Exponential decay ODE (`du/dt + λu = 0`)
 - **FBPINN ODE** (`du/dx = cos(ω x)`) — domain decomposition into overlapping subdomains; defeats the spectral bias that stalls a single PINN at high ω
+- 1-D periodic / Dirichlet viscous Burgers — grid (finite-difference) residual for FNO1D (`BurgersGrid1D`)
+- 2-D periodic viscous Burgers — grid residual for FNO2D / CViT, selectable central or upwind advection stencil (`BurgersGrid2D`)
+- 1-D viscous Burgers — autodiff residual for DeepONet (`DeepONetBurgersPDE`)
+- 2-D incompressible Navier-Stokes, primitive variables `(u,v,p)` — grid residual for the cylinder-flow FNO2D operator, with an obstacle mask (`CylinderNSGrid`)
 
 ### Geometry
 - **Interval** — 1-D uniform / stratified sampler
@@ -74,6 +86,8 @@ underPINN is a research-grade PINN engine that combines classical collocation-ba
 - **`SteadySolver`** — stationary (no time dimension) PDE training
 - **`LDCSolver`** — lid-driven cavity / FBPINN variant
 - **`RANSSolver`** — k-ε turbulence model with RBA loss weighting
+- **`OperatorSolver`** — generic training loop for grid-based neural operators (FNO1D, FNO2D, CViT); same `n_scan_steps` acceleration as `FBPINNSolver`, plus a PDE-weight warmup ramp
+- **`DeepONetSolver`** — physics-informed DeepONet training (fresh IC/BC/residual points sampled each step)
 
 ### Checkpointing & Inference
 - Every runner saves `params.msgpack` + `params_meta.json` to the output directory after training
@@ -114,7 +128,7 @@ Calendar versioning (CalVer YYMM) — May 2026 → **underPINN-v2605**
 
 ```bash
 # CPU / development
-pip install jax flax optax matplotlib scipy shapely pandas pyyaml
+pip install jax flax optax matplotlib scipy shapely trimesh pandas einops pyyaml
 ```
 
 ```bash
@@ -670,10 +684,15 @@ underPINN/
 │   ├── fbpinn.py          # FBPINN (domain-decomposed network)
 │   ├── attention.py       # HybridAttention, SimpleGate
 │   ├── embeddings.py      # Fourier / positional embeddings
-│   └── subdomain.py       # SubdomainNetwork
+│   ├── subdomain.py       # SubdomainNetwork
+│   ├── operators.py       # FNO1D, FNO2D, DeepONet1D, CVit, cvit_grid_predict
+│   └── factory.py         # build_model / network_config — single model-building path
 │
 ├── pde/
 │   ├── burgers.py         # 1-D Burgers equation
+│   ├── burgers_grid.py    # BurgersGrid1D/2D — FD residual for FNO1D/FNO2D/CViT
+│   ├── burgers_deeponet.py# DeepONetBurgersPDE — autodiff residual for DeepONet
+│   ├── navier_stokes_2d_grid.py # CylinderNSGrid — FD residual for the cylinder FNO2D
 │   ├── diffusion.py       # 1-D unsteady diffusion / heat inverse
 │   ├── heat.py            # 2-D steady heat (Poisson)
 │   ├── heat2d_unsteady.py # 2-D unsteady heat  (x, y, t) → u
@@ -704,12 +723,14 @@ underPINN/
 │   ├── ode_solver.py      # ODESolver
 │   ├── steady_solver.py   # SteadySolver  (no time dimension)
 │   ├── ldc_solver.py      # LDCSolver     (lid-driven cavity / FBPINN)
-│   └── rans_solver.py     # RANSSolver    (k-ε turbulence)
+│   ├── rans_solver.py     # RANSSolver    (k-ε turbulence)
+│   └── operator.py        # OperatorSolver (FNO/CViT), DeepONetSolver
 │
 ├── losses/
 │   ├── loss.py            # PINNLoss  (with optional RBA)
 │   ├── ode_loss.py        # ODELoss
-│   └── steady_loss.py     # SteadyLoss
+│   ├── steady_loss.py     # SteadyLoss
+│   └── operator_loss.py   # OperatorLoss (data+PDE+warmup+RBA), DeepONetLoss
 │
 ├── callbacks/
 │   ├── base.py            # Callback ABC
@@ -742,7 +763,13 @@ underPINN/
 │   ├── restart.py         # RestartManager (snapshot + resume + done marker)
 │   ├── timing.py          # fmt_train_time (JIT-aware training time reporting)
 │   ├── metrics.py         # rel_l2, mse helpers
-│   └── plotting.py        # plot_losses, plot_ode_result
+│   ├── plotting.py        # plot_losses, plot_ode_result
+│   └── operator_datagen.py # FD reference solvers + random ICs for the operator examples
+│
+├── postprocess/
+│   ├── plotting.py        # field / cbar / save_fig (shared matplotlib style)
+│   ├── pulsatile.py       # PulsatilePredictor
+│   └── operators.py       # plot_operator_loss, plot_prediction_1d/2d
 │
 └── __main__.py            # CLI entry point (python -m underPINN)
                            # sets XLA_PYTHON_CLIENT_PREALLOCATE=false before import jax
@@ -773,8 +800,14 @@ examples/                  # self-contained: each folder holds script + YAML
 ├── sod_shock/             sod_shock.py + config.yaml            (Sod tube, learnable ε + RAR)
 ├── toro3/                  toro3.py + config.yaml                (Toro-3 blast wave, exp positivity + non-dim)
 ├── predict_steady.py                                            (post-process steady pipe/AAA: WSS, contours, NPZ)
-└── transfer/              burgers_transfer.py + yaml            (Burgers param + temp. TL)
-                           heat2d_transfer.py  + yaml            (2-D heat transfer)
+├── transfer/              burgers_transfer.py + yaml            (Burgers param + temp. TL)
+│                          heat2d_transfer.py  + yaml            (2-D heat transfer)
+└── operators/             fno1d_periodic/      + config.yaml    (1-D periodic Burgers, FNO1D PINO)
+                           fno1d_dirichlet/     + config.yaml    (1-D Dirichlet Burgers, FNO1D PINO)
+                           fno2d_burgers/       + config.yaml    (2-D periodic Burgers, FNO2D PINO)
+                           deeponet1d_burgers/  + config.yaml    (1-D Burgers, physics-informed DeepONet)
+                           cvit2d_burgers/      + config.yaml    (2-D periodic Burgers, CViT PINO)
+                           fno2d_cylinder/      + config.yaml + datagen.py  (cylinder-flow FNO2D PINO)
 
 docs/
 └── index.html             # Static framework documentation website
@@ -811,6 +844,12 @@ docs/
 | 3-D Unsteady Pipe Transfer | u_t = G + ν∇²u | MLP [3,64,64,64,64,1] | Bessel exact solution, Re + temporal TL | `examples/pipe_flow/pipe_flow_unsteady_transfer.yaml` |
 | Burgers Transfer | Burgers | MLP [2,64,64,64,1] | Parameter transfer (ν) + temporal transfer | `examples/transfer/burgers_transfer.yaml` |
 | Heat 2-D Transfer | 2-D heat | MLP [3,64,64,64,1] | Cross-diffusivity transfer + temporal | `examples/transfer/heat2d_transfer.yaml` |
+| FNO1D Periodic Burgers | Burgers (PINO, grid residual) | FNO1D | Generalizes across ν, `pde_weight` warmup | `examples/operators/fno1d_periodic/config.yaml` |
+| FNO1D Dirichlet Burgers | Burgers (PINO, grid residual) | FNO1D | Zero-wall BCs, FNO domain-padding trick | `examples/operators/fno1d_dirichlet/config.yaml` |
+| FNO2D Burgers | 2-D Burgers (PINO, grid residual) | FNO2D | Central/upwind stencil selectable | `examples/operators/fno2d_burgers/config.yaml` |
+| DeepONet Burgers | Burgers (self-supervised, autodiff residual) | DeepONet1D | IC/BC + residual only, no full-field data | `examples/operators/deeponet1d_burgers/config.yaml` |
+| CViT Burgers | 2-D Burgers (PINO, grid residual) | CViT | Scaled-increment prediction, matched-upwind residual | `examples/operators/cvit2d_burgers/config.yaml` |
+| FNO2D Cylinder Flow | 2-D incompressible N-S, `(u,v,p)` | FNO2D | Chorin-projection reference data, obstacle mask | `examples/operators/fno2d_cylinder/config.yaml` |
 
 ---
 
@@ -834,6 +873,10 @@ docs/
 | Compressible Euler (1-D unsteady) | ∂U/∂t + ∂F/∂x = ε∂²U/∂x² | `Euler1DUnsteadyPDE.residual` | `examples/sod_shock/` |
 | Exponential Decay | du/dt + λu = 0 | `ExpDecayODE.residual` | `examples/ode/` |
 | Harmonic Oscillator | d²u/dt² + ω²u = 0 | `HarmonicODE.residual` | `examples/ode/` |
+| Burgers grid (1-D, FNO) | u_t + uu_x = νu_xx (FD residual) | `BurgersGrid1D.residual` | `examples/operators/fno1d_periodic/`, `fno1d_dirichlet/` |
+| Burgers grid (2-D, FNO/CViT) | u_t + u(u_x+u_y) = ν(u_xx+u_yy) (FD residual) | `BurgersGrid2D.residual` | `examples/operators/fno2d_burgers/`, `cvit2d_burgers/` |
+| Burgers (DeepONet) | u_t + uu_x = νu_xx (autodiff residual) | `DeepONetBurgersPDE.residual` | `examples/operators/deeponet1d_burgers/` |
+| Navier-Stokes grid (2-D, FNO) | ∇·u=0, u·∇u = -∇p + ν∇²u (FD residual) | `CylinderNSGrid.residual` | `examples/operators/fno2d_cylinder/` |
 
 ---
 

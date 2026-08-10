@@ -31,3 +31,6 @@ trimesh>=4.0
 
 # Benchmark reporting (pandas used in LDC / turbulence examples)
 pandas>=2.0
+
+# Tensor rearrange ops (CViT neural-operator patch/attention reshaping)
+einops>=0.7

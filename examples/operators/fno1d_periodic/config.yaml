@@ -1,0 +1,45 @@
+problem: fno1d_periodic
+
+network:
+  type              : fno1d
+  modes1            : 12
+  width             : 32
+  depth             : 4
+  channels_last_proj: 128
+  padding           : 0        # periodic domain — no domain padding needed
+
+physics:
+  nu_lo: 0.005   # sampled viscosity range across trajectories
+  nu_hi: 0.05
+
+data:
+  Nx            : 64     # spatial grid points
+  Nt            : 200    # time steps (CFL-limited by solve_burgers1d)
+  T             : 1.0
+  Lx            : 6.283185307   # 2*pi
+  n_train       : 400
+  n_test        : 80
+  prev_steps    : 1      # history frames fed to the operator
+  pred_steps    : 1      # frames ahead the target is
+  pairs_per_traj: 5
+  early_frac    : 0.8    # only sample windows from the first 80% of the trajectory
+  seed          : 0
+
+loss:
+  pde_weight       : 0.1    # lambda in L = L_data + lambda * L_pde
+  pde_warmup_epochs: 50     # ramp lambda from 0 over the first 50 epochs
+  rba              : false
+
+training:
+  epochs            : 500
+  lr                : 1.0e-3
+  lr_alpha          : 0.01
+  batch_size        : 32
+  log_every         : 50
+  seed              : 0
+  save_restart_every: 0
+  # n_scan_steps    : 50   # uncomment to fuse steps into one XLA kernel (GPU)
+
+output:
+  dir        : outputs/fno1d_periodic
+  save_params: true

@@ -233,7 +233,18 @@ class ModelPredictor:
 
         Requires that ``params_meta.json`` was written alongside the
         checkpoint (i.e. ``metadata`` was passed to :func:`save_checkpoint`).
-        The JSON must contain a ``"network"`` key with at least ``"layers"``.
+        The JSON must contain a ``"network"`` key — whatever
+        :func:`underPINN.nn.factory.build_model` needs for that architecture
+        (``"layers"`` for the point networks; its own keys for neural
+        operators, e.g. ``"modes1"``/``"width"`` for FNO or
+        ``"branch_layers"``/``"trunk_layers"`` for DeepONet).
+
+        Only point networks (single ``(N, in_features)`` input) can rebuild
+        their parameter template automatically here — neural operators take
+        grid-shaped and/or multiple positional inputs that this metadata
+        doesn't record, so load their checkpoint via
+        :meth:`from_checkpoint` with the model constructed explicitly and a
+        correctly-shaped dummy input instead.
         """
         meta = read_metadata(path)
         if meta is None:
@@ -244,20 +255,8 @@ class ModelPredictor:
             )
 
         net = meta.get("network", {})
-        layers = net.get("layers")
-        if layers is None:
-            raise ValueError("Metadata 'network.layers' is required for auto-rebuild.")
-
-        net_type = net.get("type", "mlp").lower()
-        from underPINN.nn.mlp import MLP, FourierMLP
-        if net_type == "fourier_mlp":
-            model = FourierMLP(
-                layers=layers,
-                n_fourier=net.get("n_fourier", 16),
-                sigma=net.get("sigma", 2.0),
-            )
-        else:
-            model = MLP(layers=layers)
+        from underPINN.nn.factory import build_model
+        model = build_model(net)
 
         return cls.from_checkpoint(model, path)
 
