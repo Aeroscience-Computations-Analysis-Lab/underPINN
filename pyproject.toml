@@ -36,5 +36,20 @@ where   = ["."]
 include = ["underPINN*"]
 
 [tool.ruff.lint]
+# Pinned explicitly rather than left to ruff's own default: ruff's default
+# enabled-rule set is NOT stable across releases (0.15.x -> 0.16.0 alone went
+# from ~60 to ~410 enabled rules by default), so relying on "whatever ruff
+# ships with by default" means every ruff upgrade is a potential silent CI
+# break unrelated to any actual code change. This pins CI (and any local run)
+# to the traditional pycodestyle-errors + pyflakes set this codebase is
+# actually written and reviewed against. Broadening this is a deliberate,
+# reviewed decision, not a side effect of `pip install --upgrade ruff`.
+select = ["E4", "E7", "E9", "F"]
+# N999 (invalid module name) flags every __init__.py in the tree because the
+# top-level package itself is "underPINN" (mixed case) — that's the project's
+# established name, not fixable per-file, so it's ignored project-wide (kept
+# even though `select` above doesn't currently reach N-series rules, in case
+# that's ever broadened).
+ignore = ["N999"]
 # Star imports in the top-level __init__ are intentional public-API re-exports.
 per-file-ignores = {"underPINN/__init__.py" = ["F403", "F405"]}

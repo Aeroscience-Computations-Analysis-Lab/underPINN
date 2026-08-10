@@ -133,7 +133,14 @@ class BenchmarkRunner:
         List of evaluator keys from :data:`EVALUATOR_REGISTRY`.
         Pass ``None`` to use all registered problems.
     epoch_budgets :
-        List of epoch counts to test per problem.
+        List of epoch counts to test per "simple" problem (smooth PDEs —
+        Burgers, wave, Helmholtz, steady heat, harmonic ODE).
+    complex_epoch_budgets :
+        List of epoch counts for problems marked ``complex=True`` on their
+        evaluator class (shocks, viscous SBLI, 3-D N-S — ``ramp``, ``toro3``,
+        ``pipe_flow``, ``ramp_ns``). These converge much more slowly than the
+        smooth PDEs, so the default ``epoch_budgets`` badly under-trains them;
+        defaults to a budget an order of magnitude higher.
     seed :
         Base PRNG seed forwarded to every evaluator.
     fast_only :
@@ -147,6 +154,7 @@ class BenchmarkRunner:
         self,
         problems: Optional[List[str]] = None,
         epoch_budgets: Optional[List[int]] = None,
+        complex_epoch_budgets: Optional[List[int]] = None,
         seed: int = 0,
         fast_only: bool = True,
         verbose: bool = True,
@@ -155,6 +163,8 @@ class BenchmarkRunner:
             EVALUATOR_REGISTRY, SLOW_PROBLEMS)
 
         self.epoch_budgets = epoch_budgets or [500, 1000, 2000, 5000]
+        self.complex_epoch_budgets = (
+            complex_epoch_budgets or [2000, 5000, 15000, 40000])
         self.seed = seed
         self.verbose = verbose
         self.results: List[BenchmarkResult] = []
@@ -176,30 +186,40 @@ class BenchmarkRunner:
         """Run all (problem, epochs) combinations.
 
         Each evaluator is constructed fresh per problem so state does not
-        leak across epoch budgets for the same problem.  For the largest
-        epoch budget, a final PDE solution plot is saved to *out_dir* (when
-        provided) via ``ev.plot(out_dir)``.
+        leak across epoch budgets for the same problem. For the largest
+        epoch budget (per-problem — simple and complex problems use different
+        budget lists), a final PDE solution is saved both as a matplotlib
+        ``.png`` via ``ev.plot(out_dir)`` and as PGFPlots ``.dat`` data via
+        ``ev.plot_pgf({out_dir}/pgf/)`` — the two are independent outputs, so
+        a failure in one doesn't block the other.
 
         Parameters
         ----------
         out_dir :
-            Directory where artefacts (plots, JSON, CSV) are written.
-            When ``None`` no plots are saved.
+            Directory where artefacts (plots, PGF exports, JSON, CSV) are
+            written. When ``None`` no plots are saved.
 
         Returns
         -------
         List[BenchmarkResult]
             Also stored in ``self.results``.
         """
-        n_total = len(self._problems) * len(self.epoch_budgets)
+        budgets_by_problem = {
+            prob: (self.complex_epoch_budgets
+                  if getattr(self._registry[prob], "complex", False)
+                  else self.epoch_budgets)
+            for prob in self._problems
+        }
+        n_total = sum(len(b) for b in budgets_by_problem.values())
         counter = 0
-        max_epochs = max(self.epoch_budgets)
 
         for prob in self._problems:
             cls = self._registry[prob]
             self._loss_snapshots[prob] = {}
+            budgets = budgets_by_problem[prob]
+            max_epochs = max(budgets)
 
-            for epochs in self.epoch_budgets:
+            for epochs in budgets:
                 counter += 1
                 if self.verbose:
                     print(
@@ -218,18 +238,27 @@ class BenchmarkRunner:
                     pde_final  = ev.pde_hist[-1]  if ev.pde_hist  else float("nan")
                     self._loss_snapshots[prob][epochs] = list(ev.loss_hist)
 
-                    # --- solution plot for the largest epoch run only ----------
+                    # --- solution plot(s) for the largest epoch run only ---
                     if out_dir is not None and epochs == max_epochs:
                         os.makedirs(out_dir, exist_ok=True)
+                        _plot_ctx = (contextlib.nullcontext()
+                                    if self.verbose
+                                    else contextlib.redirect_stdout(io.StringIO()))
                         try:
-                            _plot_ctx = (contextlib.nullcontext()
-                                         if self.verbose
-                                         else contextlib.redirect_stdout(io.StringIO()))
                             with _plot_ctx:
                                 ev.plot(out_dir)
                         except Exception as plot_exc:  # noqa: BLE001
                             if self.verbose:
                                 print(f"  plot failed: {plot_exc}")
+
+                        pgf_dir = os.path.join(out_dir, "pgf")
+                        os.makedirs(pgf_dir, exist_ok=True)
+                        try:
+                            with _plot_ctx:
+                                ev.plot_pgf(pgf_dir)
+                        except Exception as plot_exc:  # noqa: BLE001
+                            if self.verbose:
+                                print(f"  plot_pgf failed: {plot_exc}")
 
                 except Exception as exc:  # noqa: BLE001
                     print(f"  ERROR: {exc}")

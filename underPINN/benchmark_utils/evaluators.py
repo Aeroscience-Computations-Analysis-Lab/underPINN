@@ -108,6 +108,11 @@ class BaseBenchmarkEvaluator(ABC):
     name:  str        #: machine-readable key, used as file-stem
     label: str        #: human label for legends
     fast:  bool = True
+    #: Harder-to-converge physics (shocks, viscous SBLI, 3-D N-S) that need a
+    #: bigger epoch budget than smooth PDEs (Burgers/wave/heat/ODE) to reach
+    #: comparable accuracy — independent of ``fast`` (whether it's cheap
+    #: enough per-epoch to run by default at all).
+    complex: bool = False
 
     @abstractmethod
     def train(self, epochs: int, seed: int = 0) -> float:
@@ -120,6 +125,14 @@ class BaseBenchmarkEvaluator(ABC):
     @abstractmethod
     def plot(self, out_dir: str, suffix: str = "") -> str:
         """Save solution figure to *out_dir*; return the file path."""
+
+    def plot_pgf(self, out_dir: str, suffix: str = ""):
+        """Export the same solution data as PGFPlots ``.dat`` files (see
+        :mod:`underPINN.utils.pgf_export`) — not abstract, since a caller
+        (:meth:`BenchmarkRunner.run`) already tolerates it being unimplemented
+        for any evaluator that hasn't added it yet."""
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement plot_pgf()")
 
     @property
     def loss_hist(self) -> list:
@@ -178,7 +191,7 @@ class BurgersEvaluator(BaseBenchmarkEvaluator):
 
     def train(self, epochs: int, seed: int = 0) -> float:
         rng  = np.random.default_rng(seed)
-        N_r, N_ic, N_bc = 6000, 200, 300
+        N_r, N_ic, N_bc = 20000, 200, 300
         T    = 1.5
         x_r  = jnp.array(rng.uniform(-1.0, 1.0, N_r).astype("f4"))
         t_r  = jnp.array(rng.uniform( 0.0,  T,   N_r).astype("f4"))
@@ -189,7 +202,7 @@ class BurgersEvaluator(BaseBenchmarkEvaluator):
         t_bc = jnp.array(np.tile(t_bc, 2))
         u_bc = jnp.zeros(2 * N_bc, dtype="f4")
 
-        model  = MLP(layers=[2, 64, 64, 64, 1])
+        model  = MLP(layers=[2, 64, 64, 64, 64, 64, 1])
         pde    = self._BurgersPDE(model, nu=self._nu)
         loss   = self._PINNLoss(model, pde, ic_weight=100.0, bc_weight=10.0, rba=True)
         solver = self._FBPINNSolver(model, pde, loss=loss)
@@ -262,6 +275,55 @@ class BurgersEvaluator(BaseBenchmarkEvaluator):
         print(f"  plot → {path}")
         return path
 
+    def plot_pgf(self, out_dir: str, suffix: str = "") -> str:
+        from underPINN.utils.pgf_export import save_heatmap_png, save_lines_dat
+        from underPINN.utils.pgf_tex import field_comparison_tex, loss_tex
+        Nx, Nt = 200, 100
+        T = self._T
+        x_plt = np.linspace(-1, 1, Nx, dtype="f4")
+        t_plt = np.linspace(0,  T, Nt, dtype="f4")
+        XX, TT = np.meshgrid(x_plt, t_plt, indexing="ij")
+        pts    = jnp.stack([jnp.array(XX.ravel()), jnp.array(TT.ravel())], axis=1)
+        u_pred = np.array(self._model.apply(self._params, pts)[:, 0]).reshape(Nx, Nt)
+
+        x_ref, t_ref, U_ref = _burgers_reference(self._nu)
+        from scipy.interpolate import RegularGridInterpolator
+        interp  = RegularGridInterpolator((x_ref, t_ref), U_ref,
+                                          method="linear", bounds_error=False,
+                                          fill_value=0.0)
+        u_exact = interp(np.column_stack([XX.ravel(), TT.ravel()])).reshape(Nx, Nt)
+        err = np.abs(u_pred - u_exact)
+        vlim = float(max(abs(u_pred.min()), abs(u_pred.max()),
+                        abs(u_exact.min()), abs(u_exact.max())))
+
+        pinn_png = os.path.join(out_dir, f"burgers{suffix}_pinn.png")
+        exact_png = os.path.join(out_dir, f"burgers{suffix}_exact.png")
+        err_png = os.path.join(out_dir, f"burgers{suffix}_err.png")
+        ext = save_heatmap_png(pinn_png, x_plt, t_plt, u_pred, "RdBu_r", -vlim, vlim)
+        save_heatmap_png(exact_png, x_plt, t_plt, u_exact, "RdBu_r", -vlim, vlim)
+        save_heatmap_png(err_png, x_plt, t_plt, err, "Reds", 0.0, float(err.max()))
+
+        fig_path = field_comparison_tex(
+            os.path.join(out_dir, f"burgers{suffix}_fields.tex"),
+            [
+                dict(png_rel=os.path.basename(pinn_png), extent=ext, vmin=-vlim,
+                    vmax=vlim, cmap="divRdBu", title="PINN", cbar_label="$u$",
+                    xlabel="$x$", ylabel="$t$"),
+                dict(png_rel=os.path.basename(exact_png), extent=ext, vmin=-vlim,
+                    vmax=vlim, cmap="divRdBu", title="Exact", cbar_label="$u$",
+                    xlabel="$x$", ylabel="$t$"),
+                dict(png_rel=os.path.basename(err_png), extent=ext, vmin=0.0,
+                    vmax=float(err.max()), cmap="seqReds", title="$|$Error$|$",
+                    cbar_label="", xlabel="$x$", ylabel="$t$"),
+            ])
+
+        loss_path = os.path.join(out_dir, f"burgers{suffix}_loss.dat")
+        save_lines_dat(loss_path, epoch=np.arange(1, len(self._loss_hist) + 1),
+                       total=self._loss_hist, pde=self._pde_hist)
+        loss_tex(os.path.join(out_dir, f"burgers{suffix}_loss.tex"),
+                os.path.basename(loss_path), "1-D Burgers training loss")
+        return fig_path
+
 
 # =============================================================================
 #  1-D Wave  u_tt = c² u_xx
@@ -280,7 +342,7 @@ class WaveEvaluator(BaseBenchmarkEvaluator):
         c    = self._c
         T    = 2.0
         rng  = np.random.default_rng(seed)
-        N_r, N_ic, N_bc = 6000, 300, 300
+        N_r, N_ic, N_bc = 20000, 300, 300
         x_r  = jnp.array(rng.uniform(-1, 1, N_r).astype("f4"))
         t_r  = jnp.array(rng.uniform( 0, T, N_r).astype("f4"))
         x_ic = jnp.array(np.linspace(-1, 1, N_ic, dtype="f4"))
@@ -291,7 +353,7 @@ class WaveEvaluator(BaseBenchmarkEvaluator):
         t_bc = jnp.array(np.concatenate([t_bc_half, t_bc_half]))
 
         sigma    = max(2.0, float(c) * np.pi)
-        model    = FourierMLP(layers=[2, 64, 64, 64, 1], n_fourier=16, sigma=sigma)
+        model    = FourierMLP(layers=[2, 64, 64, 64, 64, 64, 1], n_fourier=16, sigma=sigma)
         pde      = self._WavePDE(model, c=c)
         lr_sched = optax.cosine_decay_schedule(1e-3, epochs, alpha=1e-2)
         optimizer = optax.chain(optax.scale_by_adam(),
@@ -377,6 +439,51 @@ class WaveEvaluator(BaseBenchmarkEvaluator):
         print(f"  plot → {path}")
         return path
 
+    def plot_pgf(self, out_dir: str, suffix: str = "") -> str:
+        from underPINN.utils.pgf_export import save_heatmap_png, save_lines_dat
+        from underPINN.utils.pgf_tex import field_comparison_tex, loss_tex
+        Nx, Nt = 200, 100
+        T      = self._T
+        x_plt  = np.linspace(-1, 1, Nx, dtype="f4")
+        t_plt  = np.linspace( 0, T, Nt, dtype="f4")
+        XX, TT = np.meshgrid(x_plt, t_plt, indexing="ij")
+        pts    = jnp.stack([jnp.array(XX.ravel()), jnp.array(TT.ravel())], axis=1)
+        u_pred  = np.array(self._model.apply(self._params, pts)[:, 0]).reshape(Nx, Nt)
+        u_exact = np.array(self._pde.exact(
+            jnp.array(XX.ravel()), jnp.array(TT.ravel()))).reshape(Nx, Nt)
+        err = np.abs(u_pred - u_exact)
+        vlim = float(max(abs(u_pred.min()), abs(u_pred.max()),
+                        abs(u_exact.min()), abs(u_exact.max())))
+
+        pinn_png = os.path.join(out_dir, f"wave{suffix}_pinn.png")
+        exact_png = os.path.join(out_dir, f"wave{suffix}_exact.png")
+        err_png = os.path.join(out_dir, f"wave{suffix}_err.png")
+        ext = save_heatmap_png(pinn_png, x_plt, t_plt, u_pred, "RdBu_r", -vlim, vlim)
+        save_heatmap_png(exact_png, x_plt, t_plt, u_exact, "RdBu_r", -vlim, vlim)
+        save_heatmap_png(err_png, x_plt, t_plt, err, "Reds", 0.0, float(err.max()))
+
+        fig_path = field_comparison_tex(
+            os.path.join(out_dir, f"wave{suffix}_fields.tex"),
+            [
+                dict(png_rel=os.path.basename(pinn_png), extent=ext, vmin=-vlim,
+                    vmax=vlim, cmap="divRdBu", title="PINN", cbar_label="$u$",
+                    xlabel="$x$", ylabel="$t$"),
+                dict(png_rel=os.path.basename(exact_png), extent=ext, vmin=-vlim,
+                    vmax=vlim, cmap="divRdBu", title="Exact", cbar_label="$u$",
+                    xlabel="$x$", ylabel="$t$"),
+                dict(png_rel=os.path.basename(err_png), extent=ext, vmin=0.0,
+                    vmax=float(err.max()), cmap="seqReds", title="$|$Error$|$",
+                    cbar_label="", xlabel="$x$", ylabel="$t$"),
+            ])
+
+        loss_path = os.path.join(out_dir, f"wave{suffix}_loss.dat")
+        save_lines_dat(loss_path, epoch=np.arange(1, len(self._loss_hist) + 1),
+                       total=self._loss_hist)
+        loss_tex(os.path.join(out_dir, f"wave{suffix}_loss.tex"),
+                os.path.basename(loss_path), "1-D Wave training loss",
+                has_pde=False)
+        return fig_path
+
 
 # =============================================================================
 #  2-D Helmholtz  Δu + k²u = f
@@ -397,7 +504,7 @@ class HelmholtzEvaluator(BaseBenchmarkEvaluator):
 
     def train(self, epochs: int, seed: int = 0) -> float:
         rng  = np.random.default_rng(seed)
-        N_r, N_b = 4000, 400
+        N_r, N_b = 20000, 400
         xy_r = jnp.array(rng.uniform(0, 1, (N_r, 2)).astype("f4"))
         t    = rng.uniform(0, 1, N_b).astype("f4")
         xy_b = jnp.array(np.vstack([
@@ -409,7 +516,7 @@ class HelmholtzEvaluator(BaseBenchmarkEvaluator):
         u_b  = jnp.zeros(4 * N_b, dtype="f4")
 
         sigma  = max(3.0, float(self._k) * np.pi * 1.5)
-        model  = FourierMLP(layers=[2, 64, 64, 64, 1], n_fourier=16, sigma=sigma)
+        model  = FourierMLP(layers=[2, 64, 64, 64, 64, 64,1], n_fourier=16, sigma=sigma)
         pde    = self._HelmholtzPDE(model, k=self._k)
         loss   = self._SteadyLoss(model, pde, bc_weight=20.0)
         solver = self._SteadySolver(model, pde, loss=loss)
@@ -462,6 +569,50 @@ class HelmholtzEvaluator(BaseBenchmarkEvaluator):
         print(f"  plot → {path}")
         return path
 
+    def plot_pgf(self, out_dir: str, suffix: str = "") -> str:
+        from underPINN.utils.pgf_export import save_heatmap_png, save_lines_dat
+        from underPINN.utils.pgf_tex import field_comparison_tex, loss_tex
+        N  = 100
+        x  = np.linspace(0, 1, N, dtype="f4")
+        XY = np.array(np.meshgrid(x, x, indexing="ij")).reshape(2, -1).T
+        xy = jnp.array(XY)
+        u_pred  = np.array(self._pde.u(self._params, xy)).reshape(N, N)
+        u_exact = np.array(self._pde.exact(xy)).reshape(N, N)
+        err = np.abs(u_pred - u_exact)
+        # exact(x,y) = sin(pi*x)*sin(pi*y) is non-negative everywhere on
+        # [0,1]^2 -- a sequential colormap over the true [min,max] range, not
+        # a symmetric +-vlim diverging one, matches what the field actually
+        # does (a diverging map here just wastes half the color range on
+        # negative values that never occur and mislabels the colorbar).
+        vmin = float(min(u_pred.min(), u_exact.min()))
+        vmax = float(max(u_pred.max(), u_exact.max()))
+
+        pinn_png = os.path.join(out_dir, f"helmholtz{suffix}_pinn.png")
+        exact_png = os.path.join(out_dir, f"helmholtz{suffix}_exact.png")
+        err_png = os.path.join(out_dir, f"helmholtz{suffix}_err.png")
+        ext = save_heatmap_png(pinn_png, x, x, u_pred, "viridis", vmin, vmax)
+        save_heatmap_png(exact_png, x, x, u_exact, "viridis", vmin, vmax)
+        save_heatmap_png(err_png, x, x, err, "Reds", 0.0, float(err.max()))
+
+        fig_path = field_comparison_tex(
+            os.path.join(out_dir, f"helmholtz{suffix}_fields.tex"),
+            [
+                dict(png_rel=os.path.basename(pinn_png), extent=ext, vmin=vmin,
+                    vmax=vmax, cmap="viridis", title="PINN", cbar_label="$u$"),
+                dict(png_rel=os.path.basename(exact_png), extent=ext, vmin=vmin,
+                    vmax=vmax, cmap="viridis", title="Exact", cbar_label="$u$"),
+                dict(png_rel=os.path.basename(err_png), extent=ext, vmin=0.0,
+                    vmax=float(err.max()), cmap="seqReds", title="$|$Error$|$",
+                    cbar_label=""),
+            ], aspect_equal=True)
+
+        loss_path = os.path.join(out_dir, f"helmholtz{suffix}_loss.dat")
+        save_lines_dat(loss_path, epoch=np.arange(1, len(self._loss_hist) + 1),
+                       total=self._loss_hist, pde=self._pde_hist)
+        loss_tex(os.path.join(out_dir, f"helmholtz{suffix}_loss.tex"),
+                os.path.basename(loss_path), "2-D Helmholtz training loss")
+        return fig_path
+
 
 # =============================================================================
 #  2-D Steady Heat / Poisson
@@ -477,7 +628,7 @@ class SteadyHeatEvaluator(BaseBenchmarkEvaluator):
         from underPINN.solver.steady_solver import SteadySolver
 
         rng  = np.random.default_rng(seed)
-        N_r, N_b = 4000, 400
+        N_r, N_b = 20000, 400
         xy_r = jnp.array(rng.uniform(0, 1, (N_r, 2)).astype("f4"))
         t    = rng.uniform(0, 1, N_b).astype("f4")
         xy_b = jnp.array(np.vstack([
@@ -491,7 +642,7 @@ class SteadyHeatEvaluator(BaseBenchmarkEvaluator):
         def source(x, y):
             return 2.0 * jnp.pi**2 * jnp.sin(jnp.pi * x) * jnp.sin(jnp.pi * y)
 
-        model  = MLP(layers=[2, 64, 64, 64, 1])
+        model  = MLP(layers=[2, 64, 64, 64, 64, 64, 1])
         pde    = SteadyHeatPDE(model, source_fn=source)
         loss   = SteadyLoss(model, pde, bc_weight=20.0)
         solver = SteadySolver(model, pde, loss=loss)
@@ -543,6 +694,29 @@ class SteadyHeatEvaluator(BaseBenchmarkEvaluator):
         print(f"  plot → {path}")
         return path
 
+    def plot_pgf(self, out_dir: str, suffix: str = "") -> tuple:
+        from underPINN.utils.pgf_export import save_lines_dat, save_surf_dat
+        N  = 100
+        x  = np.linspace(0, 1, N, dtype="f4")
+        XY = np.array(np.meshgrid(x, x, indexing="ij")).reshape(2, -1).T
+        xy = jnp.array(XY)
+        u_pred  = np.array(self._pde.u(self._params, xy)).reshape(N, N)
+        u_exact = np.array(self._pde.exact(xy)).reshape(N, N)
+
+        rows, cols = save_surf_dat(
+            os.path.join(out_dir, f"heat_steady{suffix}_pinn.dat"), x, x, u_pred)
+        save_surf_dat(
+            os.path.join(out_dir, f"heat_steady{suffix}_exact.dat"), x, x, u_exact)
+        save_surf_dat(
+            os.path.join(out_dir, f"heat_steady{suffix}_err.dat"), x, x,
+            np.abs(u_pred - u_exact))
+        save_lines_dat(
+            os.path.join(out_dir, f"heat_steady{suffix}_loss.dat"),
+            epoch=np.arange(1, len(self._loss_hist) + 1),
+            total=self._loss_hist, pde=self._pde_hist)
+        print(f"  plot_pgf → {out_dir}/heat_steady{suffix}_*.dat")
+        return rows, cols
+
 
 # =============================================================================
 #  ODE — Harmonic oscillator
@@ -565,7 +739,7 @@ class ODEHarmonicEvaluator(BaseBenchmarkEvaluator):
         t_r  = jnp.linspace(0, T, 500).reshape(-1, 1).astype("f4")
         t_ic = jnp.array([[0.0]], dtype="f4")
         u_ic = jnp.array([[1.0]], dtype="f4")
-        model  = FourierMLP(layers=[1, 64, 64, 1], n_fourier=16,
+        model  = FourierMLP(layers=[1, 64, 64, 64, 64, 64, 1], n_fourier=16,
                             sigma=float(self._omega))
         pde    = self._ODE(model, omega=self._omega)
         loss   = self._Loss(model, pde, ic_weight=50.0, ic_derivative_weight=50.0)
@@ -630,15 +804,34 @@ class ODEHarmonicEvaluator(BaseBenchmarkEvaluator):
         print(f"  plot → {path}")
         return path
 
+    def plot_pgf(self, out_dir: str, suffix: str = "") -> list:
+        from underPINN.utils.pgf_export import save_lines_dat
+        t_test  = jnp.linspace(0, self._T, 500).reshape(-1, 1).astype("f4")
+        u_pred  = np.array(self._pde.u(self._params, t_test)).ravel()
+        u_exact = np.array(self._pde.exact(t_test)).ravel()
+        t_np    = np.array(t_test).ravel()
+        err     = np.abs(u_pred - u_exact)
+
+        names = save_lines_dat(
+            os.path.join(out_dir, f"ode_harmonic{suffix}_solution.dat"),
+            t=t_np, pinn=u_pred, exact=u_exact, err=err)
+        save_lines_dat(
+            os.path.join(out_dir, f"ode_harmonic{suffix}_loss.dat"),
+            epoch=np.arange(1, len(self._loss_hist) + 1),
+            total=self._loss_hist, pde=self._pde_hist)
+        print(f"  plot_pgf → {out_dir}/ode_harmonic{suffix}_*.dat")
+        return names
+
 
 # =============================================================================
 #  3-D Steady Pipe Flow (Hagen-Poiseuille)
 # =============================================================================
 
 class PipeFlowEvaluator(BaseBenchmarkEvaluator):
-    name  = "pipe_flow"
-    label = "3-D Pipe Flow (Re=10)"
-    fast  = False
+    name    = "pipe_flow"
+    label   = "3-D Pipe Flow (Re=10)"
+    fast    = False
+    complex = True
 
     def __init__(self, Re: float = 10.0):
         from underPINN.pde.navier_stokes_3d import SteadyNS3DPDE
@@ -650,13 +843,13 @@ class PipeFlowEvaluator(BaseBenchmarkEvaluator):
     def train(self, epochs: int, seed: int = 0) -> float:
         R, L, U_max = 0.5, 2.0, 1.0
         pipe     = self._Pipe(R=R, L=L)
-        xyz_int  = jnp.array(np.array(pipe.sample_interior(2000), dtype="f4"))
+        xyz_int  = jnp.array(np.array(pipe.sample_interior(40000), dtype="f4"))
         xyz_wall = jnp.array(np.array(pipe.sample_wall(600),      dtype="f4"))
         xyz_in   = jnp.array(np.array(pipe.sample_inlet(200),     dtype="f4"))
         xyz_out  = jnp.array(np.array(pipe.sample_outlet(200),    dtype="f4"))
         W_PDE, W_WALL, W_IN, W_OUT = 1.0, 100.0, 50.0, 20.0
 
-        model    = MLP(layers=[3, 64, 64, 64, 64, 4])
+        model    = MLP(layers=[3, 128, 128, 128, 128, 128, 4])
         pde      = self._SteadyNS3DPDE(model, Re=self._Re)
         key      = jax.random.PRNGKey(seed)
         params   = model.init(key, jnp.ones((1, 3)))
@@ -795,6 +988,52 @@ class PipeFlowEvaluator(BaseBenchmarkEvaluator):
         print(f"  plot → {path}")
         return path
 
+    def plot_pgf(self, out_dir: str, suffix: str = "") -> tuple:
+        from underPINN.utils.pgf_export import save_lines_dat, save_surf_dat
+        R, U_max = self._R, self._U_max
+        # Cross-section at x = L/2
+        N = 80
+        y_plt = np.linspace(-R, R, N, dtype="f4")
+        z_plt = np.linspace(-R, R, N, dtype="f4")
+        YY, ZZ = np.meshgrid(y_plt, z_plt, indexing="ij")
+        mask   = (YY**2 + ZZ**2) <= R**2
+        x_mid  = np.full(N * N, self._L / 2, dtype="f4")
+        pts    = jnp.stack([jnp.array(x_mid),
+                            jnp.array(YY.ravel()),
+                            jnp.array(ZZ.ravel())], axis=1)
+        u_pred_flat, _, _, _ = self._pde.uvwp(self._params, pts)
+        u_pred  = np.array(u_pred_flat).reshape(N, N)
+        r2      = YY**2 + ZZ**2
+        u_exact = U_max * (1 - r2 / R**2)
+        u_pred[~mask] = np.nan
+        u_exact[~mask] = np.nan
+
+        rows, cols = save_surf_dat(
+            os.path.join(out_dir, f"pipe_flow{suffix}_pinn.dat"), y_plt, z_plt, u_pred)
+        save_surf_dat(
+            os.path.join(out_dir, f"pipe_flow{suffix}_exact.dat"), y_plt, z_plt, u_exact)
+        save_surf_dat(
+            os.path.join(out_dir, f"pipe_flow{suffix}_err.dat"), y_plt, z_plt,
+            np.abs(u_pred - u_exact))
+
+        # Radial profile
+        r_line = np.linspace(0, R * 0.98, 100, dtype="f4")
+        pts_r  = jnp.stack([jnp.full(100, self._L / 2, "f4"),
+                            jnp.array(r_line),
+                            jnp.zeros(100, "f4")], axis=1)
+        u_r_pred, _, _, _ = self._pde.uvwp(self._params, pts_r)
+        u_r_exact = U_max * (1 - r_line**2 / R**2)
+        save_lines_dat(
+            os.path.join(out_dir, f"pipe_flow{suffix}_radial.dat"),
+            r=r_line, pinn=np.array(u_r_pred), exact=u_r_exact)
+
+        save_lines_dat(
+            os.path.join(out_dir, f"pipe_flow{suffix}_loss.dat"),
+            epoch=np.arange(1, len(self._loss_hist) + 1),
+            total=self._loss_hist, pde=self._pde_hist)
+        print(f"  plot_pgf → {out_dir}/pipe_flow{suffix}_*.dat")
+        return rows, cols
+
 
 # =============================================================================
 #  2-D Compressible Euler — Mach-3 oblique-shock ramp
@@ -809,8 +1048,9 @@ class RampEvaluator(BaseBenchmarkEvaluator):
     freestream above the shock line, the exact post-shock state below it.
     """
 
-    name  = "ramp"
-    label = "2-D Ramp — Oblique Shock (M=3, θ=10°)"
+    name    = "ramp"
+    label   = "2-D Ramp — Oblique Shock (M=3, θ=10°)"
+    complex = True
 
     def __init__(self, M_inf: float = 3.0, theta_deg: float = 10.0,
                  gamma: float = 1.4):
@@ -825,13 +1065,13 @@ class RampEvaluator(BaseBenchmarkEvaluator):
         L, H = 1.0, 0.8
         geom = self._RampGeometry(theta_deg, L=L, H=H)
 
-        xy_r  = jnp.array(np.array(geom.sample_interior(3000, seed=seed), "f4"))
-        xy_in = jnp.array(np.array(geom.sample_inlet(200),     "f4"))
-        xy_w  = jnp.array(np.array(geom.sample_ramp_wall(250), "f4"))
-        xy_up = jnp.array(np.array(geom.sample_upper(150),     "f4"))
+        xy_r  = jnp.array(np.array(geom.sample_interior(30000, seed=seed), "f4"))
+        xy_in = jnp.array(np.array(geom.sample_inlet(300),     "f4"))
+        xy_w  = jnp.array(np.array(geom.sample_ramp_wall(400), "f4"))
+        xy_up = jnp.array(np.array(geom.sample_upper(200),     "f4"))
         nx, ny = geom.ramp_normal()
 
-        model  = MLP(layers=[2, 64, 64, 64, 4])
+        model  = MLP(layers=[2, 128, 128, 128, 128, 128, 4])
         pde    = self._CompressibleEulerPDE(model, gamma=gamma, art_visc=1e-3)
         rho_inf, u_inf, v_inf, p_inf = pde.freestream(M_inf)
 
@@ -842,11 +1082,12 @@ class RampEvaluator(BaseBenchmarkEvaluator):
                                 optax.scale_by_schedule(lr_sched),
                                 optax.scale(-1.0))
         state = optimizer.init(params)
-        W_PDE, W_INLET, W_WALL, W_UPPER = 1.0, 100.0, 50.0, 20.0
+        # Loss weights match examples/ramp/config.yaml exactly.
+        W_PDE, W_INLET, W_WALL, W_UPPER = 1.0, 200.0, 80.0, 30.0
         N_r, N_in, N_w, N_up = (xy_r.shape[0], xy_in.shape[0],
                                 xy_w.shape[0], xy_up.shape[0])
-        bR, bI, bW, bU = (min(1024, N_r), min(150, N_in),
-                         min(150, N_w), min(100, N_up))
+        bR, bI, bW, bU = (min(2048, N_r), min(256, N_in),
+                         min(256, N_w), min(200, N_up))
 
         @jax.jit
         def step(params, state, r_b, in_b, w_b, up_b):
@@ -876,10 +1117,22 @@ class RampEvaluator(BaseBenchmarkEvaluator):
             params = optax.apply_updates(params, updates)
             return params, state, total, aux
 
+        # RAR-D resampling of the interior pool, matching examples/ramp's
+        # rar_period=2000 cadence (scaled to "~5 resamples over the run" so
+        # it also does something useful at the smaller benchmark epoch tiers
+        # instead of only firing at the full 2000-epoch cadence).
+        from underPINN.utils.sampling import rad_resample
+        rar_period = max(1, epochs // 5)
         loss_hist, pde_hist = [], []
         key = jax.random.PRNGKey(seed + 11)
         t0 = time.perf_counter()
         for ep in range(epochs):
+            if ep > 0 and ep % rar_period == 0:
+                xy_r = jnp.array(rad_resample(
+                    pde, params, lambda n, s: geom.sample_interior(n, seed=s),
+                    n_keep=N_r, n_candidates=5 * N_r,
+                    k=1.0, c=1.0, seed=seed + ep))
+
             key, k1, k2, k3, k4 = jax.random.split(key, 5)
             ir = jax.random.randint(k1, (bR,), 0, N_r)
             ii = jax.random.randint(k2, (bI,), 0, N_in)
@@ -969,6 +1222,41 @@ class RampEvaluator(BaseBenchmarkEvaluator):
         print(f"  plot → {path}")
         return path
 
+    def plot_pgf(self, out_dir: str, suffix: str = "") -> tuple:
+        from underPINN.utils.pgf_export import save_lines_dat, save_surf_dat
+        XX, YY, mask = self._geom.make_grid(Nx=200, Ny=160)
+        mach_pred  = self._mach_field(self._params, XX, YY)
+        mach_exact = self._exact_field(XX, YY)
+        mach_pred  = mach_pred.copy()
+        mach_exact = mach_exact.copy()
+        mach_pred[~mask]  = np.nan
+        mach_exact[~mask] = np.nan
+        err = np.abs(mach_pred - mach_exact)
+        # make_grid returns (Ny, Nx); save_surf_dat wants Z as (len(x), len(y))
+        x_np, y_np = XX[0, :], YY[:, 0]
+
+        rows, cols = save_surf_dat(
+            os.path.join(out_dir, f"ramp{suffix}_pinn.dat"), x_np, y_np, mach_pred.T)
+        save_surf_dat(
+            os.path.join(out_dir, f"ramp{suffix}_exact.dat"), x_np, y_np, mach_exact.T)
+        save_surf_dat(
+            os.path.join(out_dir, f"ramp{suffix}_err.dat"), x_np, y_np, err.T)
+
+        beta = math.radians(self._shock["beta_deg"])
+        x_shock = np.array([0.0, min(self._L, self._H / max(math.tan(beta), 1e-9))],
+                          dtype="f4")
+        y_shock = x_shock * math.tan(beta)
+        save_lines_dat(
+            os.path.join(out_dir, f"ramp{suffix}_shock_line.dat"),
+            x=x_shock, y=y_shock)
+
+        save_lines_dat(
+            os.path.join(out_dir, f"ramp{suffix}_loss.dat"),
+            epoch=np.arange(1, len(self._loss_hist) + 1),
+            total=self._loss_hist, pde=self._pde_hist)
+        print(f"  plot_pgf → {out_dir}/ramp{suffix}_*.dat")
+        return rows, cols
+
 
 # =============================================================================
 #  1-D Unsteady Compressible Euler — Toro test 3 (severe blast wave)
@@ -983,8 +1271,9 @@ class Toro3Evaluator(BaseBenchmarkEvaluator):
     dynamic range, evaluated against the exact Riemann solution.
     """
 
-    name  = "toro3"
-    label = "1-D Toro Test 3 (blast wave)"
+    name    = "toro3"
+    label   = "1-D Toro Test 3 (blast wave)"
+    complex = True
 
     def __init__(self, gamma: float = 1.4):
         from underPINN.pde.euler_1d_unsteady import Euler1DUnsteadyPDE
@@ -1010,7 +1299,7 @@ class Toro3Evaluator(BaseBenchmarkEvaluator):
         self._left, self._right = left, right
 
         rng   = np.random.default_rng(seed)
-        n_int, n_ic, n_bc = 4000, 500, 300
+        n_int, n_ic, n_bc = 40000, 5000, 3000
         xt_r = np.stack([rng.uniform(0.0, 1.0,  n_int),
                          rng.uniform(0.0, tf_nd, n_int)], axis=1).astype("f4")
         x_ic = rng.uniform(0.0, 1.0, n_ic).astype("f4")
@@ -1029,22 +1318,25 @@ class Toro3Evaluator(BaseBenchmarkEvaluator):
         bcL_tgt = jnp.array(np.array(left_nd,  "f4"))
         bcR_tgt = jnp.array(np.array(right_nd, "f4"))
 
-        model = MLP(layers=[2, 64, 64, 64, 3])
-        pde   = self._Euler1DUnsteadyPDE(model, gamma=gamma, art_visc=0.02,
+        # Fixed (non-trainable) artificial viscosity at the example's vetted
+        # value -- the example config runs with trainable_visc: false and
+        # art_visc: 0.001; passing plain net params (no "log_av" key) makes
+        # Euler1DUnsteadyPDE use self.art_visc as a fixed constant instead of
+        # treating it as trainable (see Euler1DUnsteadyPDE._is_combined).
+        model = MLP(layers=[2, 128, 128, 128, 128, 128, 3])
+        pde   = self._Euler1DUnsteadyPDE(model, gamma=gamma, art_visc=0.001,
                                          transform="exp")
         key    = jax.random.PRNGKey(seed)
         params = model.init(key, jnp.ones((1, 2)))
-        raw0   = self._Euler1DUnsteadyPDE.inverse_softplus(0.02)
-        params = {"net": params, "log_av": jnp.asarray(raw0, jnp.float32)}
 
         lr_sched  = optax.cosine_decay_schedule(1e-3, epochs, alpha=1e-2)
         optimizer = optax.chain(optax.scale_by_adam(),
                                 optax.scale_by_schedule(lr_sched),
                                 optax.scale(-1.0))
         state = optimizer.init(params)
-        W_PDE, W_IC, W_BC = 1.0, 20.0, 10.0
+        W_PDE, W_IC, W_BC = 1.0, 100.0, 10.0  # w_ic matches the example (100.0)
         N_r, N_ic_, N_bc_ = xt_r_j.shape[0], xt_ic_j.shape[0], xt_bcL_j.shape[0]
-        bR, bI, bB = min(1024, N_r), min(200, N_ic_), min(150, N_bc_)
+        bR, bI, bB = min(2048, N_r), min(400, N_ic_), min(300, N_bc_)
 
         @jax.jit
         def step(params, state, r_b, ic_b, ic_t, bcL_b, bcR_b):
@@ -1131,6 +1423,25 @@ class Toro3Evaluator(BaseBenchmarkEvaluator):
         print(f"  plot → {path}")
         return path
 
+    def plot_pgf(self, out_dir: str, suffix: str = "") -> list:
+        from underPINN.utils.pgf_export import save_lines_dat
+        rho_ref, u_ref, p_ref, t_ref = self._nd
+        xg, pv_nd, exact_nd = self._fields()
+        rho_p, u_p, p_p = pv_nd[:, 0]*rho_ref, pv_nd[:, 1]*u_ref, pv_nd[:, 2]*p_ref
+        rho_e, u_e, p_e = (exact_nd[:, 0]*rho_ref, exact_nd[:, 1]*u_ref,
+                          exact_nd[:, 2]*p_ref)
+
+        names = save_lines_dat(
+            os.path.join(out_dir, f"toro3{suffix}_solution.dat"),
+            x=xg, rho_pinn=rho_p, rho_exact=rho_e,
+            u_pinn=u_p, u_exact=u_e, p_pinn=p_p, p_exact=p_e)
+        save_lines_dat(
+            os.path.join(out_dir, f"toro3{suffix}_loss.dat"),
+            epoch=np.arange(1, len(self._loss_hist) + 1),
+            total=self._loss_hist, pde=self._pde_hist)
+        print(f"  plot_pgf → {out_dir}/toro3{suffix}_*.dat")
+        return names
+
 
 # =============================================================================
 #  2-D Compressible Navier–Stokes — viscous Mach-3 compression ramp (SBLI)
@@ -1155,9 +1466,10 @@ class RampNSEvaluator(BaseBenchmarkEvaluator):
     (run with ``--all``).
     """
 
-    name  = "ramp_ns"
-    label = "2-D Ramp NS — Viscous SBLI (M=3, Re=1e4)"
-    fast  = False
+    name    = "ramp_ns"
+    label   = "2-D Ramp NS — Viscous SBLI (M=3, Re=1e4)"
+    fast    = False
+    complex = True
 
     def __init__(self, M_inf: float = 3.0, theta_deg: float = 15.0,
                  gamma: float = 1.4, Re: float = 1.0e4, Pr: float = 0.72):
@@ -1177,18 +1489,26 @@ class RampNSEvaluator(BaseBenchmarkEvaluator):
         geom = self._RampGeometry(theta_deg, L=L, H=H,
                                   ramp_start=ramp_start, slip_end=slip_end)
 
-        # Hybrid interior pool: fixed uniform base + wall-clustered (BL) points,
-        # combined once (the full example also RAR-migrates a third pool toward
-        # the shock; omitted here to keep the benchmark loop simple).
-        xy_uniform = geom.sample_interior(1500, seed=seed)
-        xy_bl      = geom.sample_boundary_layer(1500, beta=4.0, seed=seed + 7)
-        xy_r  = jnp.array(np.concatenate([xy_uniform, xy_bl], axis=0))
+        # Hybrid interior pool, matching the full example: fixed uniform base
+        # + wall-clustered (BL) points + a residual-ADAPTIVE pool that gets
+        # RAR-D-migrated toward the shock every rar_period epochs. x_min
+        # excludes the inlet/wall corner (a geometric BC singularity with a
+        # far larger raw residual than the shock -- see sample_interior's
+        # docstring) so RAR's budget lands on the shock, not the corner.
+        from underPINN.utils.sampling import rad_resample
+        n_adapt   = 6000
+        rar_x_min = 0.25
+        xy_uniform = geom.sample_interior(40000, seed=seed)
+        xy_bl      = geom.sample_boundary_layer(5000, beta=4.0, seed=seed + 7)
+        xy_adapt   = geom.sample_interior(n_adapt, seed=seed + 101, x_min=rar_x_min)
+        xy_adapt_init = np.array(xy_adapt)
+        xy_r  = jnp.array(np.concatenate([xy_uniform, xy_bl, xy_adapt], axis=0))
         xy_in   = jnp.array(np.array(geom.sample_inlet(200),        "f4"))
         xy_w    = jnp.array(np.array(geom.sample_noslip_wall(200),  "f4"))
         xy_slip = jnp.array(np.array(geom.sample_slip_wall(100),    "f4"))
         xy_up   = jnp.array(np.array(geom.sample_upper(150),        "f4"))
 
-        model = MLP(layers=[2, 96, 96, 96, 4])
+        model = MLP(layers=[2, 128, 128, 128, 128, 128, 4])
         pde   = self._CompressibleNS2DPDE(model, gamma=gamma, M_inf=M_inf,
                                           Re=Re, Pr=Pr, art_visc=2e-3)
         T0 = pde.total_temperature()
@@ -1204,11 +1524,11 @@ class RampNSEvaluator(BaseBenchmarkEvaluator):
         W_PDE, W_INLET, W_WALL, W_SLIP, W_UPPER = 1.0, 100.0, 100.0, 80.0, 20.0
         N_r, N_in, N_w = xy_r.shape[0], xy_in.shape[0], xy_w.shape[0]
         N_slip, N_up   = xy_slip.shape[0], xy_up.shape[0]
-        bR  = min(768, N_r)
-        bI  = min(150, N_in)
-        bW  = min(150, N_w)
-        bS  = min(100, N_slip)
-        bU  = min(100, N_up)
+        bR  = min(1536, N_r)
+        bI  = min(250, N_in)
+        bW  = min(250, N_w)
+        bS  = min(180, N_slip)
+        bU  = min(180, N_up)
 
         @jax.jit
         def step(params, state, r_b, in_b, w_b, slip_b, up_b):
@@ -1244,10 +1564,26 @@ class RampNSEvaluator(BaseBenchmarkEvaluator):
             params = optax.apply_updates(params, updates)
             return params, state, total, aux
 
+        # Fixed 5000-epoch cadence (rather than epochs // 5, which gave only
+        # ~4-5 resamples total and left the pool frozen for a long stretch
+        # before the run ended -- e.g. at 60000 epochs the last resample
+        # landed at epoch 48000, so the "final" positions in the migration
+        # plot reflected the model's state 12000 epochs before convergence,
+        # understating how far points had actually migrated by the end).
+        rar_period = 5000
         loss_hist, pde_hist = [], []
         key = jax.random.PRNGKey(seed + 11)
         t0 = time.perf_counter()
         for ep in range(epochs):
+            if ep > 0 and ep % rar_period == 0:
+                xy_adapt = rad_resample(
+                    pde, params,
+                    lambda n, s: geom.sample_interior(n, seed=s, x_min=rar_x_min),
+                    n_keep=n_adapt, n_candidates=5 * n_adapt,
+                    k=1.0, c=1.0, seed=seed + ep)
+                xy_r = jnp.array(np.concatenate(
+                    [xy_uniform, xy_bl, xy_adapt], axis=0))
+
             key, k1, k2, k3, k4, k5 = jax.random.split(key, 6)
             ir  = jax.random.randint(k1, (bR,), 0, N_r)
             ii  = jax.random.randint(k2, (bI,), 0, N_in)
@@ -1265,6 +1601,10 @@ class RampNSEvaluator(BaseBenchmarkEvaluator):
         self._loss_hist, self._pde_hist = loss_hist, pde_hist
         self._geom, self._L, self._H = geom, L, H
         self._ramp_start = ramp_start
+        self._xy_adapt_init  = xy_adapt_init
+        self._xy_adapt_final = np.array(xy_adapt)
+        self._rho_inf = float(rho_inf)
+        self._p_inf   = float(rho_inf) * float(T_inf) / (gamma * M_inf ** 2)
         # Analytic inviscid oblique-shock state, via a model-free helper PDE
         # (its oblique_shock()/freestream() are pure closed-form calculations).
         euler = self._CompressibleEulerPDE(None, gamma=gamma)
@@ -1274,15 +1614,39 @@ class RampNSEvaluator(BaseBenchmarkEvaluator):
     def _exact_field(self, XX, YY):
         """Piecewise-exact outer Mach: freestream upstream of the corner shock,
         the analytic post-shock state below the shock line downstream of it."""
-        beta = math.radians(self._shock["beta_deg"])
-        dx = np.maximum(XX - self._ramp_start, 0.0)
-        below_shock = (YY <= dx * math.tan(beta)) & (XX >= self._ramp_start)
-        return np.where(below_shock, self._shock["M2"], self._M_inf)
+        return np.where(self._below_shock(XX, YY), self._shock["M2"], self._M_inf)
 
     def _mach_field(self, params, XX, YY):
         pts  = jnp.array(np.stack([XX.ravel(), YY.ravel()], axis=1), "f4")
         mach = np.array(self._pde.mach(params, pts))
         return mach.reshape(XX.shape)
+
+    def _below_shock(self, XX, YY):
+        beta = math.radians(self._shock["beta_deg"])
+        dx = np.maximum(XX - self._ramp_start, 0.0)
+        return (YY <= dx * math.tan(beta)) & (XX >= self._ramp_start)
+
+    def _exact_density_field(self, XX, YY):
+        """Piecewise-exact outer density: freestream (rho_inf) upstream of
+        the corner shock, the analytic post-shock density downstream."""
+        return np.where(self._below_shock(XX, YY), self._shock["rho2"],
+                        self._rho_inf)
+
+    def _exact_pressure_field(self, XX, YY):
+        """Piecewise-exact outer pressure: freestream (p_inf) upstream of
+        the corner shock, the analytic post-shock pressure downstream."""
+        return np.where(self._below_shock(XX, YY), self._shock["p2"],
+                        self._p_inf)
+
+    def _density_field(self, params, XX, YY):
+        pts = jnp.array(np.stack([XX.ravel(), YY.ravel()], axis=1), "f4")
+        rho = np.array(self._pde.apply(params, pts)[:, 0])
+        return rho.reshape(XX.shape)
+
+    def _pressure_field(self, params, XX, YY):
+        pts = jnp.array(np.stack([XX.ravel(), YY.ravel()], axis=1), "f4")
+        p = np.array(self._pde.pressure(params, pts))
+        return p.reshape(XX.shape)
 
     def _outer_mask(self, XX, YY, mask, band_frac=0.12):
         """Domain-interior mask, excluding a near-wall band (boundary layer)."""
@@ -1354,6 +1718,90 @@ class RampNSEvaluator(BaseBenchmarkEvaluator):
         plt.close(fig)
         print(f"  plot → {path}")
         return path
+
+    def plot_pgf(self, out_dir: str, suffix: str = "") -> tuple:
+        from underPINN.utils.pgf_export import save_lines_dat, save_surf_dat
+        XX, YY, mask = self._geom.make_grid(Nx=200, Ny=160)
+        outer = self._outer_mask(XX, YY, mask)
+        mach_pred  = self._mach_field(self._params, XX, YY)
+        mach_exact = self._exact_field(XX, YY)
+
+        mach_full = mach_pred.copy()
+        mach_full[~mask] = np.nan
+        mach_outer_exact = mach_exact.copy()
+        mach_outer_exact[~outer] = np.nan
+        err = np.abs(mach_pred - mach_exact)
+        err[~outer] = np.nan
+        # make_grid returns (Ny, Nx); save_surf_dat wants Z as (len(x), len(y))
+        x_np, y_np = XX[0, :], YY[:, 0]
+
+        rows, cols = save_surf_dat(
+            os.path.join(out_dir, f"ramp_ns{suffix}_pinn.dat"), x_np, y_np, mach_full.T)
+        save_surf_dat(
+            os.path.join(out_dir, f"ramp_ns{suffix}_exact.dat"), x_np, y_np,
+            mach_outer_exact.T)
+        save_surf_dat(
+            os.path.join(out_dir, f"ramp_ns{suffix}_err.dat"), x_np, y_np, err.T)
+
+        # Density and pressure fields, same PINN | outer-exact | |error|
+        # treatment as Mach above (freestream upstream of the corner shock,
+        # analytic post-shock state downstream).
+        for field_name, pred_fn, exact_fn in (
+            ("density", self._density_field, self._exact_density_field),
+            ("pressure", self._pressure_field, self._exact_pressure_field),
+        ):
+            pred = pred_fn(self._params, XX, YY)
+            exact = exact_fn(XX, YY)
+            pred_full = pred.copy()
+            pred_full[~mask] = np.nan
+            exact_outer = exact.copy()
+            exact_outer[~outer] = np.nan
+            field_err = np.abs(pred - exact)
+            field_err[~outer] = np.nan
+            save_surf_dat(
+                os.path.join(out_dir, f"ramp_ns{suffix}_{field_name}_pinn.dat"),
+                x_np, y_np, pred_full.T)
+            save_surf_dat(
+                os.path.join(out_dir, f"ramp_ns{suffix}_{field_name}_exact.dat"),
+                x_np, y_np, exact_outer.T)
+            save_surf_dat(
+                os.path.join(out_dir, f"ramp_ns{suffix}_{field_name}_err.dat"),
+                x_np, y_np, field_err.T)
+
+        beta = math.radians(self._shock["beta_deg"])
+        x_shock = np.array([self._ramp_start,
+                           min(self._L, self._ramp_start
+                               + self._H / max(math.tan(beta), 1e-9))], dtype="f4")
+        y_shock = (x_shock - self._ramp_start) * math.tan(beta)
+        save_lines_dat(
+            os.path.join(out_dir, f"ramp_ns{suffix}_shock_line.dat"),
+            x=x_shock, y=y_shock)
+
+        save_lines_dat(
+            os.path.join(out_dir, f"ramp_ns{suffix}_loss.dat"),
+            epoch=np.arange(1, len(self._loss_hist) + 1),
+            total=self._loss_hist, pde=self._pde_hist)
+
+        # Subsample for the figure only -- a plain vector \addplot table of
+        # the full n_adapt=6000 points (2 series = 12000 marks) exceeds
+        # pdflatex's default main memory (confirmed: 6000 fails, 2500
+        # compiles fine). The migration pattern is a spatial density plot,
+        # not a precise per-point record, so thinning is visually lossless.
+        _MAX_RAR_PTS = 2000
+        rar_rng = np.random.default_rng(0)
+        n_pts = self._xy_adapt_init.shape[0]
+        if n_pts > _MAX_RAR_PTS:
+            idx = rar_rng.choice(n_pts, _MAX_RAR_PTS, replace=False)
+        else:
+            idx = slice(None)
+        save_lines_dat(
+            os.path.join(out_dir, f"ramp_ns{suffix}_rar_init.dat"),
+            x=self._xy_adapt_init[idx, 0], y=self._xy_adapt_init[idx, 1])
+        save_lines_dat(
+            os.path.join(out_dir, f"ramp_ns{suffix}_rar_final.dat"),
+            x=self._xy_adapt_final[idx, 0], y=self._xy_adapt_final[idx, 1])
+        print(f"  plot_pgf → {out_dir}/ramp_ns{suffix}_*.dat")
+        return rows, cols
 
 
 # =============================================================================

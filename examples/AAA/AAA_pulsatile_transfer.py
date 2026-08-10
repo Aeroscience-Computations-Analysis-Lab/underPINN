@@ -67,7 +67,8 @@ def run_AAA_pulsatile_transfer(cfg) -> dict:
             geom=geom, pde=pde,
             inlet_target_fn=cosine_squared_inlet_factory(
                 R_vessel, V_max, V_amp, T_period),
-            steady_uvw_fn=parabolic_steady_uvw_factory(R_vessel, V_max),
+            steady_uvw_fn=parabolic_steady_uvw_factory(
+                R_vessel, V_max, radius_fn=geom.radius_at),
             physics_dict={"Re": Re, "R_vessel": R_vessel, "R_AAA": R_AAA,
                           "L": L, "x_lo": x_lo, "x0": x0, "L_AAA": L_AAA,
                           "V_max": V_max, "V_amp": V_amp, "T_period": T_period},

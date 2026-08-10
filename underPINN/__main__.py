@@ -20,6 +20,7 @@ Usage
     python -m underPINN bench
     python -m underPINN bench --problems burgers wave --epochs 500 2000 5000
     python -m underPINN bench --all --output outputs/bench_full
+    python -m underPINN bench --all --complex-epochs 5000 20000 60000
 
     # Continue a completed run from its last checkpoint
     #   Step 1 — raise epochs in the YAML (e.g. 5000 → 10000)
@@ -101,7 +102,7 @@ def _cmd_show(args):
 def _cmd_bench(args):
     """Delegate to benchmarks/run_benchmarks.py main() with the parsed args."""
     from underPINN.benchmark_utils import (
-        BenchmarkRunner, generate_report)
+        BenchmarkRunner, generate_report, generate_report_pgf)
     from underPINN.benchmark_utils.benchmark_suite import BenchmarkRunner as BR
 
     if args.list_problems:
@@ -109,8 +110,12 @@ def _cmd_bench(args):
             EVALUATOR_REGISTRY, SLOW_PROBLEMS)
         print("Registered evaluators:")
         for k, cls in sorted(EVALUATOR_REGISTRY.items()):
-            speed = " [slow]" if k in SLOW_PROBLEMS else ""
-            print(f"  {k:<20s}  {cls.__name__}{speed}")
+            tags = ""
+            if k in SLOW_PROBLEMS:
+                tags += " [slow]"
+            if getattr(cls, "complex", False):
+                tags += " [complex]"
+            print(f"  {k:<20s}  {cls.__name__}{tags}")
         return
 
     out_dir = args.output
@@ -119,13 +124,16 @@ def _cmd_bench(args):
     if args.from_json:
         print(f"Loading results from {args.from_json} …")
         results = BR.load_json(args.from_json)
+        generate_report_pgf(results, runner=None, out_dir=os.path.join(out_dir, "pgf"))
         generate_report(results, runner=None, out_dir=out_dir)
         return
 
     epoch_budgets = args.epochs or [500, 1000, 2000, 5000]
+    complex_epoch_budgets = args.complex_epochs or [2000, 5000, 15000, 40000]
     runner = BenchmarkRunner(
         problems=args.problems or None,
         epoch_budgets=epoch_budgets,
+        complex_epoch_budgets=complex_epoch_budgets,
         seed=args.seed,
         fast_only=not args.all,
         verbose=not args.quiet,
@@ -133,14 +141,16 @@ def _cmd_bench(args):
 
     print("=" * 60)
     print("  underPINN Benchmark Suite")
-    print(f"  Problems : {runner._problems}")
-    print(f"  Epochs   : {epoch_budgets}")
-    print(f"  Output   : {out_dir}/")
+    print(f"  Problems         : {runner._problems}")
+    print(f"  Epochs (simple)  : {epoch_budgets}")
+    print(f"  Epochs (complex) : {complex_epoch_budgets}")
+    print(f"  Output           : {out_dir}/")
     print("=" * 60)
 
     results = runner.run(out_dir=out_dir)
     runner.save_json(os.path.join(out_dir, "results.json"))
     runner.save_loss_npz(os.path.join(out_dir, "loss_hists.npz"))
+    generate_report_pgf(results, runner=runner, out_dir=os.path.join(out_dir, "pgf"))
     generate_report(results, runner=runner, out_dir=out_dir)
 
 
@@ -405,7 +415,15 @@ examples:
     p.add_argument("--problems", nargs="+", default=None, metavar="PROB",
                    help="Evaluator keys (default: all fast problems).")
     p.add_argument("--epochs", nargs="+", type=int, default=None, metavar="N",
-                   help="Epoch budgets (default: 500 1000 2000 5000).")
+                   help="Epoch budgets for simple (smooth-PDE) problems "
+                       "(default: 500 1000 2000 5000).")
+    p.add_argument("--complex-epochs", nargs="+", type=int, default=None,
+                   metavar="N",
+                   help="Epoch budgets for problems marked complex=True "
+                       "(shocks / viscous SBLI / 3-D N-S: ramp, toro3, "
+                       "pipe_flow, ramp_ns) — these converge much slower than "
+                       "smooth PDEs, so they get their own, larger budget "
+                       "(default: 2000 5000 15000 40000).")
     p.add_argument("--all", action="store_true",
                    help="Include slow evaluators (e.g. 3-D pipe flow, viscous ramp NS).")
     p.add_argument("--seed", type=int, default=0, metavar="S",
