@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name        = "underPINN"
 dynamic     = ["version"]        # resolved from underPINN/_version.py at build time
 description = "Physics-Informed Neural Networks framework built on JAX/Flax"
+readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.9"
 dependencies = [
     "jax[cpu]>=0.4.26",
