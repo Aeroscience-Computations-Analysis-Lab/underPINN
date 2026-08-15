@@ -1,4 +1,4 @@
-# underPINN-v2605
+# underPINN-v2608
 > A modular, GPU-accelerated Physics-Informed Neural Network framework built on JAX + Flax + Optax
 
 ![Static Badge](https://img.shields.io/badge/version-v2605-blue) ![Static Badge](https://img.shields.io/badge/repo%20status-Active-95eb34) ![Static Badge](https://img.shields.io/badge/license-GPL--3.0-green) ![Static Badge](https://img.shields.io/badge/python-%3E%3D3.9-blue) ![Static Badge](https://img.shields.io/badge/jax-%3E%3D0.4.26-orange)
