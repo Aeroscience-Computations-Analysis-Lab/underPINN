@@ -400,9 +400,6 @@ class CompressibleEulerPDE(BasePDE):
         p2 = p1 * ratio
         rho2 = rho1 * ratio ** (1.0 / gamma)
 
-        a1 = math.sqrt(gamma * p1 / rho1)
-        V1 = math.sqrt(u1 * u1 + v1 * v1)
-        M1_check = V1 / a1                          # sanity, not used further
         theta1 = math.atan2(v1, u1)                 # upstream flow angle
         a2 = math.sqrt(gamma * p2 / rho2)
         V2 = M2 * a2
