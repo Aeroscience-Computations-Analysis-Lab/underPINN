@@ -256,7 +256,7 @@ lowers the loss, damping shrinks after an accepted step and grows after a reject
 one (a trust-region scheme). Loss is therefore **monotonically non-increasing**.
 
 ```python
-from underPINN.training.natural_gradient import train_gauss_newton
+from underPINN.training import train_gauss_newton
 
 # residual_fn: params pytree -> 1-D residual vector
 def residual_fn(params):
