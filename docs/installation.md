@@ -58,7 +58,7 @@ Hessians used throughout the framework.
 
 ```bash
 git clone https://github.com/Aeroscience-Computations-Analysis-Lab/underPINN.git
-cd underPINN-v2605
+cd underPINN
 pip install -e .
 ```
 

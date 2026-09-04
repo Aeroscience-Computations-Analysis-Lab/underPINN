@@ -1,5 +1,5 @@
 # Configuration file for the Sphinx documentation builder.
-# underPINN-v2605 documentation
+# underPINN documentation
 #
 # Full list of options: https://www.sphinx-doc.org/en/master/usage/configuration.html
 
@@ -13,8 +13,8 @@ sys.path.insert(0, os.path.abspath("../.."))
 project = "underPINN"
 copyright = "2026, Kumar Prashant, Senthilkumar Lohith, Ranjan Rajesh"
 author = "Kumar Prashant, Senthilkumar Lohith, Ranjan Rajesh"
-#release = "v2605"
-#version = "v2605"
+#release = "v2608"
+#version = "v2608"
 
 # -- General configuration ----------------------------------------------------
 

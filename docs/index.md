@@ -1,4 +1,4 @@
-# underPINN-v2605
+# underPINN
 
 *A modular, GPU-accelerated Physics-Informed Neural Network framework built on JAX + Flax + Optax*
 
@@ -133,11 +133,11 @@ performance
 If you use underPINN in research or publications, please cite:
 
 ```bibtex
-@software{underPINN_v2605,
+@software{underPINN,
   author  = {Kumar Prashant, Senthilkumar Lohith, Ranjan Rajesh},
-  title   = {underPINN-v2605: A Modular JAX Framework for Physics-Informed Neural Networks},
+  title   = {underPINN: A Modular JAX Framework for Physics-Informed Neural Networks},
   year    = {2026},
-  version = {v2605},
+  version = {v2608},
   url     = {https://github.com/Aeroscience-Computations-Analysis-Lab/underPINN.git}
 }
 ```
