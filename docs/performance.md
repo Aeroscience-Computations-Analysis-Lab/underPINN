@@ -89,8 +89,16 @@ training is not currently implemented — launch one run per device instead.
 ## TPU
 
 Installing via `requirements-tpu.txt` (see {doc}`installation`) causes underPINN to
-detect the TPU backend on import and set `jax_default_matmul_precision = "highest"`
+detect the TPU backend on import and set `jax_default_matmul_precision = "float32"`
 automatically.
+
+```{note}
+Use the canonical name `"float32"`, not the `"highest"` alias, if you set this
+yourself. JAX's config validator accepts only `'bfloat16'`, `'tensorfloat32'` and
+`'float32'`, and raises `ValueError` on `'highest'`/`'high'`/`'default'`.
+`"float32"` *is* `Precision.HIGHEST` — identical semantics, portable across every
+supported JAX version.
+```
 
 ```{warning}
 The TPU's default bfloat16 MXU matmuls corrupt second-order PDE residuals (Hessians),

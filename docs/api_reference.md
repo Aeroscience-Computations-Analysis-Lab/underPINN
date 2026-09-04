@@ -78,7 +78,8 @@ class Pipe:
   - `Interval`, `Rectangle`, `NACAAirfoil`, `Cylinder2D`, `Pipe`, `BulgeGeometry`,
     `Ramp`, `Composite`, `ShapelyGeom`
 * - `training/`
-  - `rar_d_resample` (RAR-D adaptive collocation)
+  - `rar_d_resample`, `rar_d_resample_split` (RAR-D adaptive collocation);
+    `train_gauss_newton` (L-M-damped Gauss-Newton / natural-gradient training)
 * - `config/`
   - `load_config`, `generate_sweep_configs`, `cfg_get`
 * - `runner/`
@@ -167,7 +168,8 @@ underPINN/
 │   └── heat_forward.py       # heat_forward runner helper
 │
 ├── training/
-│   └── resample.py           # rar_d_resample  (RAR-D adaptive collocation)
+│   ├── resample.py           # rar_d_resample, rar_d_resample_split  (RAR-D adaptive collocation)
+│   └── natural_gradient.py   # train_gauss_newton  (L-M-damped Gauss-Newton / natural gradient)
 │
 ├── config/
 │   └── loader.py             # load_config, generate_sweep_configs, cfg_get

@@ -170,6 +170,43 @@ For shock-dominated problems (`ramp`, `sod_shock`, `toro3`) underPINN instead us
 `p ∝ r^k / E[r^k] + c`, tuned via `rar_period`, `rar_candidates`, `rar_k`, `rar_c`.
 ```
 
+## QR-DEIM-R adaptive collocation resampling
+
+`underPINN.utils.sampling.qr_deim_resample` is an alternative selection rule for the
+same resampling slot, addressing a specific weakness of magnitude-proportional
+sampling: because RAR-D/RAD draw *randomly* from `p(x) ∝ |r(x)|^k`, nothing stops
+dozens of draws landing on top of each other on one narrow shock spike while other
+high-residual regions go unsampled.
+
+QR-DEIM instead selects points **deterministically well-spread** across the residual
+field, using the column-pivoted-QR selection rule from the Discrete Empirical
+Interpolation Method (Chaturantabut & Sorensen, 2010; Drmač & Gugercin, 2016) to keep
+the chosen subset as mutually independent as possible.
+
+```python
+from underPINN.utils.sampling import qr_deim_resample
+
+new_points = qr_deim_resample(
+    pde, params, sampler,
+    n_keep=20000,          # collocation batch size
+    n_candidates=200000,   # candidate pool to select from
+    augment_coords=True,   # add residual-scaled coordinates to the feature basis
+)
+```
+
+Plain QR-DEIM is capped at one point per basis column, which cannot fill a collocation
+batch of thousands. The **R** (randomized) is a leverage-score-weighted fill (Drineas,
+Mahoney & Muthukrishnan, 2006) that reaches the remaining `n_keep` points while
+respecting the same small basis.
+
+```{note}
+This is not a transcription of a specific published "QR-DEIM-R" algorithm — it is a
+construction inspired by that selection philosophy. Cost is `O(n_candidates × r0)`
+throughout (`r0` = a handful of basis columns); no dense
+`(n_candidates, n_keep)` matrix is ever formed, which at real batch sizes
+(e.g. 40,000 × 200,000) would allocate tens of gigabytes.
+```
+
 ## Shock capturing — artificial viscosity
 
 The compressible Euler cases add global Laplacian dissipation `−ε∇²U` on the conserved
@@ -178,6 +215,16 @@ variables. `ε` can be:
 - **Fixed** — set directly via `art_visc`
 - **Learned** — jointly optimised as `ε = softplus(log_av)` alongside the network
   weights (`trainable_visc: true`)
+
+When learned, the parameters become a `{"net", "log_av"}` pytree optimized by a
+single `optax` chain, so `log_av` shares the network's optimizer, learning rate and
+cosine schedule rather than having its own.
+
+```{note}
+The shipped shock configs (`examples/toro3`, `examples/ramp`, `examples/sod_shock`)
+all set `trainable_visc: false` and run with a fixed `art_visc`. If you want the
+learned coefficient, you must opt in explicitly.
+```
 
 ## Time-marching transfer learning
 
@@ -190,6 +237,62 @@ checkpoints and window-level restart. See {doc}`transfer_learning`.
 Residual-based adaptivity assigns **per-point loss weights** so boundary and collocation
 losses are automatically balanced during training, especially effective for stiff
 boundary conditions. Enable with `loss.rba: true`.
+
+## Gauss-Newton / natural-gradient training
+
+An optional **second-order** alternative to Adam, for cases where the PDE-residual
+loss surface is too ill-conditioned for a first-order method to make progress.
+
+Every underPINN loss is a sum of squared residuals,
+$L(\theta) = \tfrac{1}{2}\lVert r(\theta) \rVert^2$ (PDE residual plus weighted
+IC/BC residuals, concatenated). Gauss-Newton approximates the Hessian by
+$J^\mathsf{T}J$ — curvature taken from the residual's own Jacobian rather than from
+gradient statistics — and solves the Levenberg-Marquardt-damped normal equations
+
+$$(J^\mathsf{T}J + \lambda I)\,\Delta\theta = J^\mathsf{T} r$$
+
+with the damping $\lambda$ adapted step-to-step: each step is accepted only if it
+lowers the loss, damping shrinks after an accepted step and grows after a rejected
+one (a trust-region scheme). Loss is therefore **monotonically non-increasing**.
+
+```python
+from underPINN.training.natural_gradient import train_gauss_newton
+
+# residual_fn: params pytree -> 1-D residual vector
+def residual_fn(params):
+    return pde.residual(params, x_r).reshape(-1)
+
+final_params, loss_hist, damping_hist = train_gauss_newton(
+    residual_fn, params0,
+    epochs=200,
+    damping0=1e-3,      # initial LM damping
+    damping_up=3.0,     # grow after a rejected step
+    damping_down=0.5,   # shrink after an accepted step
+    log_every=20,
+)
+```
+
+`final_params` keeps the same pytree structure as `params0`; `loss_hist` and
+`damping_hist` have length `epochs + 1` (the initial values are included).
+
+```{warning}
+**Scoped to small networks.** The step performs an explicit dense solve costing
+$O(n_\text{params}^3)$, so it is practical only for networks in the low hundreds to
+a few thousand parameters. It is *not* a replacement for the Adam-based solvers on
+the large 3-D or compressible-flow benchmarks — for those, `optax.lbfgs`
+limited-memory quasi-Newton refinement *after* Adam is the scalable second-order
+option.
+```
+
+```{note}
+Two numerical precautions are load-bearing and were each verified necessary:
+the step solves an **augmented least-squares** system rather than forming
+$J^\mathsf{T}J$ explicitly (forming it squares the Jacobian's condition number),
+and the whole traced body runs under forced `jax.default_matmul_precision("float32")`
+— JAX's default GPU matmul precision corrupts `jacfwd`'s internal matmuls enough to
+make the Jacobian wrong in exactly the low-order digits Newton's method depends on.
+See {doc}`performance` for the precision naming caveat.
+```
 
 ## Callbacks
 
