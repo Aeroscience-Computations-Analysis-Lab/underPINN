@@ -49,7 +49,7 @@ html_theme = "sphinx_book_theme"
 html_title = "underPINN"
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
-html_favicon = "underPINN-logo.png"
+html_favicon = "_static/underPINN-logo.ico"
 
 html_context = {
     "default_mode": "dark",
@@ -71,9 +71,8 @@ html_theme_options = {
     "home_page_in_toc": True,
     "show_navbar_depth": 2,
     "logo": {
-        "text": "underPINN",
         "image_light": "underPINN-logo-light-mode.png",  
-        "image_dark": "underPINN-logo-dark-mode.png",    
+        "image_dark": "underPINN-logo-dark-mode.png"  
     },
 }
 

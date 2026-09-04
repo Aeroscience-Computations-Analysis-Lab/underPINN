@@ -1,0 +1,16 @@
+/* 1. Remove bottom margins/padding from the Logo wrappers */
+.navbar-brand-box,
+.sidebar-header-items,
+.sidebar-header-items__center,
+.logo__image {
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+}
+
+/* 2. Remove top margins/padding from the Search Bar wrappers */
+.sidebar-primary-items__start,
+.sidebar-primary-item,
+.bd-search {
+    margin-top: 0 !important;
+    padding-top: 0 !important;
+}
