@@ -48,14 +48,24 @@ class UnsteadyHeat2DPDE(BasePDE):
         def u_single(xyt_i):
             return self.model.apply(params, xyt_i[None, :])[0, 0]
 
-        # First-order: J[i] = (u_x, u_y, u_t)
-        J = jax.vmap(jax.jacfwd(u_single))(xyt)           # (N, 3)
-        # Second-order: H[i, j, k] = ∂²u / ∂x_j ∂x_k
-        H = jax.vmap(jax.hessian(u_single))(xyt)          # (N, 3, 3)
+        # Was: separate jax.jacfwd (3 fwd passes for the full 3-vector
+        # (u_x,u_y,u_t), only u_t used) and jax.hessian (full 3x3=9 entries,
+        # only the 2 diagonal u_xx/u_yy used, u_tt and all 4 cross terms
+        # discarded) -- same redundancy profiled and fixed in
+        # underPINN/pde/burgers.py. One jax.vjp gives the full gradient
+        # (hence u_t) in a single reverse pass; two targeted jax.jvp calls
+        # of that gradient (x- and y-direction tangents only, skipping the
+        # unused t-direction) give exactly u_xx and u_yy.
+        def per_point(xyt_i):
+            def grad_only(z):
+                return jax.vjp(u_single, z)[1](1.0)[0]
 
-        u_t  = J[:, 2]
-        u_xx = H[:, 0, 0]
-        u_yy = H[:, 1, 1]
+            grad_vec = grad_only(xyt_i)
+            _, jvp_x = jax.jvp(grad_only, (xyt_i,), (jnp.array([1.0, 0.0, 0.0]),))
+            _, jvp_y = jax.jvp(grad_only, (xyt_i,), (jnp.array([0.0, 1.0, 0.0]),))
+            return grad_vec[2], jvp_x[0], jvp_y[1]   # u_t, u_xx, u_yy
+
+        u_t, u_xx, u_yy = jax.vmap(per_point)(xyt)
         return u_t - a * (u_xx + u_yy)
 
     def exact(self, xy, t, alpha=None):

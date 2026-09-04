@@ -29,7 +29,9 @@ Unlike the point networks above (one collocation point in, one value out), these
 - **Cosine LR decay** — via `optax.cosine_decay_schedule`; integrates seamlessly with `TrainingConfig`
 - **RAR-D adaptive collocation resampling** — periodically replaces a fraction of collocation points with samples drawn proportional to `|residual|^k` (Lu et al., 2021); focuses compute on high-error regions without changing the total batch size
 - **RAR/RAD shock-focused resampling** — `rad_resample` (Wu et al., 2023; `p ∝ r^k/E[r^k] + c`) refreshes the interior pool toward shocks/contacts in the compressible cases (`ramp`, `sod_shock`, `toro3`); config knobs `rar_period`, `rar_candidates`, `rar_k`, `rar_c`
-- **Artificial viscosity for shocks** — global Laplacian dissipation `−ε∇²U` on the conserved variables in the compressible Euler cases; ε can be **fixed** (`art_visc`) or **learned** as `ε = softplus(log_av)` jointly with the network (`trainable_visc: true`)
+- **QR-DEIM-R adaptive collocation resampling** — `qr_deim_resample` (`underPINN/utils/sampling.py`): column-pivoted-QR DEIM anchors (Chaturantabut & Sorensen, 2010; Drmac & Gugercin, 2016) plus a leverage-score-weighted randomized fill (Drineas, Mahoney & Muthukrishnan, 2006) — selects points *deterministically well-spread* across every high-residual region instead of RAD's magnitude-proportional random draw, which can cluster redundantly on one narrow shock spike; `O(n_candidates × r0)` throughout, no dense `(n_candidates, n_keep)` matrix ever formed
+- **Artificial viscosity for shocks** — global Laplacian dissipation `−ε∇²U` on the conserved variables in the compressible Euler cases; ε can be **fixed** (`art_visc`) or **learned** as `ε = softplus(log_av)`, either jointly with the network (`trainable_visc: true`) or via its own fully decoupled `optax` optimizer instance (`optax.multi_transform` over a `{"net", "log_av"}` param split) so its learning rate and schedule never have to match the network's
+- **Gauss-Newton / natural-gradient training** — `underPINN.training.natural_gradient.train_gauss_newton`: Levenberg-Marquardt-damped Gauss-Newton second-order optimizer (`(JᵀJ + λI)Δθ = Jᵀr`, trust-region damping adapted step-to-step) as an alternative to Adam; explicit dense solve is `O(n_params³)` per step, so it is scoped to small networks (low hundreds to a few thousand parameters) — not a replacement for underPINN's Adam-based solvers on the large 3-D / compressible-flow benchmarks, where `optax.lbfgs` limited-memory quasi-Newton refinement after Adam is the scalable second-order option instead
 - **Time-marching transfer learning** — long-horizon unsteady problems split into windows; each window warm-starts from the previous one and chains its end-state as the next initial condition (pulsatile pipe flow), with per-window checkpoints and window-level restart
 - **RBA element-wise loss weighting** — residual-based adaptivity assigns per-point weights so that boundary and collocation losses are automatically balanced during training
 - **EarlyStopping** — monitors a metric (default: total loss) and halts training after `patience` epochs without improvement
@@ -56,7 +58,7 @@ Unlike the point networks above (one collocation point in, one value out), these
 - 3-D steady incompressible Navier-Stokes (Hagen-Poiseuille pipe flow, AAA bulge)
 - 3-D **unsteady** incompressible Navier-Stokes (`(x,y,z,t) → (u,v,w,p)`; pulsatile pipe via time-marching transfer)
 - 3-D **generalized-Newtonian (Carreau)** Navier-Stokes — shear-thinning blood rheology (`μ(γ̇) = μ∞ + (μ0−μ∞)[1+(λγ̇)²]^((n−1)/2)`); pipe and AAA cases
-- 2-D steady compressible Euler — **conservative flux-divergence form** with optional artificial viscosity (oblique-shock ramp, Mach 3, θ=10°)
+- 2-D steady compressible Euler — **conservative flux-divergence form** with optional artificial viscosity (oblique-shock compression ramp, Mach 3, θ=10°; two-corner **compression-expansion ramp** combining the oblique shock with an exact **Prandtl-Meyer expansion fan** reference state via `prandtl_meyer_expansion`)
 - 2-D steady compressible **Navier–Stokes** — viscous Mach-3 compression ramp / **shock–boundary-layer interaction** (no-slip + isothermal `T=T₀` walls, Newtonian stress + Fourier conduction, Re=10⁴, Pr=0.72)
 - 1-D **unsteady** compressible Euler — Sod shock tube with learnable artificial viscosity + exact Riemann reference
 - 1-D **unsteady** compressible Euler — **Toro test 3** (Woodward–Colella blast wave, 5-decade pressure jump) with **exp/log positivity** + reference-state **non-dimensionalisation** for the extreme dynamic range
@@ -77,6 +79,7 @@ Unlike the point networks above (one collocation point in, one value out), these
 - **Cylindrical Pipe** — interior, wall, inlet, and outlet face samplers
 - **AAA bulge** (`BulgeGeometry`) — axisymmetric vessel with a cosine-squared AAA bulge `R(x)`; interior / curved-wall / inlet / outlet samplers
 - **Ramp** — trapezoidal domain above a wedge surface for compressible shock problems
+- **Compression-Expansion Ramp** (`CompressionExpansionRampGeometry`) — two-corner wall (compression corner into an expansion corner), piecewise-linear with per-segment normals, for combined oblique-shock + Prandtl-Meyer-expansion problems
 - **Composite** — boolean combinations of any geometry objects
 - **Shapely-backed polygon** — arbitrary 2-D polygon sampler backed by Shapely 2.x
 
@@ -701,7 +704,7 @@ underPINN/
 │   ├── navier_stokes.py   # 2-D steady incompressible N-S
 │   ├── navier_stokes_3d.py# 3-D steady + UNSTEADY incompressible N-S
 │   ├── carreau_ns_3d.py   # 3-D Carreau (shear-thinning) N-S + 1-D exact profile
-│   ├── compressible_euler.py # 2-D steady Euler — conservative form + artificial viscosity
+│   ├── compressible_euler.py # 2-D steady Euler — conservative form + artificial viscosity; oblique_shock + prandtl_meyer_expansion reference states
 │   ├── euler_1d_unsteady.py  # 1-D unsteady Euler (Sod) — learnable artificial viscosity
 │   ├── pipe_flow_unsteady.py # Unsteady pipe cross-section  (y, z, t) → u
 │   ├── k_epsilon.py       # RANS k-ε turbulence model
@@ -714,7 +717,7 @@ underPINN/
 │   ├── cylinder.py        # 2-D circular cylinder (cross-flow exterior)
 │   ├── pipe.py            # Cylindrical pipe (interior, wall, inlet, outlet)
 │   ├── aaa.py             # BulgeGeometry — axisymmetric AAA bulge R(x)
-│   ├── ramp.py            # Trapezoidal ramp domain above a wedge (compressible Euler)
+│   ├── ramp.py            # RampGeometry (single wedge) + CompressionExpansionRampGeometry (two-corner)
 │   ├── composite.py       # Boolean combination of geometries
 │   └── shapely_geom.py    # Shapely-backed arbitrary polygon sampler
 │
@@ -745,7 +748,8 @@ underPINN/
 │   └── heat_forward.py    # heat_forward runner helper
 │
 ├── training/
-│   └── resample.py        # rar_d_resample  (RAR-D adaptive collocation)
+│   ├── resample.py        # rar_d_resample, rar_d_resample_split  (RAR-D adaptive collocation)
+│   └── natural_gradient.py # train_gauss_newton — L-M-damped Gauss-Newton / natural-gradient training
 │
 ├── config/
 │   └── loader.py          # load_config, generate_sweep_configs, cfg_get
@@ -757,7 +761,7 @@ underPINN/
 │
 ├── utils/
 │   ├── io.py              # save_predictions (NPZ archives)
-│   ├── sampling.py        # safe_choice (replace-safe mini-batching)
+│   ├── sampling.py        # safe_choice (mini-batching); rad_resample, qr_deim_resample (adaptive collocation)
 │   ├── seed.py            # set_seed (Python + NumPy + JAX)
 │   ├── checkpoint.py      # save_checkpoint, load_checkpoint, ModelPredictor
 │   ├── restart.py         # RestartManager (snapshot + resume + done marker)
@@ -868,7 +872,7 @@ docs/
 | Carreau N-S (3-D steady) | ∇·[μ*(γ̇)(∇u+∇uᵀ)] stress | `CarreauNS3DPDE.residual` | `examples/pipe_flow_rheology/`, `examples/AAA_rheology/` |
 | Pipe unsteady | u_t = G + ν(u_yy + u_zz) | `PipeUnsteadyPDE.residual` | `examples/pipe_flow/` |
 | RANS k-ε | N-S + k + ε transport | `KEpsilonPDE.residual` | `examples/K-Epsilon/` |
-| Compressible Euler (2-D steady) | ∂F/∂x + ∂G/∂y = ε∇²U (conservative) | `CompressibleEulerPDE.residual` | `examples/ramp/` |
+| Compressible Euler (2-D steady) | ∂F/∂x + ∂G/∂y = ε∇²U (conservative) | `CompressibleEulerPDE.residual` (+ `oblique_shock`, `prandtl_meyer_expansion` reference states) | `examples/ramp/`, compression-expansion ramp studies |
 | Compressible Navier–Stokes (2-D steady) | ∂x(F−Fv/Re) + ∂y(G−Gv/Re) = 0 | `CompressibleNS2DPDE.residual` | `examples/ramp_ns/` |
 | Compressible Euler (1-D unsteady) | ∂U/∂t + ∂F/∂x = ε∂²U/∂x² | `Euler1DUnsteadyPDE.residual` | `examples/sod_shock/` |
 | Exponential Decay | du/dt + λu = 0 | `ExpDecayODE.residual` | `examples/ode/` |
@@ -891,6 +895,7 @@ docs/
 | `Pipe` | 3-D cylindrical interior, lateral wall, circular inlet, circular outlet | `examples/pipe_flow/`, `examples/pipe_flow_rheology/` |
 | `BulgeGeometry` | Axisymmetric AAA bulge `R(x)` (cosine²): interior, curved wall, inlet, outlet | `examples/AAA/`, `examples/AAA_rheology/` |
 | `Ramp` | Trapezoidal domain above a wedge surface at angle θ | `examples/ramp/` |
+| `CompressionExpansionRampGeometry` | Two-corner wall (compression + expansion), piecewise-linear, per-segment normals | Compression-expansion ramp studies |
 | `Composite` | Boolean union / intersection / difference of any two geometry objects | LDC (cavity minus any obstacle) |
 | `ShapelyGeom` | Arbitrary 2-D polygon backed by Shapely 2.x; rejection-samples interior | Custom geometries |
 

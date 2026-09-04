@@ -68,13 +68,15 @@ class KEpsilonPDE(BasePDE):
         s_k   = self.sigma_k
         s_e   = self.sigma_e
 
-        # Per-point function for jacfwd/hessian
+        # Per-point function for jacfwd
         def u_fn(x_i):  # (2,) → (5,)
             return self.u(params, x_i[None, :])[0]
 
-        # Jacobian (N, 5, 2)  and  Hessian (N, 5, 2, 2)
+        # Jacobian (N, 5, 2): forward-mode over a low (2-D) input is already
+        # close to optimal (2 fwd passes give all 10 first derivatives used
+        # below) -- left as-is, as is the plain-forward-pass value
+        # extraction just below it.
         J = jax.vmap(jax.jacfwd(u_fn))(x)
-        H = jax.vmap(jax.hessian(u_fn))(x)
 
         # Raw field values
         out = self.u(params, x)
@@ -88,7 +90,27 @@ class KEpsilonPDE(BasePDE):
         k_x, k_y = J[:, 3, 0], J[:, 3, 1]
         e_x, e_y = J[:, 4, 0], J[:, 4, 1]
 
-        # Second derivatives (Laplacians)
+        # Second derivatives (Laplacians): jax.hessian(u_fn) computes the
+        # full (5, 2, 2) tensor -- 20 entries -- for all 5 components
+        # including pressure, whose second derivatives are never used, and
+        # only the 2 diagonal entries of u/v/k/epsilon's 2x2 blocks are used
+        # out of 4 each (8 of 20 total).
+        #
+        # A per-component, diagonal-only replacement (identical in
+        # structure to underPINN/pde/navier_stokes.py's attempted fix, four
+        # components' worth of vjp+2xjvp here instead of two) *was* tried
+        # -- and, as an isolated forward residual call, measured faster.
+        # But wrapped in the outer jax.value_and_grad(loss)(params, ...) an
+        # actual training step needs, it measured 0.49x (~2x *slower*) at
+        # the K-Epsilon config (layers=[2,96,96,96,96,96,5], batch=2048) --
+        # the worst regression of the three files this happened to (see
+        # helmholtz.py and navier_stokes.py for the other two), consistent
+        # with backpropagating through *more* independently-traced
+        # nested vjp/jvp subgraphs (8 here, vs. helmholtz's 2 and
+        # navier_stokes's 4) costing correspondingly more. Reverted to
+        # jax.hessian for that reason -- see
+        # benchmarks/rebuttal/README.md section 6 for the full measurement.
+        H = jax.vmap(jax.hessian(u_fn))(x)
         u_xx, u_yy = H[:, 0, 0, 0], H[:, 0, 1, 1]
         v_xx, v_yy = H[:, 1, 0, 0], H[:, 1, 1, 1]
         k_xx, k_yy = H[:, 3, 0, 0], H[:, 3, 1, 1]

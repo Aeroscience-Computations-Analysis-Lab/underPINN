@@ -330,3 +330,84 @@ class CompressibleEulerPDE(BasePDE):
             "v2":       v2,
             "p2":       p2,
         }
+
+    # ------------------------------------------------------------------
+    # Prandtl-Meyer expansion-fan analytical solution
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _pm_nu(M: float, gamma: float) -> float:
+        """Prandtl-Meyer function ν(M) in radians, M >= 1.
+
+        ν(M) = sqrt((γ+1)/(γ-1)) atan(sqrt((γ-1)/(γ+1) (M²-1))) − atan(sqrt(M²-1))
+
+        Verified against standard textbook values (γ=1.4): ν(1)=0°,
+        ν(1.5)=11.91°, ν(2)=26.38°, ν(3)=49.76°, ν(M→∞)→130.45°.
+        """
+        if M <= 1.0:
+            return 0.0
+        a = math.sqrt((gamma + 1.0) / (gamma - 1.0))
+        m = math.sqrt(M * M - 1.0)
+        return a * math.atan(m / a) - math.atan(m)
+
+    @classmethod
+    def _pm_mach_from_nu(cls, nu_target: float, gamma: float,
+                         lo: float = 1.0, hi: float = 50.0,
+                         n_bisect: int = 100) -> float:
+        """Invert ν(M) = nu_target (radians) by bisection -- ν is monotonic
+        increasing in M for M >= 1, so this is well-posed."""
+        for _ in range(n_bisect):
+            mid = 0.5 * (lo + hi)
+            if cls._pm_nu(mid, gamma) < nu_target:
+                lo = mid
+            else:
+                hi = mid
+        return 0.5 * (lo + hi)
+
+    def prandtl_meyer_expansion(self, M1: float, rho1: float, u1: float,
+                                v1: float, p1: float, delta_deg: float):
+        """Post-expansion-fan state for a convex (flow-turning-away) corner.
+
+        An isentropic expansion fan: stagnation pressure/density are
+        conserved across it (unlike a shock), so the post-expansion state
+        follows from the Prandtl-Meyer angle shift ν(M2) = ν(M1) + Δθ and
+        the standard isentropic p0/p, ρ0/ρ relations.
+
+        Parameters
+        ----------
+        M1, rho1, u1, v1, p1 : upstream (pre-expansion) state; ``u1``/``v1``
+            give the upstream flow *direction* the deflection is measured
+            relative to.
+        delta_deg : flow deflection angle (degrees, > 0), i.e. how far the
+            wall (and hence the flow) turns *away* from itself at this
+            corner.
+
+        Returns
+        -------
+        dict with keys ``M2``, ``rho2``, ``u2``, ``v2``, ``p2`` -- the
+        downstream primitive state, with velocity rotated by
+        ``delta_deg`` relative to the upstream flow direction.
+        """
+        gamma = self.gamma
+        nu1 = self._pm_nu(M1, gamma)
+        nu2 = nu1 + math.radians(delta_deg)
+        M2 = self._pm_mach_from_nu(nu2, gamma)
+
+        def p0_over_p(M):
+            return (1.0 + 0.5 * (gamma - 1.0) * M * M) ** (gamma / (gamma - 1.0))
+
+        ratio = p0_over_p(M1) / p0_over_p(M2)      # = p2/p1 (shared p0)
+        p2 = p1 * ratio
+        rho2 = rho1 * ratio ** (1.0 / gamma)
+
+        a1 = math.sqrt(gamma * p1 / rho1)
+        V1 = math.sqrt(u1 * u1 + v1 * v1)
+        M1_check = V1 / a1                          # sanity, not used further
+        theta1 = math.atan2(v1, u1)                 # upstream flow angle
+        a2 = math.sqrt(gamma * p2 / rho2)
+        V2 = M2 * a2
+        theta2 = theta1 - math.radians(delta_deg)    # turns away from the wall
+        u2 = V2 * math.cos(theta2)
+        v2 = V2 * math.sin(theta2)
+
+        return {"M2": M2, "rho2": rho2, "u2": u2, "v2": v2, "p2": p2}

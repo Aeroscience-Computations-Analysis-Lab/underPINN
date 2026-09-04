@@ -63,14 +63,22 @@ class UnsteadyPipeFlowPDE(BasePDE):
         def u_single(yzt_i):
             return self.model.apply(params, yzt_i[None, :])[0, 0]
 
-        # J[n, k] = du/d(yzt_k)  →  indices 0,1,2 = y, z, t
-        J = jax.vmap(jax.jacfwd(u_single))(yzt)    # (N, 3)
-        # H[n, j, k] = d²u / (d(yzt_j) d(yzt_k))
-        H = jax.vmap(jax.hessian(u_single))(yzt)   # (N, 3, 3)
+        # Was: separate jax.jacfwd (3 fwd passes, only u_t used) and
+        # jax.hessian (full 3x3=9 entries, only u_yy/u_zz used) -- same
+        # redundancy profiled and fixed in underPINN/pde/burgers.py. One
+        # jax.vjp gives the full gradient (hence u_t) in a single reverse
+        # pass; two targeted jax.jvp calls (y-, z-direction tangents only,
+        # skipping the unused t-direction) give exactly u_yy and u_zz.
+        def per_point(yzt_i):
+            def grad_only(z):
+                return jax.vjp(u_single, z)[1](1.0)[0]
 
-        u_t  = J[:, 2]
-        u_yy = H[:, 0, 0]
-        u_zz = H[:, 1, 1]
+            grad_vec = grad_only(yzt_i)
+            _, jvp_y = jax.jvp(grad_only, (yzt_i,), (jnp.array([1.0, 0.0, 0.0]),))
+            _, jvp_z = jax.jvp(grad_only, (yzt_i,), (jnp.array([0.0, 1.0, 0.0]),))
+            return grad_vec[2], jvp_y[0], jvp_z[1]   # u_t, u_yy, u_zz
+
+        u_t, u_yy, u_zz = jax.vmap(per_point)(yzt)
         return u_t - nu * (u_yy + u_zz) - G
 
     def exact(self, yz, t_val: float, N_terms: int = 30):

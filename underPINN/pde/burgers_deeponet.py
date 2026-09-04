@@ -10,6 +10,7 @@ sample rather than being a training variable.
 from __future__ import annotations
 
 import jax
+import jax.numpy as jnp
 
 from underPINN.core.base import BasePDE
 
@@ -39,15 +40,23 @@ class DeepONetBurgersPDE(BasePDE):
         def s_of_xt(u_i, xt_i):
             return self.model.apply(params, u_i, xt_i)
 
-        def grad_single(u_i, xt_i):
-            return jax.jacfwd(lambda z: s_of_xt(u_i, z))(xt_i)
+        # Was: separate jax.jacfwd (both entries used, so no waste there)
+        # and jax.hessian (full 2x2, only s_xx used) plus a third separate
+        # forward pass for the value s -- same redundancy profiled and
+        # fixed in underPINN/pde/burgers.py, adapted to keep the DeepONet
+        # branch input u_i fixed (not differentiated) per sample.
+        def per_point(u_i, xt_i):
+            def scalar_fn(z):
+                return s_of_xt(u_i, z)
 
-        def hess_single(u_i, xt_i):
-            return jax.hessian(lambda z: s_of_xt(u_i, z))(xt_i)
+            s_val, vjp_fn = jax.vjp(scalar_fn, xt_i)
 
-        J = jax.vmap(grad_single)(u_batch, xt_batch)      # (batch, 2): [s_x, s_t]
-        H = jax.vmap(hess_single)(u_batch, xt_batch)      # (batch, 2, 2)
-        s = jax.vmap(s_of_xt)(u_batch, xt_batch)
+            def grad_only(z):
+                return jax.vjp(scalar_fn, z)[1](1.0)[0]
 
-        s_x, s_t, s_xx = J[:, 0], J[:, 1], H[:, 0, 0]
+            grad_vec = vjp_fn(1.0)[0]
+            _, jvp_out = jax.jvp(grad_only, (xt_i,), (jnp.array([1.0, 0.0]),))
+            return s_val, grad_vec[0], grad_vec[1], jvp_out[0]
+
+        s, s_x, s_t, s_xx = jax.vmap(per_point)(u_batch, xt_batch)
         return s_t + s * s_x - self.nu * s_xx
