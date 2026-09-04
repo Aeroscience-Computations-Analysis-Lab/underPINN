@@ -173,7 +173,12 @@ def train_gauss_newton(
     # wrap tracing, not just execution: JAX bakes the active precision into
     # the compiled HLO at trace time, so entering the context only around
     # each *call* to an already-traced jit function would be a no-op.
-    with jax.default_matmul_precision("highest"):
+    # "float32" (not the "highest" alias): jax.config's validator for
+    # jax_default_matmul_precision accepts only the canonical precision names
+    # ('bfloat16', 'tensorfloat32', 'float32') on the JAX versions this project
+    # supports (>=0.4.26) and rejects the 'highest'/'high'/'default' aliases
+    # with a ValueError. 'float32' *is* HIGHEST -- same semantics, portable.
+    with jax.default_matmul_precision("float32"):
         _jit_step = jax.jit(
             lambda fp, d: gauss_newton_step(flat_residual, fp, d))
         _jit_loss = jax.jit(lambda fp: 0.5 * jnp.sum(flat_residual(fp) ** 2))
