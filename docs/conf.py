@@ -13,8 +13,8 @@ sys.path.insert(0, os.path.abspath("../.."))
 project = "underPINN"
 copyright = "2026, Kumar Prashant, Senthilkumar Lohith, Ranjan Rajesh"
 author = "Kumar Prashant, Senthilkumar Lohith, Ranjan Rajesh"
-release = "v2605"
-version = "v2605"
+#release = "v2605"
+#version = "v2605"
 
 # -- General configuration ----------------------------------------------------
 
@@ -46,10 +46,10 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 # -- Options for HTML output ---------------------------------------------------
 
 html_theme = "sphinx_book_theme"
-html_title = "underPINN v2605"
+html_title = "underPINN"
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
-html_favicon = "_static/underpinn-logo.png"
+html_favicon = "underPINN-logo.png"
 
 html_context = {
     "default_mode": "dark",
@@ -72,8 +72,8 @@ html_theme_options = {
     "show_navbar_depth": 2,
     "logo": {
         "text": "underPINN",
-        "image_light": "_static/underpinn-logo-light-mode.png",  # Removed _static/
-        "image_dark": "_static/underpinn-logo-dark-mode.png",    # Removed _static/
+        "image_light": "underPINN-logo-light-mode.png",  
+        "image_dark": "underPINN-logo-dark-mode.png",    
     },
 }
 
