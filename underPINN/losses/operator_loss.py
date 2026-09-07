@@ -36,14 +36,30 @@ class OperatorLoss(BaseLoss):
     rba        : residual-based adaptivity — reweight the PDE term by each
                  point's relative residual magnitude (detached), matching
                  the RBA convention used by :class:`underPINN.losses.loss.PINNLoss`.
+    data_mask  : optional array, spatial shape only (no batch/channel dims),
+                 1 where a grid point counts toward the data loss and 0
+                 where it shouldn't (e.g. inside a solid obstacle). None
+                 (default): unmasked data loss, every existing example
+                 unaffected.
     """
 
     def __init__(self, predict_fn, pde, loss_type: str = "l2",
-                rba: bool = False, rba_eps: float = 1e-6):
+                rba: bool = False, rba_eps: float = 1e-6, data_mask=None):
         self.predict_fn = predict_fn
         self.pde = pde
         self.rba = rba
         self.rba_eps = rba_eps
+        # data_mask: optional array broadcastable against u_pred's spatial
+        # dims (shape (Nx,) for FNO1D, (Nx, Ny) for FNO2D/CViT), 1 where a
+        # grid point should count toward the data loss and 0 where it
+        # shouldn't (e.g. inside a solid obstacle the target is only zero by
+        # construction, not something the network should be scored against
+        # or pushed to represent -- a low-Fourier-mode FNO structurally
+        # cannot fit a sharp obstacle cutout via unmasked MSE, it can only
+        # smear it; see examples/operators/fno2d_cylinder). None (default):
+        # every existing FNO/CViT example is unaffected, unmasked data loss.
+        self.data_mask = data_mask
+        self._l1 = loss_type == "l1"
         if loss_type == "l2":
             self.norm = l2_loss
         elif loss_type == "l1":
@@ -66,7 +82,21 @@ class OperatorLoss(BaseLoss):
                       Defaults to ``x_input``.
         """
         u_pred = self.predict_fn(params, x_input if model_input is None else model_input)
-        data_loss = self.norm(u_pred - u_target)
+        diff = u_pred - u_target
+        if self.data_mask is not None:
+            # Broadcast the spatial mask over the leading batch dim and the
+            # trailing channel dim, then normalise by the actual number of
+            # unmasked (batch, spatial, channel) elements -- not the full
+            # array size -- so masked-out points contribute neither to the
+            # numerator nor inflate the denominator (matching a plain mean
+            # over just the valid points, not a mean-with-zeros).
+            mask_b = self.data_mask.reshape((1,) + self.data_mask.shape + (1,))
+            n_valid = (jnp.sum(self.data_mask) * u_pred.shape[0] * u_pred.shape[-1]
+                      + self.rba_eps)
+            elementwise = jnp.abs(diff) if self._l1 else diff ** 2
+            data_loss = jnp.sum(elementwise * mask_b) / n_valid
+        else:
+            data_loss = self.norm(diff)
 
         res = self.pde.residual_from_pred(x_input, u_pred)
         if self.rba:

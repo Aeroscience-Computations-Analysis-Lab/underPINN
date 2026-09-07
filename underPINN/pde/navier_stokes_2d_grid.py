@@ -34,11 +34,16 @@ class CylinderNSGrid(BasePDE):
 
     Model input layout
     -------------------
-    ``x_input``: ``(batch, Nx, Ny, 2*prev_steps + 1)`` — ``prev_steps``
+    ``x_input``: ``(batch, Nx, Ny, 2*prev_steps + 2)`` — ``prev_steps``
     history frames of ``(u, v)`` interleaved (``u_1, v_1, ..., u_k, v_k``),
-    followed by one constant Reynolds-number channel (read per-sample from
-    the input, so a single batch can mix trajectories at different Re —
-    exactly like the ``nu`` channel in :mod:`underPINN.pde.burgers_grid`).
+    then one constant Reynolds-number channel (read per-sample from the
+    input, so a single batch can mix trajectories at different Re — exactly
+    like the ``nu`` channel in :mod:`underPINN.pde.burgers_grid`), then one
+    fluid-mask channel (1 = fluid, 0 = solid). The mask channel is fed to
+    the network as well as used to build ``obstacle_mask`` below: an FNO's
+    low-mode spectral representation cannot sharply represent the obstacle
+    cutout from velocity history alone (it can only smear it), so the
+    network needs the geometry given directly, not inferred.
     """
 
     def __init__(self, model, dt: float, dx: float, dy: float,
@@ -59,9 +64,9 @@ class CylinderNSGrid(BasePDE):
         (see :meth:`underPINN.pde.burgers_grid.BurgersGrid1D.residual_from_pred`)."""
         u, v, p = out[..., 0], out[..., 1], out[..., 2]
 
-        u_prev = x_input[..., -3]
-        v_prev = x_input[..., -2]
-        Re = x_input[:, 0, 0, -1]
+        u_prev = x_input[..., -4]
+        v_prev = x_input[..., -3]
+        Re = x_input[:, 0, 0, -2]
 
         u_t = (u - u_prev) / (self.dt * self.pred_steps)
         v_t = (v - v_prev) / (self.dt * self.pred_steps)

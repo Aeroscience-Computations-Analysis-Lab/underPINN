@@ -50,12 +50,42 @@ from underPINN.postprocess.operators import plot_operator_loss, plot_prediction_
 from datagen import solve_cylinder_flow  # local to this example
 
 
-def _build_pairs(U, V, P, Re, prev_steps, pred_steps, pairs_per_traj, early_frac, seed):
-    """Interleaved (u, v) history + constant-Re channel -> (u, v, p) target,
-    matching the layout :class:`CylinderNSGrid` expects."""
+def _masked_predict(raw_apply, fluid_mask):
+    """Wrap ``model.apply`` so every prediction is hard-masked to exactly
+    zero inside the solid, at every call site (training, eval, plotting).
+
+    An FNO's spectral convolution keeps only a handful of Fourier modes
+    (``modes1=12, modes2=8`` here) -- fundamentally band-limited, so it
+    cannot represent a sharp circular obstacle cutout on its own; giving it
+    the mask as an input channel and masking the data/PDE loss (see
+    ``OperatorLoss``/``CylinderNSGrid``) stops it from being *penalized*
+    for smearing that region, but doesn't make its raw output any sharper.
+    Hard-masking the output deterministically imposes the known BC instead
+    of relying on the network to learn/represent it -- matching the
+    reference implementation's ``nxt = nxt * mask3`` re-imposition after
+    every rollout step (Github/flowPastCylinder/final_flow/rollout.py)."""
+    mask_b = fluid_mask.astype(jnp.float32)[None, :, :, None]   # (1,Nx,Ny,1)
+
+    def predict_fn(params, x_input):
+        return raw_apply(params, x_input) * mask_b
+    return predict_fn
+
+
+def _build_pairs(U, V, P, Re, fluid_mask, prev_steps, pred_steps,
+                 pairs_per_traj, early_frac, seed):
+    """Interleaved (u, v) history + constant-Re channel + fluid-mask channel
+    -> (u, v, p) target, matching the layout :class:`CylinderNSGrid` expects.
+
+    The mask channel (1=fluid, 0=solid, same geometry for every trajectory)
+    is fed to the network as well as used to mask the loss -- an FNO's
+    low-mode spectral representation cannot sharply resolve the obstacle
+    cutout from velocity history alone, it needs the geometry given
+    directly. See ``run_fno2d_cylinder``'s module docstring / the fix note
+    below for why this matters."""
     n_re, n_frames, Nx, Ny = U.shape
     last_start = max(int(early_frac * (n_frames - prev_steps - pred_steps)), 1)
     rng = np.random.default_rng(seed)
+    mask_chan = fluid_mask.astype(np.float32)[..., None]   # (Nx,Ny,1)
     inputs, targets = [], []
     for i in range(n_re):
         starts = rng.integers(0, last_start, size=pairs_per_traj)
@@ -66,7 +96,7 @@ def _build_pairs(U, V, P, Re, prev_steps, pred_steps, pairs_per_traj, early_frac
             uv_hist = np.stack([u_hist, v_hist], axis=-1)              # (prev,Nx,Ny,2)
             uv_hist = np.moveaxis(uv_hist, 0, -2).reshape(Nx, Ny, -1)    # (Nx,Ny,2*prev)
             re_chan = np.full((Nx, Ny, 1), Re[i], dtype=np.float32)
-            inp = np.concatenate([uv_hist, re_chan], axis=-1)
+            inp = np.concatenate([uv_hist, re_chan, mask_chan], axis=-1)
             tgt = np.stack([U[i, tgt_idx], V[i, tgt_idx], P[i, tgt_idx]], axis=-1)
             inputs.append(inp)
             targets.append(tgt)
@@ -112,13 +142,14 @@ def _make_data(data_cfg, physics_cfg, geom_cfg, seed: int):
 
     U_train, V_train, P_train, mask = _solve_all(Re_train)
     U_test, V_test, P_test, _ = _solve_all(Re_test)
+    fluid_mask = ~mask                                  # mask: True=solid
 
     x_train, y_train = _build_pairs(U_train, V_train, P_train, Re_train,
-                                    prev_steps, pred_steps, pairs_per_traj,
-                                    early_frac, seed)
+                                    fluid_mask, prev_steps, pred_steps,
+                                    pairs_per_traj, early_frac, seed)
     x_test, y_test = _build_pairs(U_test, V_test, P_test, Re_test,
-                                  prev_steps, pred_steps, pairs_per_traj,
-                                  early_frac, seed + 1)
+                                  fluid_mask, prev_steps, pred_steps,
+                                  pairs_per_traj, early_frac, seed + 1)
 
     dt = T / Nt
     dx = Lx / Nx
@@ -144,7 +175,13 @@ def run_fno2d_cylinder(cfg) -> dict:
 
     pde = CylinderNSGrid(model, dt=dt, dx=dx, dy=dy,
                          pred_steps=pred_steps, obstacle_mask=mask)
-    loss = OperatorLoss(model.apply, pde,
+    fluid_mask = ~mask
+    predict_fn = _masked_predict(model.apply, fluid_mask)
+    # data_mask=fluid_mask: the target is zero inside the solid by
+    # construction, not something the network should be scored against --
+    # an unmasked data loss forces the low-mode FNO to try to fit a sharp
+    # obstacle cutout it structurally cannot represent, smearing it instead.
+    loss = OperatorLoss(predict_fn, pde, data_mask=fluid_mask.astype(jnp.float32),
                         rba=bool(cfg_get(cfg.loss, "rba", default=False)))
 
     epochs = tr.epochs
@@ -170,7 +207,7 @@ def run_fno2d_cylinder(cfg) -> dict:
     )
     solver.train(x_train, y_train, config=tc)
 
-    u_pred_test = model.apply(solver.params, x_test)
+    u_pred_test = predict_fn(solver.params, x_test)
     rel_l2 = relative_l2_error(u_pred_test, y_test)
     print_errors(u_pred_test, y_test, label="Test set (u,v,p)")
 
