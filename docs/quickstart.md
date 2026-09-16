@@ -177,7 +177,7 @@ python examples/PINNs/burgers/burgers.py my_custom.yaml
 
 ```{admonition} What's next?
 :class: seealso
-- {doc}`examples` — browse all 22 worked physics examples
+- {doc}`examples` — browse all 27 worked physics examples
 - {doc}`training` — the full `TrainingConfig` field reference and callback system
 - {doc}`restart` — never lose progress to a killed job again
 ```

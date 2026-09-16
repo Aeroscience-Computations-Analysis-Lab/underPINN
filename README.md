@@ -807,7 +807,7 @@ examples/                  # self-contained: each folder holds script + YAML
 │   ├── toro3/             toro3.py + config.yaml                (Toro-3 blast wave, exp positivity + non-dim)
 │   ├── predict_steady.py                                        (post-process steady pipe/AAA: WSS, contours, NPZ)
 │   └── transfer/          burgers_transfer.py + yaml            (Burgers param + temp. TL)
-│                          heat2d_transfer.py  + yaml            (2-D heat transfer)
+│                          heat2d_transfer.py                    (2-D heat transfer; standalone, no YAML)
 └── operators/             # neural-operator (PINO / DeepONet / CViT) examples
     ├── fno1d_periodic/    + config.yaml                         (1-D periodic Burgers, FNO1D PINO)
     ├── fno1d_dirichlet/   + config.yaml                         (1-D Dirichlet Burgers, FNO1D PINO)
@@ -823,6 +823,17 @@ docs/
 ---
 
 ## Examples
+
+Examples are organised into two families, each self-contained (script + YAML per folder):
+
+- **`examples/PINNs/`** — collocation-based PINNs: one network fitted to one problem
+  instance, trained on the PDE residual at sampled points.
+- **`examples/operators/`** — neural operators (FNO / DeepONet / CViT): a mapping learned
+  across a *family* of problems, evaluated on a grid rather than at free collocation
+  points. See [Neural Operators](#neural-operators-pino--deeponet--cvit).
+
+Both are launched identically — `python -m underPINN run <config.yaml>` — since the CLI
+resolves a problem name to its script via `underPINN/runner/dispatch.py`.
 
 | Problem | PDE | Network | Key Features | Config |
 |---|---|---|---|---|
@@ -845,12 +856,13 @@ docs/
 | Cylinder Cross-flow | Steady N-S, Re=40 | MLP [2,128×6,3] | Pure-PINN recipe, Cp(θ) vs inviscid reference, wake pool | `examples/PINNs/cylinder/config.yaml` |
 | 3-D Pipe Flow | Steady 3-D N-S | MLP / GatedMLP [3,…,4] | Double-jacfwd Hessian, Hagen-Poiseuille exact | `examples/PINNs/pipe_flow/pipe_flow.yaml` |
 | 3-D AAA Bulge | Steady 3-D N-S | GatedMLP [3,192×5,4] | Cosine² bulge `R(x)`, flow-rate balance check | `examples/PINNs/AAA/config.yaml` |
+| 3-D Aneurysm (patient-specific) | Steady 3-D N-S, Re=40 | MLP [3,192×5,4] | Geometry built from STL surfaces at runtime (`STLVolumeGeometry`), parabolic inlet, mass-flow continuity plane | `examples/PINNs/Aneurysm/config.yaml` |
 | Carreau Pipe (blood) | Steady Carreau N-S | GatedMLP [3,128×4,4] | Shear-thinning μ(γ̇), 1-D Carreau exact profile, β=16; same domain/Re as Newtonian pipe | `examples/PINNs/pipe_flow_rheology/config.yaml` |
 | Carreau AAA (blood) | Steady Carreau N-S | GatedMLP [3,192×5,4] | Blood rheology in the bulge, apparent-viscosity maps | `examples/PINNs/AAA_rheology/config.yaml` |
 | 3-D Pulsatile Pipe | Unsteady 3-D N-S | GatedMLP [4,…,4] | **Time-marching transfer** (windowed), per-window ckpts, window restart | `examples/PINNs/pipe_flow/pipe_flow_pulsatile_transfer.yaml` |
 | 3-D Unsteady Pipe Transfer | u_t = G + ν∇²u | MLP [3,64,64,64,64,1] | Bessel exact solution, Re + temporal TL | `examples/PINNs/pipe_flow/pipe_flow_unsteady_transfer.yaml` |
 | Burgers Transfer | Burgers | MLP [2,64,64,64,1] | Parameter transfer (ν) + temporal transfer | `examples/PINNs/transfer/burgers_transfer.yaml` |
-| Heat 2-D Transfer | 2-D heat | MLP [3,64,64,64,1] | Cross-diffusivity transfer + temporal | `examples/PINNs/transfer/heat2d_transfer.yaml` |
+| Heat 2-D Transfer | 2-D heat | MLP [3,64,64,64,1] | Cross-diffusivity transfer + temporal; standalone script — no YAML, not CLI-dispatchable | `examples/PINNs/transfer/heat2d_transfer.py` |
 | FNO1D Periodic Burgers | Burgers (PINO, grid residual) | FNO1D | Generalizes across ν, `pde_weight` warmup | `examples/operators/fno1d_periodic/config.yaml` |
 | FNO1D Dirichlet Burgers | Burgers (PINO, grid residual) | FNO1D | Zero-wall BCs, FNO domain-padding trick | `examples/operators/fno1d_dirichlet/config.yaml` |
 | FNO2D Burgers | 2-D Burgers (PINO, grid residual) | FNO2D | Central/upwind stencil selectable | `examples/operators/fno2d_burgers/config.yaml` |

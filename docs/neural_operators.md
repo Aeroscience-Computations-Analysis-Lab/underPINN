@@ -127,5 +127,5 @@ data-fit loss term.
 
 ```{seealso}
 {doc}`pde_reference` for the full residual-class table and {doc}`examples` for the
-complete catalogue of 22 worked physics examples.
+complete catalogue of 27 worked physics examples.
 ```

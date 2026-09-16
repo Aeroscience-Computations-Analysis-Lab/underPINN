@@ -1,9 +1,31 @@
 # Physics Examples
 
-22 worked examples across 8 physics domains. Each example folder is **self-contained**:
-one script + one YAML config living side by side. Run directly
+27 worked examples. Each example folder is **self-contained**: one script + one YAML
+config living side by side. Run directly
 (`python examples/PINNs/burgers/burgers.py`) or via the {doc}`cli` — both save predictions,
 plots, and a `params.msgpack` checkpoint automatically.
+
+Examples are organised into two families:
+
+```{list-table}
+:header-rows: 1
+:widths: 26 74
+
+* - Folder
+  - What lives there
+* - `examples/PINNs/`
+  - **Collocation PINNs** (21 examples) — one network fitted to one problem instance,
+    trained on the PDE residual at sampled points. Everything on this page except the
+    last section.
+* - `examples/operators/`
+  - **Neural operators** (6 examples) — FNO / DeepONet / CViT: a mapping learned across a
+    *family* of problems, evaluated on a grid rather than at free collocation points.
+    See {doc}`neural_operators`.
+```
+
+Both families launch identically (`python -m underPINN run <config.yaml>`) — the CLI
+resolves a problem name to its script via `underPINN/runner/dispatch.py`, so the split is
+organisational, not behavioural.
 
 ## Core PINN examples
 
@@ -104,6 +126,12 @@ plots, and a `params.msgpack` checkpoint automatically.
   - GatedMLP `[3,192×5,4]`
   - Cosine² bulge `R(x)`, flow-rate balance
   - `examples/PINNs/AAA/config.yaml`
+* - 3-D Aneurysm (patient-specific)
+  - Steady 3-D N-S, Re=40
+  - MLP `[3,192×5,4]`
+  - Geometry from STL surfaces at runtime (`STLVolumeGeometry`), parabolic inlet,
+    mass-flow continuity plane
+  - `examples/PINNs/Aneurysm/config.yaml`
 * - Carreau Pipe (blood)
   - Steady Carreau N-S
   - GatedMLP `[3,128×4,4]`
@@ -176,8 +204,8 @@ plots, and a `params.msgpack` checkpoint automatically.
   - `examples/PINNs/transfer/burgers_transfer.yaml`
 * - Heat 2-D Transfer
   - MLP `[3,64,64,64,1]`
-  - Cross-diffusivity transfer + temporal
-  - `examples/PINNs/transfer/heat2d_transfer.yaml`
+  - Cross-diffusivity transfer + temporal; standalone script — no YAML, not CLI-dispatchable
+  - `examples/PINNs/transfer/heat2d_transfer.py`
 ```
 
 ## Neural operator examples

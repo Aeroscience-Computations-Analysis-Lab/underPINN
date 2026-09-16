@@ -38,7 +38,7 @@ Install underPINN and train your first PINN in five minutes.
 :::{grid-item-card} 🧪 Physics Examples
 :link: examples
 :link-type: doc
-22 worked examples across 8 physics domains, from ODEs to 3-D turbulence.
+27 worked examples, from ODEs and 3-D haemodynamics to compressible shocks and neural operators.
 :::
 
 :::{grid-item-card} ⚙️ Training System
