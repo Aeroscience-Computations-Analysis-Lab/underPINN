@@ -31,7 +31,7 @@ five -- only host-side scaffolding differs. Any timing spread is therefore
 attributable to dispatch/sync overhead alone.
 
 Run:
-    python benchmarks/rebuttal/parity/dispatch_parity.py --epochs 5000
+    python benchmarks/suite/parity/dispatch_parity.py --epochs 5000
 """
 from __future__ import annotations
 

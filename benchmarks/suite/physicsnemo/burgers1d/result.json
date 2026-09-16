@@ -1,0 +1,18 @@
+{
+  "framework": "nvidia-physicsnemo-sym",
+  "physicsnemo_sym_version": "2.4.0",
+  "problem": "burgers_1d",
+  "nu": 0.01,
+  "epochs": 5000,
+  "device": "cuda",
+  "device_name": "NVIDIA GB10",
+  "setup_s": 1.2837653351016343,
+  "train_s": 133.8633279351052,
+  "ms_per_epoch": 26.772665587021038,
+  "rel_l2_vs_cole_hopf": 0.3070654571056366,
+  "layers_hidden": 5,
+  "layer_size": 64,
+  "n_r": 20000,
+  "n_ic": 200,
+  "n_bc": 300
+}

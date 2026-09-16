@@ -1,0 +1,11 @@
+{
+  "framework": "nvidia-physicsnemo-sym",
+  "problem": "pipe_flow_3d",
+  "epochs": 70000,
+  "device": "cuda",
+  "setup_s": 1.4475234327837825,
+  "train_s": 1852.5408122949302,
+  "ms_per_epoch": 26.464868747070433,
+  "rel_l2_axial_velocity": 0.24143086373806,
+  "rel_l2_pressure": 0.4169410169124603
+}

@@ -1,0 +1,18 @@
+defaults:
+  - physicsnemo_default
+  - scheduler: tf_exponential_lr
+  - optimizer: adam
+  - loss: sum
+  - _self_
+
+scheduler:
+  decay_rate: 0.95
+  decay_steps: 500
+
+training:
+  max_steps: 5000
+  rec_results_freq: 100000
+  rec_constraint_freq: 100000
+  rec_validation_freq: 100000
+
+save_filetypes: "npz"

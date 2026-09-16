@@ -113,14 +113,66 @@ def section_ablations(res: dict) -> None:
         print(f"  {k:12s} {v['rel_l2']:11.4e} {rel:>9s} {v['eps_final']:13.6g}")
 
 
+def section_new_algorithms(res: dict) -> None:
+    print(f"\n{RULE}\n 4. New algorithms: QR-DEIM-R resampling, "
+          f"Gauss-Newton training\n{RULE}")
+
+    def _resample_table(result, key_label):
+        arms = {k: v for k, v in result["arms"].items() if "error" not in v}
+        base = arms.get("none", {}).get("rel_l2")
+        period = result.get("resample_period")
+        period_note = f", resample_period: {period}" if period else ""
+        print(f"  QR-DEIM-R vs RAD vs no resampling -- {key_label} "
+              f"({result['metric']}), epochs: {result['epochs']}{period_note}")
+        print(f"\n  {'strategy':10s} {'rel L2':>11s} {'vs none':>9s}")
+        print("  " + "-" * 74)
+        for k, v in arms.items():
+            rel = f"{base / v['rel_l2']:.2f}x" if base else "-"
+            print(f"  {k:10s} {v['rel_l2']:11.4e} {rel:>9s}")
+        if arms:
+            best = min(arms, key=lambda k: arms[k]["rel_l2"])
+            print(f"  best on this run: '{best}'")
+
+    q = res.get("ablation_qr_deim_toro3")
+    if not q:
+        print("  MISSING -- run ablations/ablate_qr_deim.py")
+    else:
+        _resample_table(q, "1-D Toro-3 blast wave")
+
+    r = res.get("ablation_qr_deim_ramp_ns")
+    print()
+    if not r:
+        print("  MISSING -- run ablations/ablate_qr_deim_ramp_ns.py")
+    else:
+        _resample_table(r, "2-D Ramp NS SBLI (the paper's flagship RAR-D case)")
+
+    n = res.get("ablation_natural_gradient_ode_harmonic")
+    print()
+    if not n:
+        print("  MISSING -- run ablations/ablate_natural_gradient.py")
+        return
+    methods = {k: v for k, v in n["methods"].items() if "error" not in v}
+    print(f"  Gauss-Newton vs Adam ({n['metric']}), epochs: {n['epochs']}")
+    print(f"\n  {'method':13s} {'wall_s':>9s} {'rel L2':>11s}")
+    print("  " + "-" * 74)
+    for k, v in methods.items():
+        print(f"  {k:13s} {v['wall_s']:9.3f} {v['rel_l2']:11.4e}")
+    if "adam" in methods and "gauss_newton" in methods:
+        acc = methods["adam"]["rel_l2"] / methods["gauss_newton"]["rel_l2"]
+        wall = methods["gauss_newton"]["wall_s"] / methods["adam"]["wall_s"]
+        print(f"\n  => at a matched epoch budget, Gauss-Newton is {acc:.1f}x "
+              f"more accurate but {wall:.1f}x slower on wall-clock.")
+
+
 def main() -> int:
     res = load_results()
     if not res:
-        print("No results found. Run: bash benchmarks/rebuttal/run_all.sh")
+        print("No results found. Run: bash benchmarks/suite/run_all.sh")
         return 1
     section_parity(res)
     section_baselines(res)
     section_ablations(res)
+    section_new_algorithms(res)
     print(f"\n{RULE}")
     cpu = [k for k, v in res.items()
            if "cpu" in str(v.get("device", v.get("devices", ""))).lower()]

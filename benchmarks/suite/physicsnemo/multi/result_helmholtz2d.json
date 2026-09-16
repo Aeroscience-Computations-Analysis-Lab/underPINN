@@ -1,0 +1,10 @@
+{
+  "framework": "nvidia-physicsnemo-sym",
+  "problem": "helmholtz_2d",
+  "epochs": 10000,
+  "device": "cuda",
+  "setup_s": 0.7979698241688311,
+  "train_s": 55.112808167003095,
+  "ms_per_epoch": 5.511280816700309,
+  "rel_l2": 1.0804878960843631
+}

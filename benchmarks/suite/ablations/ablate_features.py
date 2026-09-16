@@ -22,8 +22,8 @@ fbpinn             FBPINN domain decomposition claim
 mlp_rba            baseline + residual-based adaptivity (RBA) claim
 
 Run:
-    python benchmarks/rebuttal/ablations/ablate_features.py --epochs 5000
-    python benchmarks/rebuttal/ablations/ablate_features.py --arms mlp fbpinn
+    python benchmarks/suite/ablations/ablate_features.py --epochs 5000
+    python benchmarks/suite/ablations/ablate_features.py --arms mlp fbpinn
 """
 from __future__ import annotations
 

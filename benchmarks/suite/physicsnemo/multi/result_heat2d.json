@@ -1,0 +1,10 @@
+{
+  "framework": "nvidia-physicsnemo-sym",
+  "problem": "heat_2d",
+  "epochs": 5000,
+  "device": "cuda",
+  "setup_s": 0.7392810699529946,
+  "train_s": 29.11016337503679,
+  "ms_per_epoch": 5.8220326750073585,
+  "rel_l2": 0.014946780020105594
+}

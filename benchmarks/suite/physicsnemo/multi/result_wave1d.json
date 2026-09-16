@@ -1,0 +1,10 @@
+{
+  "framework": "nvidia-physicsnemo-sym",
+  "problem": "wave_1d",
+  "epochs": 5000,
+  "device": "cuda",
+  "setup_s": 1.6116735860705376,
+  "train_s": 29.880479022860527,
+  "ms_per_epoch": 5.976095804572106,
+  "rel_l2": 0.40175147603000444
+}

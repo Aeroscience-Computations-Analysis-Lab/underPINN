@@ -18,7 +18,7 @@ reported so it can be compared against the hand-picked 0.001, which tells the
 reader whether the tuning the feature automates was worth automating.
 
 Run:
-    python benchmarks/rebuttal/ablations/ablate_artificial_viscosity.py --epochs 20000
+    python benchmarks/suite/ablations/ablate_artificial_viscosity.py --epochs 20000
 """
 from __future__ import annotations
 

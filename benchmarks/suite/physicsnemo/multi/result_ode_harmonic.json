@@ -1,0 +1,10 @@
+{
+  "framework": "nvidia-physicsnemo-sym",
+  "problem": "ode_harmonic",
+  "epochs": 3000,
+  "device": "cuda",
+  "setup_s": 1.9302006450016052,
+  "train_s": 20.114938436076045,
+  "ms_per_epoch": 6.704979478692015,
+  "rel_l2": 0.04271141093919155
+}

@@ -2,26 +2,31 @@
 
 A reviewer noted that comparing only against eager-mode PyTorch is a weak
 baseline, since PyTorch also ships graph-capture backends that close much of
-the dispatch gap. This script therefore measures five implementations of the
+the dispatch gap. This script therefore measures six implementations of the
 identical problem:
 
-  torch_eager      plain eager PyTorch (the weak baseline)
-  torch_script     torch.jit.script  -- TorchScript graph capture
-  torch_compile    torch.compile(mode="max-autotune") -- TorchInductor
-  jax_jit          underPINN's default: one jax.jit step per epoch
-  jax_scan         underPINN's optional fully-fused jax.lax.scan path
+  torch_eager          plain eager PyTorch, classic autograd.grad formulation
+  torch_script         torch.jit.script on the same formulation
+  torch_func_eager     torch.func (jacrev/hessian/vmap) formulation, eager
+  torch_func_compile   the same, wrapped in torch.compile
+  jax_jit              underPINN's default: one jax.jit step per epoch
+  jax_scan             underPINN's optional fully-fused jax.lax.scan path
 
-All five use the same architecture ([2,64,64,64,64,64,1] tanh), the same
+All six use the same architecture ([2,64,64,64,64,64,1] tanh), the same
 collocation counts (N_r=20000, N_ic=200, N_bc=300), the same loss weighting
 (pde + 100*ic + 10*bc), the same Adam(1e-3) with cosine decay, and the same
 derivative technique -- JAX via jacfwd/hessian exactly as BurgersPDE.residual
-does, PyTorch via the equivalent autograd.grad "sum trick" double-backward.
+does, PyTorch via the equivalent autograd.grad "sum trick" double-backward
+(torch_eager/torch_script) or torch.func jacrev/hessian/vmap (torch_func_*).
 
-Compile-bearing variants report a first (trace+compile) and second
-(steady-state) run so one-time cost is never hidden in the headline number.
+torch.compile is attempted on its default ('inductor') backend first;
+torch_func_compile falls back to 'aot_eager' if inductor's generated backward
+kernel hits a ZeroTensor-immutability codegen bug (verified reproducible,
+independent of this script -- see the comment in run_torch_func), and records
+which backend the reported number actually came from.
 
 Run:
-    python benchmarks/rebuttal/baselines/burgers_baselines.py --epochs 5000
+    python benchmarks/suite/baselines/burgers_baselines.py --epochs 5000
 """
 from __future__ import annotations
 
@@ -36,8 +41,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(_HERE))))
 
 import numpy as np                                                # noqa: E402
 
-from common import (base_parser, jax_device_info, save_result,     # noqa: E402
-                    timed, torch_device_info, torch_sync, warn_if_cpu)
+from common import (base_parser, ensure_host_cc, jax_device_info,  # noqa: E402
+                    save_result, timed, torch_device_info,
+                    torch_sync, warn_if_cpu)
 
 NU = 0.01
 T_MAX = 1.5
@@ -176,8 +182,6 @@ def run_torch_func(compiled: bool, epochs: int, seed: int, device, data):
                 + W_IC * torch.mean((u_batch(p, XI) - UI) ** 2)
                 + W_BC * torch.mean(u_batch(p, XB) ** 2))
 
-    loss_fn = torch.compile(total_loss) if compiled else total_loss
-
     tt = lambda a: torch.tensor(a, device=device)          # noqa: E731
     XR = torch.stack([tt(x_r), tt(t_r)], dim=1)
     XI = torch.stack([tt(x_ic), torch.zeros_like(tt(x_ic))], dim=1)
@@ -188,15 +192,45 @@ def run_torch_func(compiled: bool, epochs: int, seed: int, device, data):
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(
         opt, T_max=epochs, eta_min=LR * 1e-2)
 
-    def one_epoch():
-        opt.zero_grad(set_to_none=True)
-        loss = loss_fn(dict(net.named_parameters()), XR, XI, UI, XB)
-        loss.backward()
-        opt.step()
-        sched.step()
-        return loss
+    def make_one_epoch(loss_fn):
+        def one_epoch():
+            opt.zero_grad(set_to_none=True)
+            loss = loss_fn(dict(net.named_parameters()), XR, XI, UI, XB)
+            loss.backward()
+            opt.step()
+            sched.step()
+            return loss
+        return one_epoch
 
-    one_epoch()                       # warm up / trigger compilation, untimed
+    backend_used = "eager"
+    if not compiled:
+        one_epoch = make_one_epoch(total_loss)
+        one_epoch()                   # warm up, untimed
+    else:
+        # The default 'inductor' backend hits a reproducible Inductor codegen
+        # bug on this vmap(jacrev)+vmap(hessian) composition -- its generated
+        # backward-pass kernel tries to write into an autograd "ZeroTensor"
+        # placeholder in-place ("ZeroTensors are immutable. Please use the
+        # materialized zero tensor obtained using .clone() ..."), verified
+        # reproducible in isolation, independent of this script. 'aot_eager'
+        # sidesteps Inductor codegen (AOTAutograd graph capture only) and
+        # actually runs; we fall back to it and record which backend the
+        # reported number came from, rather than silently downgrading.
+        for backend in ("inductor", "aot_eager"):
+            loss_fn = torch.compile(total_loss, backend=backend)
+            one_epoch = make_one_epoch(loss_fn)
+            try:
+                one_epoch()            # warm up / trigger compilation, untimed
+                torch_sync(device)
+                backend_used = backend
+                break
+            except RuntimeError as e:
+                print(f"    torch.compile backend={backend!r} failed: "
+                      f"{type(e).__name__}: {e}".splitlines()[0])
+                opt.zero_grad(set_to_none=True)   # discard the failed step
+                if backend == "aot_eager":
+                    raise
+
     torch_sync(device)
     losses: list = []
     _, wall = timed(lambda: [losses.append(one_epoch()) for _ in range(epochs)])
@@ -204,6 +238,7 @@ def run_torch_func(compiled: bool, epochs: int, seed: int, device, data):
     del params
     return {"wall_s": wall, "ms_per_epoch": 1e3 * wall / epochs,
             "final_loss": float(losses[-1].detach()),
+            "compile_backend": backend_used,
             "formulation": "torch.func jacrev/hessian/vmap"
                            + (" + torch.compile" if compiled else "")}
 
@@ -334,6 +369,7 @@ def main() -> int:
         ("torch_func_compile", lambda *a: run_torch_func(True, *a)),
     ]
     if any(n not in args.skip for n, _ in torch_variants):
+        ensure_host_cc()      # torch_func_compile needs a working host CC/CXX
         device, tinfo = torch_device_info(require_gpu)
         warn_if_cpu(tinfo)
         devices["torch"] = tinfo
@@ -346,8 +382,10 @@ def main() -> int:
             try:
                 r = fn(args.epochs, args.seed, device, data)
                 results[name] = r
+                backend_note = (f"  backend={r['compile_backend']}"
+                                if "compile_backend" in r else "")
                 print(f"    {r['wall_s']:8.2f}s  {r['ms_per_epoch']:7.3f} ms/ep"
-                      f"  final_loss={r['final_loss']:.4e}")
+                      f"  final_loss={r['final_loss']:.4e}{backend_note}")
             except Exception as e:
                 print(f"    FAILED: {type(e).__name__}: {e}")
                 results[name] = {"error": f"{type(e).__name__}: {e}"}
@@ -422,7 +460,7 @@ def main() -> int:
           "unsupported); the compiled PyTorch baseline\nabove therefore uses "
           "torch.func, PyTorch's analogue of JAX's jacfwd/hessian.")
 
-    save_result("baselines_burgers", {
+    save_result(f"baselines_burgers_seed{args.seed}", {
         "problem": "burgers_1d", "epochs": args.epochs, "seed": args.seed,
         "devices": devices, "variants": results,
     })

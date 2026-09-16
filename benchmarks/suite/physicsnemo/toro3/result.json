@@ -1,0 +1,19 @@
+{
+  "framework": "nvidia-physicsnemo-sym",
+  "physicsnemo_sym_version": "2.4.0",
+  "problem": "toro3_blast_wave",
+  "gamma": 1.4,
+  "art_visc": 0.001,
+  "epochs": 5000,
+  "device": "cuda",
+  "device_name": "NVIDIA GB10",
+  "setup_s": 0.941643875092268,
+  "train_s": 96.8461890341714,
+  "ms_per_epoch": 19.36923780683428,
+  "rel_l2": 0.6435190439224243,
+  "layers_hidden": 5,
+  "layer_size": 128,
+  "batch_r": 2048,
+  "batch_ic": 400,
+  "batch_bc_per_side": 300
+}

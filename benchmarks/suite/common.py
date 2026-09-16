@@ -1,6 +1,6 @@
 """Shared helpers for the reviewer-response benchmark suite.
 
-Everything here exists to make the numbers in ``benchmarks/rebuttal`` auditable:
+Everything here exists to make the numbers in ``benchmarks/suite`` auditable:
 device provenance is recorded in every result file, compile time is always
 reported separately from steady-state time, and a run that silently fell back
 to CPU can never be mistaken for a GPU measurement.
@@ -61,6 +61,43 @@ def torch_sync(device) -> None:
     import torch
     if device.type == "cuda":
         torch.cuda.synchronize()
+
+
+def ensure_host_cc() -> None:
+    """Repair a broken ``CC``/``CXX`` before any ``torch.compile`` call.
+
+    On HPC systems that load a compiler toolchain via an environment-modules
+    system (e.g. NVIDIA HPC SDK's ``nvhpc`` module), ``CC``/``CXX`` are often
+    exported globally to that toolchain's ``nvc``/``nvc++``. If the module was
+    unloaded, the filesystem it points into isn't mounted here, or the module
+    load was otherwise stale, Triton (which torch.compile/Inductor uses to
+    generate and link host-side wrapper code) fails opaquely deep inside
+    Inductor -- e.g. ``FileNotFoundError: .../nvc`` -- with no indication the
+    root cause is an environment variable rather than a torch/Triton bug. A
+    JAX-only run never touches this path, so this only matters for the
+    PyTorch baselines.
+
+    We only intervene when the *current* CC/CXX point at a file that does not
+    exist -- a working, deliberately-chosen toolchain (nvc++ included, if it
+    is actually present) is left alone.
+    """
+    import os
+    import shutil
+
+    for var, candidates in (("CC", ("cc", "gcc", "clang")),
+                            ("CXX", ("c++", "g++", "clang++"))):
+        current = os.environ.get(var)
+        if current and os.path.isfile(current):
+            continue          # already valid (or a deliberately-set, real path)
+        for name in candidates:
+            found = shutil.which(name)
+            if found:
+                if current:
+                    print(f"NOTE: ${var}={current!r} does not exist on this "
+                          f"host; falling back to {found} so torch.compile's "
+                          f"Triton backend has a working host compiler.")
+                os.environ[var] = found
+                break
 
 
 # ── timing ────────────────────────────────────────────────────────────────────
@@ -124,6 +161,46 @@ def load_results(prefix: str = "") -> dict[str, dict]:
             with open(os.path.join(RESULTS_DIR, fn)) as fh:
                 out[fn[:-5]] = json.load(fh)
     return out
+
+
+def save_raw_arrays(name: str, rows: dict) -> str:
+    """Write every ``_``-prefixed array field of a ``{arm: {key: value}}``
+    results dict to ``results/<name>_raw.npz``, so a plotting function that
+    needs them (e.g. ``plot_migration``/``plot_solutions`` in the
+    ``ablate_qr_deim*.py`` scripts) can be rerun later from the saved file
+    instead of retraining -- ``save_result`` alone strips these (they can be
+    tens of MB across a handful of arms) before the human-readable JSON.
+
+    Flattened as ``"<arm>::<key>"`` -> array, one npz. Companion to
+    :func:`load_raw_arrays`.
+    """
+    import numpy as np
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+    flat = {}
+    for arm, r in rows.items():
+        if "error" in r:
+            continue
+        for k, v in r.items():
+            if k.startswith("_"):
+                flat[f"{arm}::{k}"] = np.asarray(v)
+    path = os.path.join(RESULTS_DIR, f"{name}_raw.npz")
+    np.savez_compressed(path, **flat)
+    print(f"Raw plotting arrays saved -> {path} "
+         f"({os.path.getsize(path) / 1e6:.1f} MB)")
+    return path
+
+
+def load_raw_arrays(name: str) -> dict:
+    """Inverse of :func:`save_raw_arrays`: reconstruct the
+    ``{arm: {key: array}}`` nesting from ``results/<name>_raw.npz``."""
+    import numpy as np
+    path = os.path.join(RESULTS_DIR, f"{name}_raw.npz")
+    rows: dict = {}
+    with np.load(path) as data:
+        for flat_key in data.files:
+            arm, key = flat_key.split("::", 1)
+            rows.setdefault(arm, {})[key] = data[flat_key]
+    return rows
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
