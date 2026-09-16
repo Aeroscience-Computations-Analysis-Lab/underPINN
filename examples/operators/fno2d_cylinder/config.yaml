@@ -2,8 +2,8 @@ problem: fno2d_cylinder
 
 network:
   type              : fno2d
-  modes1            : 12
-  modes2            : 8
+  modes1            : 24    # Nx=Ny=128 now (square domain); Nyquist=64
+  modes2            : 24
   width             : 32
   depth             : 4
   channels_last_proj: 128
@@ -11,22 +11,50 @@ network:
   padding           : 0
 
 physics:
-  Re_lo : 40.0
-  Re_hi : 150.0
+  # Superseded history: Re=40-150 (original) barely sheds at all in this
+  # solver's confined channel (effective critical Re ~140-150, vs textbook
+  # unbounded ~47). Re=148-170 sheds but invisibly small-amplitude. Re=220-
+  # 290 in the Lx=32/no-slip-wall channel sheds with a real, visible
+  # amplitude -- all superseded now by fixing the actual root cause below.
+  #
+  # Root cause (cross-validated against Github/flowPastCylinder/final_flow,
+  # run unmodified at its own config): that reference sheds cleanly and
+  # dramatically at plain Re=100 in an OPEN domain with SLIP top/bottom
+  # walls (v=0, du/dy=0). Our previous no-slip channel walls added both a
+  # real viscous boundary layer and 25%-blockage confinement, both of which
+  # raise the effective critical Re well past textbook. Switching our own
+  # solver's walls to slip (datagen.py) and adopting the reference's small
+  # domain (see geometry below) fixes this at the source: verified directly
+  # in OUR solver (different discretization from theirs, not assumed to
+  # transfer) that Re=100 now saturates into a real limit cycle (windowed
+  # std plateaus at ~0.14, no further trend, over 9 consecutive 10-unit
+  # windows from t=130 to t=220).
+  Re_lo : 90.0
+  Re_hi : 120.0
   U_in  : 1.0
   radius: 0.5
 
 geometry:
+  # Reference domain (xmin=-2,xmax=6,ymin=-4,ymax=4, cylinder at x=0,y=0)
+  # remapped to our 0-based convention: Lx=xmax-xmin, Ly=ymax-ymin,
+  # cx=0-xmin, cy=0-ymin. Much smaller than the previous Lx=32/Ly=4 channel
+  # -- an open box around the cylinder rather than a long confined channel,
+  # matching the reference's approach now that walls are slip (see
+  # datagen.py's apply_bc) rather than no-slip.
   Lx: 8.0
-  Ly: 4.0
+  Ly: 8.0
   cx: 2.0
-  cy: 2.0
+  cy: 4.0
 
 data:
-  Nx            : 64
-  Ny            : 32
-  Nt            : 400
-  T             : 4.0
+  Nx            : 128   # matches the reference's resolution (dx=dy=0.0625)
+  Ny            : 128
+  Nt            : 18000  # dt=0.01 (same CFL margin as before). T=180: the
+                         # windowed-std plateau was confirmed to establish
+                         # by t~130 and hold steady through t=220 -- 180
+                         # gives real margin past onset without the extra
+                         # ~40 units of already-confirmed-flat plateau.
+  T             : 180.0
   n_train_re    : 6
   n_test_re     : 2
   prev_steps    : 2
@@ -42,13 +70,23 @@ loss:
   rba              : false
 
 training:
-  epochs            : 400
+  epochs            : 2000
   lr                : 1.0e-3
   lr_alpha          : 0.01
   batch_size        : 16
   log_every         : 50
   seed              : 0
   save_restart_every: 0
+  n_scan_steps      : 100  # fuses 100 epochs into one lax.scan-compiled XLA
+                           # kernel instead of one Python->XLA dispatch per
+                           # epoch. Without this (the default is 1), the
+                           # Python-loop path calls float(loss)/float(dl)/
+                           # float(pl) every single epoch (see
+                           # underPINN/solver/operator.py), each one a GPU->
+                           # host sync barrier -- measured directly on this
+                           # example: GPU-Util fluctuated in a 64-85% band
+                           # during training (nvidia-smi trace) from that
+                           # per-epoch dispatch/sync overhead.
 
 output:
   dir        : outputs/fno2d_cylinder
