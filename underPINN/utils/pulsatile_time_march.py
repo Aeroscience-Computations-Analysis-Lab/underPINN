@@ -2,10 +2,10 @@
 
 Used by:
 
-* ``examples/pipe_flow/pipe_flow_pulsatile_transfer.py``     — Newtonian pipe
-* ``examples/AAA/AAA_pulsatile_transfer.py``                 — Newtonian AAA
-* ``examples/pipe_flow_rheology/pipe_flow_rheology_pulsatile.py`` — Carreau pipe
-* ``examples/AAA_rheology/AAA_rheology_pulsatile.py``        — Carreau AAA
+* ``examples/PINNs/pipe_flow/pipe_flow_pulsatile_transfer.py``     — Newtonian pipe
+* ``examples/PINNs/AAA/AAA_pulsatile_transfer.py``                 — Newtonian AAA
+* ``examples/PINNs/pipe_flow_rheology/pipe_flow_rheology_pulsatile.py`` — Carreau pipe
+* ``examples/PINNs/AAA_rheology/AAA_rheology_pulsatile.py``        — Carreau AAA
 
 Each case provides a ``problem_spec`` dict with:
 

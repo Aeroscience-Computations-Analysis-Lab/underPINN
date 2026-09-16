@@ -80,10 +80,10 @@ params = load_checkpoint(model, "my_dir/")
 ```bash
 # Steady pipe & AAA (Newtonian or Carreau) — axial-plane u contour + streamlines,
 # pressure contour & line plots, wall shear stress, and an NPZ of the solution
-python examples/predict_steady.py outputs/pipe_flow
-python examples/predict_steady.py outputs/AAA_rheology
+python examples/PINNs/predict_steady.py outputs/pipe_flow
+python examples/PINNs/predict_steady.py outputs/AAA_rheology
 
 # Pulsatile pipe (time-marching) — point queries, snapshot/spacetime plots, GIF
-python examples/pipe_flow/predict_pulsatile.py outputs/pipe_flow_pulsatile_transfer --t 2.7 --plot
-python examples/pipe_flow/predict_pulsatile.py outputs/pipe_flow_pulsatile_transfer --spacetime --animate
+python examples/PINNs/pipe_flow/predict_pulsatile.py outputs/pipe_flow_pulsatile_transfer --t 2.7 --plot
+python examples/PINNs/pipe_flow/predict_pulsatile.py outputs/pipe_flow_pulsatile_transfer --spacetime --animate
 ```

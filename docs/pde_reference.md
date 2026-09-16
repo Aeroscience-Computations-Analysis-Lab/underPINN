@@ -15,67 +15,67 @@ its governing equation, and the examples that use it.
 * - Burgers (1-D)
   - `u_t + uu_x = νu_xx`
   - `BurgersPDE.residual`
-  - `examples/burgers/`, `examples/transfer/`
+  - `examples/PINNs/burgers/`, `examples/PINNs/transfer/`
 * - Diffusion / Heat (1-D)
   - `u_t = αu_xx`
   - `DiffusionPDE.residual`
-  - `examples/heat/`
+  - `examples/PINNs/heat/`
 * - Heat (2-D unsteady)
   - `u_t = α(u_xx + u_yy)`
   - `Heat2DPDE.residual`
-  - `examples/inverse/`, `examples/transfer/`
+  - `examples/PINNs/inverse/`, `examples/PINNs/transfer/`
 * - Wave (1-D)
   - `u_tt = c²u_xx`
   - `WavePDE.residual`
-  - `examples/wave/`
+  - `examples/PINNs/wave/`
 * - Helmholtz (2-D)
   - `Δu + k²u = f`
   - `HelmholtzPDE.residual`
-  - `examples/helmholtz/`
+  - `examples/PINNs/helmholtz/`
 * - Navier-Stokes (2-D steady)
   - `∇·u=0`, `u·∇u = -∇p + ν∇²u`
   - `NavierStokesPDE.residual`
-  - `examples/LDC/`, `examples/airfoil/`, `examples/cylinder/`
+  - `examples/PINNs/LDC/`, `examples/PINNs/airfoil/`, `examples/PINNs/cylinder/`
 * - Navier-Stokes (3-D steady)
   - Same + z-momentum
   - `SteadyNS3DPDE.residual`
-  - `examples/pipe_flow/`, `examples/AAA/`
+  - `examples/PINNs/pipe_flow/`, `examples/PINNs/AAA/`
 * - Navier-Stokes (3-D unsteady)
   - `u_t + (u·∇)u = −∇p + ν∇²u`
   - `UnsteadyNS3DPDE.residual`
-  - `examples/pipe_flow/` (pulsatile)
+  - `examples/PINNs/pipe_flow/` (pulsatile)
 * - Carreau N-S (3-D steady)
   - `∇·[μ*(γ̇)(∇u+∇uᵀ)]` stress
   - `CarreauNS3DPDE.residual`
-  - `examples/pipe_flow_rheology/`, `examples/AAA_rheology/`
+  - `examples/PINNs/pipe_flow_rheology/`, `examples/PINNs/AAA_rheology/`
 * - Pipe unsteady
   - `u_t = G + ν(u_yy + u_zz)`
   - `PipeUnsteadyPDE.residual`
-  - `examples/pipe_flow/`
+  - `examples/PINNs/pipe_flow/`
 * - RANS k-ε
   - N-S + `k` + `ε` transport
   - `KEpsilonPDE.residual`
-  - `examples/K-Epsilon/`
+  - `examples/PINNs/K-Epsilon/`
 * - Compressible Euler (2-D steady)
   - `∂F/∂x + ∂G/∂y = ε∇²U` (conservative)
   - `CompressibleEulerPDE.residual`
-  - `examples/ramp/`
+  - `examples/PINNs/ramp/`
 * - Compressible Navier–Stokes (2-D steady)
   - `∂x(F−Fv/Re) + ∂y(G−Gv/Re) = 0`
   - `CompressibleNS2DPDE.residual`
-  - `examples/ramp_ns/`
+  - `examples/PINNs/ramp_ns/`
 * - Compressible Euler (1-D unsteady)
   - `∂U/∂t + ∂F/∂x = ε∂²U/∂x²`
   - `Euler1DUnsteadyPDE.residual`
-  - `examples/sod_shock/`
+  - `examples/PINNs/sod_shock/`
 * - Exponential Decay
   - `du/dt + λu = 0`
   - `ExpDecayODE.residual`
-  - `examples/ode/`
+  - `examples/PINNs/ode/`
 * - Harmonic Oscillator
   - `d²u/dt² + ω²u = 0`
   - `HarmonicODE.residual`
-  - `examples/ode/`
+  - `examples/PINNs/ode/`
 * - Burgers grid (1-D, FNO)
   - `u_t + uu_x = νu_xx` (FD residual)
   - `BurgersGrid1D.residual`

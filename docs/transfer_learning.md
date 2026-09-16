@@ -37,8 +37,8 @@ solver_phase2.load_params(solver_phase1.params)
 solver_phase2.train(*data_t2, config=cfg_phase2)
 ```
 
-Both modes are demonstrated in `examples/transfer/burgers_transfer.py` and
-`examples/pipe_flow/pipe_flow_unsteady_transfer.py`.
+Both modes are demonstrated in `examples/PINNs/transfer/burgers_transfer.py` and
+`examples/PINNs/pipe_flow/pipe_flow_unsteady_transfer.py`.
 
 ## Time-marching transfer (windowed, long-horizon unsteady flows)
 
@@ -52,7 +52,7 @@ pulsatile pipe flow** case, for instance — underPINN splits the horizon into w
   (not just the epoch level) — see {doc}`restart`
 
 ```bash
-python -m underPINN run examples/pipe_flow/pipe_flow_pulsatile_transfer.yaml
+python -m underPINN run examples/PINNs/pipe_flow/pipe_flow_pulsatile_transfer.yaml
 ```
 
 ```{admonition} Why window instead of training end-to-end?

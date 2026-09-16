@@ -1042,7 +1042,7 @@ class PipeFlowEvaluator(BaseBenchmarkEvaluator):
 class RampEvaluator(BaseBenchmarkEvaluator):
     """Steady compressible Euler flow over a wedge; exact oblique-shock state.
 
-    Mirrors ``examples/ramp/ramp.py`` (M∞=3, θ=10°, γ=1.4) but with a smaller
+    Mirrors ``examples/PINNs/ramp/ramp.py`` (M∞=3, θ=10°, γ=1.4) but with a smaller
     network and collocation pool for benchmark-scale epoch budgets.  The
     reference field is the analytic piecewise-constant oblique-shock solution:
     freestream above the shock line, the exact post-shock state below it.
@@ -1082,7 +1082,7 @@ class RampEvaluator(BaseBenchmarkEvaluator):
                                 optax.scale_by_schedule(lr_sched),
                                 optax.scale(-1.0))
         state = optimizer.init(params)
-        # Loss weights match examples/ramp/config.yaml exactly.
+        # Loss weights match examples/PINNs/ramp/config.yaml exactly.
         W_PDE, W_INLET, W_WALL, W_UPPER = 1.0, 200.0, 80.0, 30.0
         N_r, N_in, N_w, N_up = (xy_r.shape[0], xy_in.shape[0],
                                 xy_w.shape[0], xy_up.shape[0])
@@ -1117,7 +1117,7 @@ class RampEvaluator(BaseBenchmarkEvaluator):
             params = optax.apply_updates(params, updates)
             return params, state, total, aux
 
-        # RAR-D resampling of the interior pool, matching examples/ramp's
+        # RAR-D resampling of the interior pool, matching examples/PINNs/ramp's
         # rar_period=2000 cadence (scaled to "~5 resamples over the run" so
         # it also does something useful at the smaller benchmark epoch tiers
         # instead of only firing at the full 2000-epoch cadence).
@@ -1266,7 +1266,7 @@ class Toro3Evaluator(BaseBenchmarkEvaluator):
     """1-D Riemann problem — Toro test 3 (Woodward–Colella blast wave).
 
     Left (1, 0, 1000) / right (1, 0, 0.01), γ=1.4 — a five-decade pressure
-    jump.  Mirrors ``examples/toro3/toro3.py``: reference-state
+    jump.  Mirrors ``examples/PINNs/toro3/toro3.py``: reference-state
     non-dimensionalisation + log-space (exp) positivity for the extreme
     dynamic range, evaluated against the exact Riemann solution.
     """
@@ -1448,7 +1448,7 @@ class Toro3Evaluator(BaseBenchmarkEvaluator):
 # =============================================================================
 
 class RampNSEvaluator(BaseBenchmarkEvaluator):
-    """Viscous compression-ramp SBLI; mirrors ``examples/ramp_ns/ramp_ns.py``.
+    """Viscous compression-ramp SBLI; mirrors ``examples/PINNs/ramp_ns/ramp_ns.py``.
 
     Supersonic M∞=3 flow over a flat wall then a θ=15° compression ramp, with
     a short slip run (no-penetration only) before a no-slip + isothermal

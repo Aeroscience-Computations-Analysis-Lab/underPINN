@@ -16,19 +16,19 @@
 * - `NACAAirfoil`
   - NACA 4-digit (symmetric & cambered) exterior domain, SDF-weighted
     near-surface, AoA via quarter-chord rotation
-  - `examples/airfoil/`
+  - `examples/PINNs/airfoil/`
 * - `Cylinder2D`
   - Circular cylinder exterior cross-flow domain, analytic SDF, surface points
-  - `examples/cylinder/`
+  - `examples/PINNs/cylinder/`
 * - `Pipe`
   - 3-D cylindrical interior, lateral wall, circular inlet, circular outlet
-  - `examples/pipe_flow/`, `examples/pipe_flow_rheology/`
+  - `examples/PINNs/pipe_flow/`, `examples/PINNs/pipe_flow_rheology/`
 * - `BulgeGeometry`
   - Axisymmetric AAA bulge `R(x)` (cosine²): interior, curved wall, inlet, outlet
-  - `examples/AAA/`, `examples/AAA_rheology/`
+  - `examples/PINNs/AAA/`, `examples/PINNs/AAA_rheology/`
 * - `Ramp`
   - Trapezoidal domain above a wedge surface at angle θ
-  - `examples/ramp/`
+  - `examples/PINNs/ramp/`
 * - `Composite`
   - Boolean union / intersection / difference of any two geometry objects
   - LDC (cavity minus any obstacle)

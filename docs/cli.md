@@ -29,16 +29,16 @@ scripts directly, or point the CLI at the same YAML — both work identically.
 ## Single run
 
 ```bash
-python -m underPINN run examples/burgers/config.yaml
-python -m underPINN run examples/wave/config.yaml
-python -m underPINN run examples/helmholtz/config.yaml
-python -m underPINN run examples/ramp/config.yaml
-python -m underPINN run examples/airfoil/config.yaml
-python -m underPINN run examples/cylinder/config.yaml
-python -m underPINN run examples/sod_shock/config.yaml
-python -m underPINN run examples/AAA/config.yaml
-python -m underPINN run examples/pipe_flow_rheology/config.yaml
-python -m underPINN run examples/pipe_flow/pipe_flow.yaml
+python -m underPINN run examples/PINNs/burgers/config.yaml
+python -m underPINN run examples/PINNs/wave/config.yaml
+python -m underPINN run examples/PINNs/helmholtz/config.yaml
+python -m underPINN run examples/PINNs/ramp/config.yaml
+python -m underPINN run examples/PINNs/airfoil/config.yaml
+python -m underPINN run examples/PINNs/cylinder/config.yaml
+python -m underPINN run examples/PINNs/sod_shock/config.yaml
+python -m underPINN run examples/PINNs/AAA/config.yaml
+python -m underPINN run examples/PINNs/pipe_flow_rheology/config.yaml
+python -m underPINN run examples/PINNs/pipe_flow/pipe_flow.yaml
 ```
 
 ## Hyperparameter sweep
@@ -47,7 +47,7 @@ Cartesian product across any dot-separated config key. Each run gets its own
 sub-directory with a saved `config.yaml` for full reproducibility.
 
 ```bash
-python -m underPINN sweep examples/burgers/burgers_nu_sweep.yaml
+python -m underPINN sweep examples/PINNs/burgers/burgers_nu_sweep.yaml
 ```
 
 ```yaml
@@ -70,8 +70,8 @@ Each run lands in `outputs/…/run_000`, `run_001`, …
 ## Inspect & list
 
 ```bash
-python -m underPINN show examples/wave/config.yaml     # print resolved config
-python -m underPINN resume examples/burgers/config.yaml # verify config hash, allow resume
+python -m underPINN show examples/PINNs/wave/config.yaml     # print resolved config
+python -m underPINN resume examples/PINNs/burgers/config.yaml # verify config hash, allow resume
 python -m underPINN list                                # list registered runners
 python -m underPINN version                              # print version string
 ```
@@ -104,17 +104,17 @@ Registering a new problem only requires touching one dispatch table:
 :caption: underPINN/runner/dispatch.py
 
 _REGISTRY = {
-    "burgers"  : ("examples/burgers/burgers.py",  "run_burgers"),
-    "wave"     : ("examples/wave/wave.py",        "run_wave"),
-    "mycase"   : ("examples/mycase/mycase.py",    "run_mycase"),  # ← add this
+    "burgers"  : ("examples/PINNs/burgers/burgers.py",  "run_burgers"),
+    "wave"     : ("examples/PINNs/wave/wave.py",        "run_wave"),
+    "mycase"   : ("examples/PINNs/mycase/mycase.py",    "run_mycase"),  # ← add this
     # ... no other files need to change
 }
 ```
 
 ```{admonition} Three-step recipe
 :class: note
-1. Create `examples/mycase/mycase.py` — define `run_mycase(cfg) -> dict`
-2. Create `examples/mycase/config.yaml` — set `problem: mycase`
+1. Create `examples/PINNs/mycase/mycase.py` — define `run_mycase(cfg) -> dict`
+2. Create `examples/PINNs/mycase/config.yaml` — set `problem: mycase`
 3. Add **one line** to `underPINN/runner/dispatch.py`
 
 No other files need to change.

@@ -228,16 +228,16 @@ import jax  # now uses at most 15% of VRAM
 ### CLI (zero Python)
 
 ```bash
-python -m underPINN run  examples/burgers/config.yaml
-python -m underPINN run  examples/wave/config.yaml
-python -m underPINN run  examples/pipe_flow/pipe_flow.yaml
-python -m underPINN run  examples/ramp/config.yaml
-python -m underPINN run  examples/cylinder/config.yaml                          # flow over a cylinder (Re=40)
-python -m underPINN run  examples/sod_shock/config.yaml                         # Sod tube, learnable ε
-python -m underPINN run  examples/AAA/config.yaml                               # 3-D AAA bulge
-python -m underPINN run  examples/pipe_flow_rheology/config.yaml                # Carreau blood, pipe
-python -m underPINN run  examples/AAA_rheology/config.yaml                      # Carreau blood, AAA
-python -m underPINN run  examples/pipe_flow/pipe_flow_pulsatile_transfer.yaml   # pulsatile, time-marching TL
+python -m underPINN run  examples/PINNs/burgers/config.yaml
+python -m underPINN run  examples/PINNs/wave/config.yaml
+python -m underPINN run  examples/PINNs/pipe_flow/pipe_flow.yaml
+python -m underPINN run  examples/PINNs/ramp/config.yaml
+python -m underPINN run  examples/PINNs/cylinder/config.yaml                          # flow over a cylinder (Re=40)
+python -m underPINN run  examples/PINNs/sod_shock/config.yaml                         # Sod tube, learnable ε
+python -m underPINN run  examples/PINNs/AAA/config.yaml                               # 3-D AAA bulge
+python -m underPINN run  examples/PINNs/pipe_flow_rheology/config.yaml                # Carreau blood, pipe
+python -m underPINN run  examples/PINNs/AAA_rheology/config.yaml                      # Carreau blood, AAA
+python -m underPINN run  examples/PINNs/pipe_flow/pipe_flow_pulsatile_transfer.yaml   # pulsatile, time-marching TL
 ```
 
 ### Programmatic
@@ -285,28 +285,28 @@ solver.train(*data, config=config)
 Each example folder is **self-contained** — script + YAML live together. Run any problem directly:
 
 ```bash
-python examples/burgers/burgers.py
-python examples/wave/wave.py
-python examples/helmholtz/helmholtz.py
-python examples/heat/forward.py
-python examples/heat/inverse.py
-python examples/LDC/run_ldc.py
-python examples/airfoil/airfoil_flow.py
-python examples/cylinder/cylinder_flow.py
-python examples/ode/ode_test.py
-python examples/pipe_flow/pipe_flow.py
-python examples/pipe_flow/pipe_flow_unsteady_transfer.py
-python examples/pipe_flow/pipe_flow_pulsatile_transfer.py
-python examples/pipe_flow_rheology/pipe_flow_rheology.py
-python examples/AAA/AAA_flow.py
-python examples/AAA_rheology/AAA_rheology.py
-python examples/ramp/ramp.py
-python examples/sod_shock/sod_shock.py
-python examples/transfer/burgers_transfer.py
-python examples/inverse/inverse_diffusion.py
+python examples/PINNs/burgers/burgers.py
+python examples/PINNs/wave/wave.py
+python examples/PINNs/helmholtz/helmholtz.py
+python examples/PINNs/heat/forward.py
+python examples/PINNs/heat/inverse.py
+python examples/PINNs/LDC/run_ldc.py
+python examples/PINNs/airfoil/airfoil_flow.py
+python examples/PINNs/cylinder/cylinder_flow.py
+python examples/PINNs/ode/ode_test.py
+python examples/PINNs/pipe_flow/pipe_flow.py
+python examples/PINNs/pipe_flow/pipe_flow_unsteady_transfer.py
+python examples/PINNs/pipe_flow/pipe_flow_pulsatile_transfer.py
+python examples/PINNs/pipe_flow_rheology/pipe_flow_rheology.py
+python examples/PINNs/AAA/AAA_flow.py
+python examples/PINNs/AAA_rheology/AAA_rheology.py
+python examples/PINNs/ramp/ramp.py
+python examples/PINNs/sod_shock/sod_shock.py
+python examples/PINNs/transfer/burgers_transfer.py
+python examples/PINNs/inverse/inverse_diffusion.py
 
 # Pass a custom config as the first argument:
-python examples/burgers/burgers.py my_custom.yaml
+python examples/PINNs/burgers/burgers.py my_custom.yaml
 ```
 
 ### Post-processing / prediction (after training)
@@ -314,23 +314,23 @@ python examples/burgers/burgers.py my_custom.yaml
 ```bash
 # Steady pipe & AAA (Newtonian or Carreau) — axial-plane u contour + streamlines,
 # pressure contour & line plots, wall shear stress, and an NPZ of the solution:
-python examples/predict_steady.py outputs/pipe_flow
-python examples/predict_steady.py outputs/AAA_rheology
+python examples/PINNs/predict_steady.py outputs/pipe_flow
+python examples/PINNs/predict_steady.py outputs/AAA_rheology
 
 # Pulsatile pipe (time-marching) — point queries, snapshot/spacetime plots, GIF:
-python examples/pipe_flow/predict_pulsatile.py outputs/pipe_flow_pulsatile_transfer --t 2.7 --plot
-python examples/pipe_flow/predict_pulsatile.py outputs/pipe_flow_pulsatile_transfer --spacetime --animate
+python examples/PINNs/pipe_flow/predict_pulsatile.py outputs/pipe_flow_pulsatile_transfer --t 2.7 --plot
+python examples/PINNs/pipe_flow/predict_pulsatile.py outputs/pipe_flow_pulsatile_transfer --spacetime --animate
 ```
 
 ### CLI commands
 
 ```bash
 # Single run
-python -m underPINN run   examples/burgers/config.yaml
+python -m underPINN run   examples/PINNs/burgers/config.yaml
 
 # Hyperparameter sweep (Cartesian product)
-python -m underPINN sweep examples/burgers/burgers_nu_sweep.yaml
-python -m underPINN sweep examples/pipe_flow/pipe_flow_re_sweep.yaml
+python -m underPINN sweep examples/PINNs/burgers/burgers_nu_sweep.yaml
+python -m underPINN sweep examples/PINNs/pipe_flow/pipe_flow_re_sweep.yaml
 
 # Benchmark all problems
 python -m underPINN bench
@@ -340,7 +340,7 @@ python -m underPINN bench --from-json outputs/bench/results.json
 
 # Utilities
 python -m underPINN list                          # list all registered runners
-python -m underPINN show examples/wave/config.yaml   # inspect resolved config
+python -m underPINN show examples/PINNs/wave/config.yaml   # inspect resolved config
 python -m underPINN version                       # print version string
 ```
 
@@ -399,10 +399,10 @@ Each run gets its own sub-directory (`outputs/…/run_000`, `run_001`, …) with
 ### Adding a new case
 
 ```
-1. Create examples/<mycase>/mycase.py  — define run_mycase(cfg) -> dict
-2. Create examples/<mycase>/config.yaml  — set problem: mycase
+1. Create examples/PINNs/<mycase>/mycase.py  — define run_mycase(cfg) -> dict
+2. Create examples/PINNs/<mycase>/config.yaml  — set problem: mycase
 3. Add ONE line to underPINN/runner/dispatch.py:
-   "mycase": ("examples/mycase/mycase.py", "run_mycase"),
+   "mycase": ("examples/PINNs/mycase/mycase.py", "run_mycase"),
 ```
 
 No other files need to change.
@@ -548,7 +548,7 @@ That's all. If the process is killed at epoch 3 700, the next run resumes from e
 Solvers gate resumption on the `done` flag only — not on a config hash. This means an interrupted run will auto-resume even if you changed `lr`, `epochs`, `layers`, or physics parameters. To check for config changes before resuming, use the `resume` CLI command:
 
 ```bash
-python -m underPINN resume examples/burgers/config.yaml
+python -m underPINN resume examples/PINNs/burgers/config.yaml
 ```
 
 `resume` computes the MD5 of the current YAML, compares it against the hash stored in `meta.json`, and warns you if any field changed since the last snapshot. If everything is consistent, it resets `done` to `false` so the next `run` will resume.
@@ -649,13 +649,13 @@ solver_phase2.load_params(solver_phase1.params)
 solver_phase2.train(*data_t2, config=cfg_phase2)
 ```
 
-Both modes are demonstrated in `examples/transfer/burgers_transfer.py` and `examples/pipe_flow/pipe_flow_unsteady_transfer.py`.
+Both modes are demonstrated in `examples/PINNs/transfer/burgers_transfer.py` and `examples/PINNs/pipe_flow/pipe_flow_unsteady_transfer.py`.
 
 ---
 
 ## Inverse Problems
 
-The heat inverse problem (`examples/heat/inverse.py`) recovers the unknown thermal diffusivity α from 50 sparse noisy observations:
+The heat inverse problem (`examples/PINNs/heat/inverse.py`) recovers the unknown thermal diffusivity α from 50 sparse noisy observations:
 
 - **Joint optimisation**: the optimizer simultaneously updates network weights `θ` and the physics parameter `log_α = log(α)` via a single `jax.grad` call
 - **Log-parameterisation**: optimising `log_α` instead of `α` directly guarantees positivity without any constraints or projections; the true α is recovered as `exp(log_α)` after training
@@ -670,7 +670,7 @@ pde = DiffusionInversePDE(model, log_alpha_init=jnp.log(0.5))
 # After training: alpha_recovered = jnp.exp(pde.log_alpha)
 ```
 
-The 2-D diffusion inverse (`examples/inverse/inverse_diffusion.py`) follows the same pattern for a 2-D domain.
+The 2-D diffusion inverse (`examples/PINNs/inverse/inverse_diffusion.py`) follows the same pattern for a 2-D domain.
 
 ---
 
@@ -780,38 +780,41 @@ underPINN/
 
 examples/                  # self-contained: each folder holds script + YAML
 │                          # Adding a new case = create folder + add 1 line to dispatch.py
-├── burgers/               burgers.py  +  config.yaml            (1-D Burgers FBPINN + RBA)
-├── wave/                  wave.py     +  config.yaml            (1-D wave FourierMLP)
-├── heat/                  forward.py  +  heat_forward.yaml      (2-D steady heat / Poisson)
-│                          inverse.py  +  heat_inverse.yaml      (recover α from noisy data)
-├── helmholtz/             helmholtz.py + config.yaml            (2-D Helmholtz FourierMLP)
-├── ode/                   ode_test.py +  config.yaml            (exp decay + harmonic osc.)
-├── fbpinn_ode/            fbpinn_ode.py + config.yaml           (FBPINN subdomains, du/dx=cos ωx)
-├── inverse/               inverse_diffusion.py + config.yaml    (2-D diffusion inverse)
-├── LDC/                   run_ldc.py  +  config.yaml            (2-D Lid-Driven Cavity Re=100)
-├── K-Epsilon/             run_kepsilon.py + config.yaml         (k-ε RANS turbulent channel)
-├── airfoil/               airfoil_flow.py + config.yaml         (NACA airfoil, AoA via rotation)
-├── cylinder/              cylinder_flow.py + config.yaml        (cylinder cross-flow, Re=40)
-├── pipe_flow/             pipe_flow.py + pipe_flow.yaml         (3-D Hagen-Poiseuille)
-│                          pipe_flow_unsteady_transfer.py + yaml  (Re + temporal transfer)
-│                          pipe_flow_pulsatile_transfer.py + yaml (3-D pulsatile, time-marching TL)
-│                          predict_pulsatile.py                   (window predictor: plots, GIF, spacetime)
-├── pipe_flow_rheology/    pipe_flow_rheology.py + config.yaml   (Carreau blood, pipe)
-├── AAA/                   AAA_flow.py + config.yaml             (3-D AAA bulge, Newtonian)
-├── AAA_rheology/          AAA_rheology.py + config.yaml         (Carreau blood, AAA bulge)
-├── ramp/                  ramp.py     +  config.yaml            (2-D compressible Euler, M=3, AV + RAR)
-├── ramp_ns/               ramp_ns.py  +  config.yaml            (2-D compressible NS, viscous SBLI, no-slip + isothermal)
-├── sod_shock/             sod_shock.py + config.yaml            (Sod tube, learnable ε + RAR)
-├── toro3/                  toro3.py + config.yaml                (Toro-3 blast wave, exp positivity + non-dim)
-├── predict_steady.py                                            (post-process steady pipe/AAA: WSS, contours, NPZ)
-├── transfer/              burgers_transfer.py + yaml            (Burgers param + temp. TL)
+├── PINNs/                 # collocation-based PINN examples
+│   ├── burgers/           burgers.py  +  config.yaml            (1-D Burgers FBPINN + RBA)
+│   ├── wave/              wave.py     +  config.yaml            (1-D wave FourierMLP)
+│   ├── heat/              forward.py  +  heat_forward.yaml      (2-D steady heat / Poisson)
+│   │                      inverse.py  +  heat_inverse.yaml      (recover α from noisy data)
+│   ├── helmholtz/         helmholtz.py + config.yaml            (2-D Helmholtz FourierMLP)
+│   ├── ode/               ode_test.py +  config.yaml            (exp decay + harmonic osc.)
+│   ├── fbpinn_ode/        fbpinn_ode.py + config.yaml           (FBPINN subdomains, du/dx=cos ωx)
+│   ├── inverse/           inverse_diffusion.py + config.yaml    (2-D diffusion inverse)
+│   ├── LDC/               run_ldc.py  +  config.yaml            (2-D Lid-Driven Cavity Re=100)
+│   ├── K-Epsilon/         run_kepsilon.py + config.yaml         (k-ε RANS turbulent channel)
+│   ├── airfoil/           airfoil_flow.py + config.yaml         (NACA airfoil, AoA via rotation)
+│   ├── cylinder/          cylinder_flow.py + config.yaml        (cylinder cross-flow, Re=40)
+│   ├── pipe_flow/         pipe_flow.py + pipe_flow.yaml         (3-D Hagen-Poiseuille)
+│   │                      pipe_flow_unsteady_transfer.py + yaml  (Re + temporal transfer)
+│   │                      pipe_flow_pulsatile_transfer.py + yaml (3-D pulsatile, time-marching TL)
+│   │                      predict_pulsatile.py                   (window predictor: plots, GIF, spacetime)
+│   ├── pipe_flow_rheology/ pipe_flow_rheology.py + config.yaml  (Carreau blood, pipe)
+│   ├── AAA/               AAA_flow.py + config.yaml             (3-D AAA bulge, Newtonian)
+│   ├── AAA_rheology/      AAA_rheology.py + config.yaml         (Carreau blood, AAA bulge)
+│   ├── Aneurysm/          Aneurysm.py + config.yaml             (3-D STL aneurysm)
+│   ├── ramp/              ramp.py     +  config.yaml            (2-D compressible Euler, M=3, AV + RAR)
+│   ├── ramp_ns/           ramp_ns.py  +  config.yaml            (2-D compressible NS, viscous SBLI, no-slip + isothermal)
+│   ├── sod_shock/         sod_shock.py + config.yaml            (Sod tube, learnable ε + RAR)
+│   ├── toro3/             toro3.py + config.yaml                (Toro-3 blast wave, exp positivity + non-dim)
+│   ├── predict_steady.py                                        (post-process steady pipe/AAA: WSS, contours, NPZ)
+│   └── transfer/          burgers_transfer.py + yaml            (Burgers param + temp. TL)
 │                          heat2d_transfer.py  + yaml            (2-D heat transfer)
-└── operators/             fno1d_periodic/      + config.yaml    (1-D periodic Burgers, FNO1D PINO)
-                           fno1d_dirichlet/     + config.yaml    (1-D Dirichlet Burgers, FNO1D PINO)
-                           fno2d_burgers/       + config.yaml    (2-D periodic Burgers, FNO2D PINO)
-                           deeponet1d_burgers/  + config.yaml    (1-D Burgers, physics-informed DeepONet)
-                           cvit2d_burgers/      + config.yaml    (2-D periodic Burgers, CViT PINO)
-                           fno2d_cylinder/      + config.yaml + datagen.py  (cylinder-flow FNO2D PINO)
+└── operators/             # neural-operator (PINO / DeepONet / CViT) examples
+    ├── fno1d_periodic/    + config.yaml                         (1-D periodic Burgers, FNO1D PINO)
+    ├── fno1d_dirichlet/   + config.yaml                         (1-D Dirichlet Burgers, FNO1D PINO)
+    ├── fno2d_burgers/     + config.yaml                         (2-D periodic Burgers, FNO2D PINO)
+    ├── deeponet1d_burgers/ + config.yaml                        (1-D Burgers, physics-informed DeepONet)
+    ├── cvit2d_burgers/    + config.yaml                         (2-D periodic Burgers, CViT PINO)
+    └── fno2d_cylinder/    + config.yaml + datagen.py            (cylinder-flow FNO2D PINO)
 
 docs/
 └── index.html             # Static framework documentation website
@@ -823,31 +826,31 @@ docs/
 
 | Problem | PDE | Network | Key Features | Config |
 |---|---|---|---|---|
-| Exponential Decay | du/dt + λu = 0 | MLP [1,32,32,1] | `ODESolver`, TrainingConfig, callbacks | `examples/ode/config.yaml` |
-| Harmonic Oscillator | d²u/dt² + ω²u = 0 | MLP [1,32,32,1] | `ODESolver`, IC derivative | `examples/ode/config.yaml` |
-| FBPINN ODE | du/dx = cos(ω x) | FBPINN — 15 subnets [1,16,16,1] | Overlapping subdomains + partition-of-unity windows, hard IC constraint | `examples/fbpinn_ode/config.yaml` |
-| 1-D Burgers | u_t + uu_x = νu_xx | MLP [2,64,64,64,1] | FBPINN, RBA, cosine LR | `examples/burgers/config.yaml` |
-| 1-D Heat — Forward | u_t = αu_xx | MLP [2,64,64,64,1] | `FBPINNSolver`, exact Gaussian IC | `examples/heat/heat_forward.yaml` |
-| 1-D Heat — Inverse | u_t = αu_xx | MLP [2,64,64,64,1] | Recover α from 50 noisy observations | `examples/heat/heat_inverse.yaml` |
-| 1-D Wave | u_tt = c²u_xx | FourierMLP [2,128,128,1] | Dual IC (u and u_t), n_fourier=32 | `examples/wave/config.yaml` |
-| 2-D Helmholtz | Δu + k²u = f | FourierMLP [2,128,128,1] | k=4, manufactured source term | `examples/helmholtz/config.yaml` |
-| 2-D Diffusion Inverse | u_t = α∇²u | MLP [3,64,64,64,1] | Log-param joint optimisation | `examples/inverse/config.yaml` |
-| 2-D Lid-Driven Cavity | Steady N-S, Re=100 | FBPINN + SimpleGate | `LDCSolver`, attention, Re=100 | `examples/LDC/config.yaml` |
-| 2-D RANS k-ε | Turbulent channel | FBPINN | `RANSSolver`, RBA, Re=10000 | `examples/K-Epsilon/config.yaml` |
-| 2-D Compressible Ramp | Steady Euler (conservative), M=3 | MLP [2,80,80,80,80,80,4] | Oblique shock θ=10°, artificial viscosity (fixed/learnable), RAR | `examples/ramp/config.yaml` |
-| 2-D Compressible NS Ramp (SBLI) | Steady Navier–Stokes (conservative), M=3 | MLP [2,128×4,4] | Viscous shock–boundary-layer interaction, **no-slip + isothermal `T=T₀`** walls, Re=10⁴, Pr=0.72, RAR | `examples/ramp_ns/config.yaml` |
-| 1-D Sod Shock Tube | Unsteady Euler (conservative) | MLP [2,80×5,3] | **Learnable ε = softplus(log_av)**, exact Riemann reference, RAR | `examples/sod_shock/config.yaml` |
-| 1-D Toro Test 3 (blast wave) | Unsteady Euler (conservative) | MLP [2,128×4,3] | **exp/log positivity**, reference-state **non-dimensionalisation**, learnable ε, RAR | `examples/toro3/config.yaml` |
-| NACA Airfoil | Steady N-S, Re=100 | MLP / GatedMLP [2,128×6,3] | Cambered profiles, AoA via airfoil rotation, surface pressure & Cp | `examples/airfoil/config.yaml` |
-| Cylinder Cross-flow | Steady N-S, Re=40 | MLP [2,128×6,3] | Pure-PINN recipe, Cp(θ) vs inviscid reference, wake pool | `examples/cylinder/config.yaml` |
-| 3-D Pipe Flow | Steady 3-D N-S | MLP / GatedMLP [3,…,4] | Double-jacfwd Hessian, Hagen-Poiseuille exact | `examples/pipe_flow/pipe_flow.yaml` |
-| 3-D AAA Bulge | Steady 3-D N-S | GatedMLP [3,192×5,4] | Cosine² bulge `R(x)`, flow-rate balance check | `examples/AAA/config.yaml` |
-| Carreau Pipe (blood) | Steady Carreau N-S | GatedMLP [3,128×4,4] | Shear-thinning μ(γ̇), 1-D Carreau exact profile, β=16; same domain/Re as Newtonian pipe | `examples/pipe_flow_rheology/config.yaml` |
-| Carreau AAA (blood) | Steady Carreau N-S | GatedMLP [3,192×5,4] | Blood rheology in the bulge, apparent-viscosity maps | `examples/AAA_rheology/config.yaml` |
-| 3-D Pulsatile Pipe | Unsteady 3-D N-S | GatedMLP [4,…,4] | **Time-marching transfer** (windowed), per-window ckpts, window restart | `examples/pipe_flow/pipe_flow_pulsatile_transfer.yaml` |
-| 3-D Unsteady Pipe Transfer | u_t = G + ν∇²u | MLP [3,64,64,64,64,1] | Bessel exact solution, Re + temporal TL | `examples/pipe_flow/pipe_flow_unsteady_transfer.yaml` |
-| Burgers Transfer | Burgers | MLP [2,64,64,64,1] | Parameter transfer (ν) + temporal transfer | `examples/transfer/burgers_transfer.yaml` |
-| Heat 2-D Transfer | 2-D heat | MLP [3,64,64,64,1] | Cross-diffusivity transfer + temporal | `examples/transfer/heat2d_transfer.yaml` |
+| Exponential Decay | du/dt + λu = 0 | MLP [1,32,32,1] | `ODESolver`, TrainingConfig, callbacks | `examples/PINNs/ode/config.yaml` |
+| Harmonic Oscillator | d²u/dt² + ω²u = 0 | MLP [1,32,32,1] | `ODESolver`, IC derivative | `examples/PINNs/ode/config.yaml` |
+| FBPINN ODE | du/dx = cos(ω x) | FBPINN — 15 subnets [1,16,16,1] | Overlapping subdomains + partition-of-unity windows, hard IC constraint | `examples/PINNs/fbpinn_ode/config.yaml` |
+| 1-D Burgers | u_t + uu_x = νu_xx | MLP [2,64,64,64,1] | FBPINN, RBA, cosine LR | `examples/PINNs/burgers/config.yaml` |
+| 1-D Heat — Forward | u_t = αu_xx | MLP [2,64,64,64,1] | `FBPINNSolver`, exact Gaussian IC | `examples/PINNs/heat/heat_forward.yaml` |
+| 1-D Heat — Inverse | u_t = αu_xx | MLP [2,64,64,64,1] | Recover α from 50 noisy observations | `examples/PINNs/heat/heat_inverse.yaml` |
+| 1-D Wave | u_tt = c²u_xx | FourierMLP [2,128,128,1] | Dual IC (u and u_t), n_fourier=32 | `examples/PINNs/wave/config.yaml` |
+| 2-D Helmholtz | Δu + k²u = f | FourierMLP [2,128,128,1] | k=4, manufactured source term | `examples/PINNs/helmholtz/config.yaml` |
+| 2-D Diffusion Inverse | u_t = α∇²u | MLP [3,64,64,64,1] | Log-param joint optimisation | `examples/PINNs/inverse/config.yaml` |
+| 2-D Lid-Driven Cavity | Steady N-S, Re=100 | FBPINN + SimpleGate | `LDCSolver`, attention, Re=100 | `examples/PINNs/LDC/config.yaml` |
+| 2-D RANS k-ε | Turbulent channel | FBPINN | `RANSSolver`, RBA, Re=10000 | `examples/PINNs/K-Epsilon/config.yaml` |
+| 2-D Compressible Ramp | Steady Euler (conservative), M=3 | MLP [2,80,80,80,80,80,4] | Oblique shock θ=10°, artificial viscosity (fixed/learnable), RAR | `examples/PINNs/ramp/config.yaml` |
+| 2-D Compressible NS Ramp (SBLI) | Steady Navier–Stokes (conservative), M=3 | MLP [2,128×4,4] | Viscous shock–boundary-layer interaction, **no-slip + isothermal `T=T₀`** walls, Re=10⁴, Pr=0.72, RAR | `examples/PINNs/ramp_ns/config.yaml` |
+| 1-D Sod Shock Tube | Unsteady Euler (conservative) | MLP [2,80×5,3] | **Learnable ε = softplus(log_av)**, exact Riemann reference, RAR | `examples/PINNs/sod_shock/config.yaml` |
+| 1-D Toro Test 3 (blast wave) | Unsteady Euler (conservative) | MLP [2,128×4,3] | **exp/log positivity**, reference-state **non-dimensionalisation**, learnable ε, RAR | `examples/PINNs/toro3/config.yaml` |
+| NACA Airfoil | Steady N-S, Re=100 | MLP / GatedMLP [2,128×6,3] | Cambered profiles, AoA via airfoil rotation, surface pressure & Cp | `examples/PINNs/airfoil/config.yaml` |
+| Cylinder Cross-flow | Steady N-S, Re=40 | MLP [2,128×6,3] | Pure-PINN recipe, Cp(θ) vs inviscid reference, wake pool | `examples/PINNs/cylinder/config.yaml` |
+| 3-D Pipe Flow | Steady 3-D N-S | MLP / GatedMLP [3,…,4] | Double-jacfwd Hessian, Hagen-Poiseuille exact | `examples/PINNs/pipe_flow/pipe_flow.yaml` |
+| 3-D AAA Bulge | Steady 3-D N-S | GatedMLP [3,192×5,4] | Cosine² bulge `R(x)`, flow-rate balance check | `examples/PINNs/AAA/config.yaml` |
+| Carreau Pipe (blood) | Steady Carreau N-S | GatedMLP [3,128×4,4] | Shear-thinning μ(γ̇), 1-D Carreau exact profile, β=16; same domain/Re as Newtonian pipe | `examples/PINNs/pipe_flow_rheology/config.yaml` |
+| Carreau AAA (blood) | Steady Carreau N-S | GatedMLP [3,192×5,4] | Blood rheology in the bulge, apparent-viscosity maps | `examples/PINNs/AAA_rheology/config.yaml` |
+| 3-D Pulsatile Pipe | Unsteady 3-D N-S | GatedMLP [4,…,4] | **Time-marching transfer** (windowed), per-window ckpts, window restart | `examples/PINNs/pipe_flow/pipe_flow_pulsatile_transfer.yaml` |
+| 3-D Unsteady Pipe Transfer | u_t = G + ν∇²u | MLP [3,64,64,64,64,1] | Bessel exact solution, Re + temporal TL | `examples/PINNs/pipe_flow/pipe_flow_unsteady_transfer.yaml` |
+| Burgers Transfer | Burgers | MLP [2,64,64,64,1] | Parameter transfer (ν) + temporal transfer | `examples/PINNs/transfer/burgers_transfer.yaml` |
+| Heat 2-D Transfer | 2-D heat | MLP [3,64,64,64,1] | Cross-diffusivity transfer + temporal | `examples/PINNs/transfer/heat2d_transfer.yaml` |
 | FNO1D Periodic Burgers | Burgers (PINO, grid residual) | FNO1D | Generalizes across ν, `pde_weight` warmup | `examples/operators/fno1d_periodic/config.yaml` |
 | FNO1D Dirichlet Burgers | Burgers (PINO, grid residual) | FNO1D | Zero-wall BCs, FNO domain-padding trick | `examples/operators/fno1d_dirichlet/config.yaml` |
 | FNO2D Burgers | 2-D Burgers (PINO, grid residual) | FNO2D | Central/upwind stencil selectable | `examples/operators/fno2d_burgers/config.yaml` |
@@ -861,22 +864,22 @@ docs/
 
 | PDE | Equation | Key method | Used in |
 |---|---|---|---|
-| Burgers (1-D) | u_t + uu_x = νu_xx | `BurgersPDE.residual` | `examples/burgers/`, `examples/transfer/` |
-| Diffusion / Heat (1-D) | u_t = αu_xx | `DiffusionPDE.residual` | `examples/heat/` |
-| Heat (2-D unsteady) | u_t = α(u_xx + u_yy) | `Heat2DPDE.residual` | `examples/inverse/`, `examples/transfer/` |
-| Wave (1-D) | u_tt = c²u_xx | `WavePDE.residual` | `examples/wave/` |
-| Helmholtz (2-D) | Δu + k²u = f | `HelmholtzPDE.residual` | `examples/helmholtz/` |
-| Navier-Stokes (2-D steady) | ∇·u=0, u·∇u = -∇p + ν∇²u | `NavierStokesPDE.residual` | `examples/LDC/`, `examples/airfoil/`, `examples/cylinder/` |
-| Navier-Stokes (3-D steady) | Same + z-momentum | `SteadyNS3DPDE.residual` | `examples/pipe_flow/`, `examples/AAA/` |
-| Navier-Stokes (3-D unsteady) | u_t + (u·∇)u = −∇p + ν∇²u | `UnsteadyNS3DPDE.residual` | `examples/pipe_flow/` (pulsatile) |
-| Carreau N-S (3-D steady) | ∇·[μ*(γ̇)(∇u+∇uᵀ)] stress | `CarreauNS3DPDE.residual` | `examples/pipe_flow_rheology/`, `examples/AAA_rheology/` |
-| Pipe unsteady | u_t = G + ν(u_yy + u_zz) | `PipeUnsteadyPDE.residual` | `examples/pipe_flow/` |
-| RANS k-ε | N-S + k + ε transport | `KEpsilonPDE.residual` | `examples/K-Epsilon/` |
-| Compressible Euler (2-D steady) | ∂F/∂x + ∂G/∂y = ε∇²U (conservative) | `CompressibleEulerPDE.residual` (+ `oblique_shock`, `prandtl_meyer_expansion` reference states) | `examples/ramp/`, compression-expansion ramp studies |
-| Compressible Navier–Stokes (2-D steady) | ∂x(F−Fv/Re) + ∂y(G−Gv/Re) = 0 | `CompressibleNS2DPDE.residual` | `examples/ramp_ns/` |
-| Compressible Euler (1-D unsteady) | ∂U/∂t + ∂F/∂x = ε∂²U/∂x² | `Euler1DUnsteadyPDE.residual` | `examples/sod_shock/` |
-| Exponential Decay | du/dt + λu = 0 | `ExpDecayODE.residual` | `examples/ode/` |
-| Harmonic Oscillator | d²u/dt² + ω²u = 0 | `HarmonicODE.residual` | `examples/ode/` |
+| Burgers (1-D) | u_t + uu_x = νu_xx | `BurgersPDE.residual` | `examples/PINNs/burgers/`, `examples/PINNs/transfer/` |
+| Diffusion / Heat (1-D) | u_t = αu_xx | `DiffusionPDE.residual` | `examples/PINNs/heat/` |
+| Heat (2-D unsteady) | u_t = α(u_xx + u_yy) | `Heat2DPDE.residual` | `examples/PINNs/inverse/`, `examples/PINNs/transfer/` |
+| Wave (1-D) | u_tt = c²u_xx | `WavePDE.residual` | `examples/PINNs/wave/` |
+| Helmholtz (2-D) | Δu + k²u = f | `HelmholtzPDE.residual` | `examples/PINNs/helmholtz/` |
+| Navier-Stokes (2-D steady) | ∇·u=0, u·∇u = -∇p + ν∇²u | `NavierStokesPDE.residual` | `examples/PINNs/LDC/`, `examples/PINNs/airfoil/`, `examples/PINNs/cylinder/` |
+| Navier-Stokes (3-D steady) | Same + z-momentum | `SteadyNS3DPDE.residual` | `examples/PINNs/pipe_flow/`, `examples/PINNs/AAA/` |
+| Navier-Stokes (3-D unsteady) | u_t + (u·∇)u = −∇p + ν∇²u | `UnsteadyNS3DPDE.residual` | `examples/PINNs/pipe_flow/` (pulsatile) |
+| Carreau N-S (3-D steady) | ∇·[μ*(γ̇)(∇u+∇uᵀ)] stress | `CarreauNS3DPDE.residual` | `examples/PINNs/pipe_flow_rheology/`, `examples/PINNs/AAA_rheology/` |
+| Pipe unsteady | u_t = G + ν(u_yy + u_zz) | `PipeUnsteadyPDE.residual` | `examples/PINNs/pipe_flow/` |
+| RANS k-ε | N-S + k + ε transport | `KEpsilonPDE.residual` | `examples/PINNs/K-Epsilon/` |
+| Compressible Euler (2-D steady) | ∂F/∂x + ∂G/∂y = ε∇²U (conservative) | `CompressibleEulerPDE.residual` (+ `oblique_shock`, `prandtl_meyer_expansion` reference states) | `examples/PINNs/ramp/`, compression-expansion ramp studies |
+| Compressible Navier–Stokes (2-D steady) | ∂x(F−Fv/Re) + ∂y(G−Gv/Re) = 0 | `CompressibleNS2DPDE.residual` | `examples/PINNs/ramp_ns/` |
+| Compressible Euler (1-D unsteady) | ∂U/∂t + ∂F/∂x = ε∂²U/∂x² | `Euler1DUnsteadyPDE.residual` | `examples/PINNs/sod_shock/` |
+| Exponential Decay | du/dt + λu = 0 | `ExpDecayODE.residual` | `examples/PINNs/ode/` |
+| Harmonic Oscillator | d²u/dt² + ω²u = 0 | `HarmonicODE.residual` | `examples/PINNs/ode/` |
 | Burgers grid (1-D, FNO) | u_t + uu_x = νu_xx (FD residual) | `BurgersGrid1D.residual` | `examples/operators/fno1d_periodic/`, `fno1d_dirichlet/` |
 | Burgers grid (2-D, FNO/CViT) | u_t + u(u_x+u_y) = ν(u_xx+u_yy) (FD residual) | `BurgersGrid2D.residual` | `examples/operators/fno2d_burgers/`, `cvit2d_burgers/` |
 | Burgers (DeepONet) | u_t + uu_x = νu_xx (autodiff residual) | `DeepONetBurgersPDE.residual` | `examples/operators/deeponet1d_burgers/` |
@@ -890,11 +893,11 @@ docs/
 |---|---|---|
 | `Interval` | 1-D uniform or Sobol interior + boundary points | Burgers, wave, heat (1-D) |
 | `Rectangle` | 2-D interior (LHS / Sobol) + all four boundary edges | Helmholtz, LDC, diffusion inverse |
-| `NACAAirfoil` | NACA 4-digit (symmetric & cambered) exterior domain, SDF-weighted near-surface, AoA via quarter-chord rotation | `examples/airfoil/` |
-| `Cylinder2D` | Circular cylinder exterior cross-flow domain, analytic SDF, surface points | `examples/cylinder/` |
-| `Pipe` | 3-D cylindrical interior, lateral wall, circular inlet, circular outlet | `examples/pipe_flow/`, `examples/pipe_flow_rheology/` |
-| `BulgeGeometry` | Axisymmetric AAA bulge `R(x)` (cosine²): interior, curved wall, inlet, outlet | `examples/AAA/`, `examples/AAA_rheology/` |
-| `Ramp` | Trapezoidal domain above a wedge surface at angle θ | `examples/ramp/` |
+| `NACAAirfoil` | NACA 4-digit (symmetric & cambered) exterior domain, SDF-weighted near-surface, AoA via quarter-chord rotation | `examples/PINNs/airfoil/` |
+| `Cylinder2D` | Circular cylinder exterior cross-flow domain, analytic SDF, surface points | `examples/PINNs/cylinder/` |
+| `Pipe` | 3-D cylindrical interior, lateral wall, circular inlet, circular outlet | `examples/PINNs/pipe_flow/`, `examples/PINNs/pipe_flow_rheology/` |
+| `BulgeGeometry` | Axisymmetric AAA bulge `R(x)` (cosine²): interior, curved wall, inlet, outlet | `examples/PINNs/AAA/`, `examples/PINNs/AAA_rheology/` |
+| `Ramp` | Trapezoidal domain above a wedge surface at angle θ | `examples/PINNs/ramp/` |
 | `CompressionExpansionRampGeometry` | Two-corner wall (compression + expansion), piecewise-linear, per-segment normals | Compression-expansion ramp studies |
 | `Composite` | Boolean union / intersection / difference of any two geometry objects | LDC (cavity minus any obstacle) |
 | `ShapelyGeom` | Arbitrary 2-D polygon backed by Shapely 2.x; rejection-samples interior | Custom geometries |

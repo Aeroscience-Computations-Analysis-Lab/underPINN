@@ -29,7 +29,9 @@ import pytest
 
 _HERE      = pathlib.Path(__file__).parent
 _REPO_ROOT = _HERE.parent
-_EXAMPLES  = _REPO_ROOT / "examples"
+# Collocation-PINN examples live under examples/PINNs/; the neural-operator
+# examples (examples/operators/) are exercised by their own suite.
+_EXAMPLES  = _REPO_ROOT / "examples" / "PINNs"
 
 
 # ---------------------------------------------------------------------------

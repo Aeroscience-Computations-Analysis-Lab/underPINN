@@ -221,7 +221,7 @@ single `optax` chain, so `log_av` shares the network's optimizer, learning rate 
 cosine schedule rather than having its own.
 
 ```{note}
-The shipped shock configs (`examples/toro3`, `examples/ramp`, `examples/sod_shock`)
+The shipped shock configs (`examples/PINNs/toro3`, `examples/PINNs/ramp`, `examples/PINNs/sod_shock`)
 all set `trainable_visc: false` and run with a fixed `art_visc`. If you want the
 learned coefficient, you must opt in explicitly.
 ```

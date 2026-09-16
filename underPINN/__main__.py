@@ -5,16 +5,16 @@ Usage
 ::
 
     # Run a single experiment
-    python -m underPINN run examples/burgers/config.yaml
+    python -m underPINN run examples/PINNs/burgers/config.yaml
 
     # Hyperparameter sweep (Cartesian product of sweep values)
-    python -m underPINN sweep examples/burgers/burgers_nu_sweep.yaml
+    python -m underPINN sweep examples/PINNs/burgers/burgers_nu_sweep.yaml
 
     # List registered problem runners
     python -m underPINN list
 
     # Print the resolved config without running
-    python -m underPINN show examples/burgers/config.yaml
+    python -m underPINN show examples/PINNs/burgers/config.yaml
 
     # Accuracy-vs-epoch benchmark suite
     python -m underPINN bench
@@ -25,12 +25,12 @@ Usage
     # Continue a completed run from its last checkpoint
     #   Step 1 — raise epochs in the YAML (e.g. 5000 → 10000)
     #   Step 2 — unlock the snapshot so the new config hash is accepted
-    python -m underPINN resume examples/wave/config.yaml
+    python -m underPINN resume examples/PINNs/wave/config.yaml
     #   Step 3 — run normally; training picks up from the saved epoch
-    python -m underPINN run    examples/wave/config.yaml
+    python -m underPINN run    examples/PINNs/wave/config.yaml
 
     # Inspect the current restart snapshot state
-    python -m underPINN status examples/wave/config.yaml
+    python -m underPINN status examples/PINNs/wave/config.yaml
 """
 
 import os
@@ -165,9 +165,9 @@ def _cmd_resume(args):
 
         # 1. Edit the YAML — raise training.epochs to the new target
         # 2. Unlock the snapshot (updates the config hash + clears done flag)
-        python -m underPINN resume examples/wave/config.yaml
+        python -m underPINN resume examples/PINNs/wave/config.yaml
         # 3. Run normally — picks up from the last saved epoch
-        python -m underPINN run    examples/wave/config.yaml
+        python -m underPINN run    examples/PINNs/wave/config.yaml
     """
     import hashlib
     import json
@@ -339,12 +339,12 @@ def main():
         epilog="""
 examples:
   python -m underPINN version
-  python -m underPINN run    examples/burgers/config.yaml
-  python -m underPINN sweep  examples/burgers/burgers_nu_sweep.yaml
+  python -m underPINN run    examples/PINNs/burgers/config.yaml
+  python -m underPINN sweep  examples/PINNs/burgers/burgers_nu_sweep.yaml
   python -m underPINN list
-  python -m underPINN show   examples/pipe_flow/pipe_flow.yaml
-  python -m underPINN status examples/wave/config.yaml
-  python -m underPINN resume examples/wave/config.yaml  # then run again
+  python -m underPINN show   examples/PINNs/pipe_flow/pipe_flow.yaml
+  python -m underPINN status examples/PINNs/wave/config.yaml
+  python -m underPINN resume examples/PINNs/wave/config.yaml  # then run again
 """,
     )
 

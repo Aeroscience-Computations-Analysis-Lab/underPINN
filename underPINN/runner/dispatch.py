@@ -5,7 +5,8 @@ self-contained (script + YAML).  This file maps problem names to those scripts
 via dynamic import so no runner code is duplicated inside underPINN.
 
 To add a new problem:
-  1. Create  examples/<name>/  with your script and a YAML config.
+  1. Create  examples/PINNs/<name>/  (or examples/operators/<name>/ for a
+     neural-operator case) with your script and a YAML config.
   2. Add one line to ``_REGISTRY`` below — that's it.
 """
 
@@ -22,61 +23,61 @@ _REPO_ROOT = pathlib.Path(__file__).parent.parent.parent   # → repo root
 
 _REGISTRY: dict[str, tuple[str, str]] = {
     # Core physics benchmarks
-    "burgers":      ("examples/burgers/burgers.py",         "run_burgers"),
-    "wave":         ("examples/wave/wave.py",                "run_wave"),
-    "helmholtz":    ("examples/helmholtz/helmholtz.py",      "run_helmholtz"),
-    "heat_forward": ("examples/heat/forward.py",             "run_heat_forward"),
-    "ode":          ("examples/ode/ode_test.py",             "run_ode"),
-    "fbpinn_ode":   ("examples/fbpinn_ode/fbpinn_ode.py",    "run_fbpinn_ode"),
+    "burgers":      ("examples/PINNs/burgers/burgers.py",         "run_burgers"),
+    "wave":         ("examples/PINNs/wave/wave.py",                "run_wave"),
+    "helmholtz":    ("examples/PINNs/helmholtz/helmholtz.py",      "run_helmholtz"),
+    "heat_forward": ("examples/PINNs/heat/forward.py",             "run_heat_forward"),
+    "ode":          ("examples/PINNs/ode/ode_test.py",             "run_ode"),
+    "fbpinn_ode":   ("examples/PINNs/fbpinn_ode/fbpinn_ode.py",    "run_fbpinn_ode"),
 
     # Fluid dynamics
-    "k_epsilon":    ("examples/K-Epsilon/turbulence.py",    "run_turbulence"),
-    "ldc":          ("examples/LDC/run_ldc.py",             "run_ldc"),
-    "airfoil":      ("examples/airfoil/airfoil_flow.py",    "run_airfoil"),
-    "cylinder":     ("examples/cylinder/cylinder_flow.py",  "run_cylinder"),
-    "pipe_flow":     ("examples/pipe_flow/pipe_flow.py",      "run_pipe_flow"),
+    "k_epsilon":    ("examples/PINNs/K-Epsilon/turbulence.py",    "run_turbulence"),
+    "ldc":          ("examples/PINNs/LDC/run_ldc.py",             "run_ldc"),
+    "airfoil":      ("examples/PINNs/airfoil/airfoil_flow.py",    "run_airfoil"),
+    "cylinder":     ("examples/PINNs/cylinder/cylinder_flow.py",  "run_cylinder"),
+    "pipe_flow":     ("examples/PINNs/pipe_flow/pipe_flow.py",      "run_pipe_flow"),
     "pipe_flow_rheology": (
-        "examples/pipe_flow_rheology/pipe_flow_rheology.py",
+        "examples/PINNs/pipe_flow_rheology/pipe_flow_rheology.py",
         "run_pipe_flow_rheology",
     ),
-    "AAA_flow":    ("examples/AAA/AAA_flow.py",         "run_AAA_flow"),
-    "Aneurysm":    ("examples/Aneurysm/Aneurysm.py",    "run_Aneurysm"),
+    "AAA_flow":    ("examples/PINNs/AAA/AAA_flow.py",         "run_AAA_flow"),
+    "Aneurysm":    ("examples/PINNs/Aneurysm/Aneurysm.py",    "run_Aneurysm"),
     "AAA_rheology": (
-        "examples/AAA_rheology/AAA_rheology.py",
+        "examples/PINNs/AAA_rheology/AAA_rheology.py",
         "run_AAA_rheology",
     ),
-    "ramp":          ("examples/ramp/ramp.py",               "run_ramp"),
-    "ramp_ns":       ("examples/ramp_ns/ramp_ns.py",         "run_ramp_ns"),
-    "sod_shock":     ("examples/sod_shock/sod_shock.py",     "run_sod_shock"),
-    "toro3":         ("examples/toro3/toro3.py",             "run_toro3"),
+    "ramp":          ("examples/PINNs/ramp/ramp.py",               "run_ramp"),
+    "ramp_ns":       ("examples/PINNs/ramp_ns/ramp_ns.py",         "run_ramp_ns"),
+    "sod_shock":     ("examples/PINNs/sod_shock/sod_shock.py",     "run_sod_shock"),
+    "toro3":         ("examples/PINNs/toro3/toro3.py",             "run_toro3"),
 
     # Inverse problems
-    "heat_inverse":      ("examples/heat/inverse.py",        "run_heat_inverse"),
-    "inverse_diffusion": ("examples/heat/inverse.py",        "run_heat_inverse"),
+    "heat_inverse":      ("examples/PINNs/heat/inverse.py",        "run_heat_inverse"),
+    "inverse_diffusion": ("examples/PINNs/heat/inverse.py",        "run_heat_inverse"),
 
     # Transfer learning
     "burgers_transfer": (
-        "examples/transfer/burgers_transfer.py",
+        "examples/PINNs/transfer/burgers_transfer.py",
         "run_burgers_transfer",
     ),
     "pipe_flow_unsteady_transfer": (
-        "examples/pipe_flow/pipe_flow_unsteady_transfer.py",
+        "examples/PINNs/pipe_flow/pipe_flow_unsteady_transfer.py",
         "run_pipe_flow_unsteady_transfer",
     ),
     "pipe_flow_pulsatile_transfer": (
-        "examples/pipe_flow/pipe_flow_pulsatile_transfer.py",
+        "examples/PINNs/pipe_flow/pipe_flow_pulsatile_transfer.py",
         "run_pipe_flow_pulsatile_transfer",
     ),
     "AAA_pulsatile_transfer": (
-        "examples/AAA/AAA_pulsatile_transfer.py",
+        "examples/PINNs/AAA/AAA_pulsatile_transfer.py",
         "run_AAA_pulsatile_transfer",
     ),
     "pipe_flow_rheology_pulsatile": (
-        "examples/pipe_flow_rheology/pipe_flow_rheology_pulsatile.py",
+        "examples/PINNs/pipe_flow_rheology/pipe_flow_rheology_pulsatile.py",
         "run_pipe_flow_rheology_pulsatile",
     ),
     "AAA_rheology_pulsatile": (
-        "examples/AAA_rheology/AAA_rheology_pulsatile.py",
+        "examples/PINNs/AAA_rheology/AAA_rheology_pulsatile.py",
         "run_AAA_rheology_pulsatile",
     ),
 

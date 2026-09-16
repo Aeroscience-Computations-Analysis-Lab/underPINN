@@ -88,7 +88,7 @@ solver.train(*data, config=config)
 ## Verifying config changes before resuming
 
 ```bash
-python -m underPINN resume examples/burgers/config.yaml
+python -m underPINN resume examples/PINNs/burgers/config.yaml
 ```
 
 `resume` computes the MD5 of the current YAML, compares it against the hash stored in

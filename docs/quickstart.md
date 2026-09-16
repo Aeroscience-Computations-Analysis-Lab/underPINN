@@ -7,13 +7,13 @@ Six entry points into underPINN — pick the one that fits your workflow. All ex
 
 ```bash
 # Single run — point at any registered YAML config
-python -m underPINN run  examples/burgers/config.yaml
-python -m underPINN run  examples/wave/config.yaml
-python -m underPINN run  examples/pipe_flow/pipe_flow.yaml
-python -m underPINN run  examples/ramp/config.yaml
+python -m underPINN run  examples/PINNs/burgers/config.yaml
+python -m underPINN run  examples/PINNs/wave/config.yaml
+python -m underPINN run  examples/PINNs/pipe_flow/pipe_flow.yaml
+python -m underPINN run  examples/PINNs/ramp/config.yaml
 
 # Hyperparameter sweep (Cartesian product)
-python -m underPINN sweep examples/burgers/burgers_nu_sweep.yaml
+python -m underPINN sweep examples/PINNs/burgers/burgers_nu_sweep.yaml
 
 # Benchmark all problems
 python -m underPINN bench
@@ -22,7 +22,7 @@ python -m underPINN bench
 python -m underPINN list
 
 # Print resolved config without training
-python -m underPINN show examples/wave/config.yaml
+python -m underPINN show examples/PINNs/wave/config.yaml
 
 # Print framework version
 python -m underPINN version
@@ -101,7 +101,7 @@ output:
 ```
 
 ```bash
-python -m underPINN run examples/burgers/config.yaml
+python -m underPINN run examples/PINNs/burgers/config.yaml
 ```
 
 ## 4. Checkpoint & Inference
@@ -165,14 +165,14 @@ Full reference: {doc}`training` and {doc}`performance`.
 Every example folder is self-contained — a script plus a YAML config side by side:
 
 ```bash
-python examples/burgers/burgers.py
-python examples/wave/wave.py
-python examples/helmholtz/helmholtz.py
-python examples/LDC/run_ldc.py
-python examples/pipe_flow/pipe_flow.py
+python examples/PINNs/burgers/burgers.py
+python examples/PINNs/wave/wave.py
+python examples/PINNs/helmholtz/helmholtz.py
+python examples/PINNs/LDC/run_ldc.py
+python examples/PINNs/pipe_flow/pipe_flow.py
 
 # Pass a custom config as the first argument
-python examples/burgers/burgers.py my_custom.yaml
+python examples/PINNs/burgers/burgers.py my_custom.yaml
 ```
 
 ```{admonition} What's next?

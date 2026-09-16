@@ -3,7 +3,7 @@
 underPINN supports **joint optimisation** of network weights and physics parameters,
 recovering unknown PDE coefficients directly from sparse, noisy observations.
 
-`examples/heat/inverse.py` recovers the unknown thermal diffusivity `α` from 50 sparse
+`examples/PINNs/heat/inverse.py` recovers the unknown thermal diffusivity `α` from 50 sparse
 noisy observations of a 1-D diffusion field.
 
 ## How it works
@@ -36,7 +36,7 @@ pde = DiffusionInversePDE(model, log_alpha_init=jnp.log(0.5))
 # After training: alpha_recovered = jnp.exp(pde.log_alpha)
 ```
 
-The 2-D diffusion inverse case (`examples/inverse/inverse_diffusion.py`) follows the
+The 2-D diffusion inverse case (`examples/PINNs/inverse/inverse_diffusion.py`) follows the
 same pattern for a full 2-D domain.
 
 ```{list-table} Inverse-problem examples
@@ -48,10 +48,10 @@ same pattern for a full 2-D domain.
   - Config
 * - 1-D Heat — Inverse
   - Thermal diffusivity `α` from 50 noisy observations
-  - `examples/heat/heat_inverse.yaml`
+  - `examples/PINNs/heat/heat_inverse.yaml`
 * - 2-D Diffusion Inverse
   - `α` via log-parameterised joint optimisation
-  - `examples/inverse/config.yaml`
+  - `examples/PINNs/inverse/config.yaml`
 ```
 
 ```{admonition} Gradient flow
