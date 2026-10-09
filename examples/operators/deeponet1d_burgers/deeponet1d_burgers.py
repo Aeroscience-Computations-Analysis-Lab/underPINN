@@ -98,6 +98,7 @@ def run_deeponet1d_burgers(cfg) -> dict:
         epochs=epochs, lr=lr,
         lr_schedule=optax.cosine_decay_schedule(lr, epochs, alpha=lr_alpha),
         batch_i=batch_size, log_every=log_every, callbacks=callbacks,
+        data_parallel=bool(cfg_get(tr, "data_parallel", default=False)),
     )
     solver.train(u_pool, x_sensors, xt_bc_lo, xt_bc_hi,
                 n_r=cfg_get(cfg.loss, "n_r", default=2000),

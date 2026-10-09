@@ -56,6 +56,7 @@ from underPINN.pde.compressible_euler import CompressibleEulerPDE
 from underPINN.utils.checkpoint import save_checkpoint
 from underPINN.utils.restart import RestartManager
 from underPINN.utils.sampling import rad_resample, safe_choice
+from underPINN.training.parallel import data_parallel_from_cfg
 
 
 # ---------------------------------------------------------------------------
@@ -227,6 +228,16 @@ def run_ramp(cfg) -> dict:
         xy_r = jnp.asarray(saved_state["xy_r"])
         N_r = xy_r.shape[0]
 
+    # Optional data parallelism (training.data_parallel: true). Inert otherwise.
+    # Prepared after restore (params re-replicated on resume). Sizes are the
+    # *effective* per-step draws, which min(batch_bc, N) can make smaller.
+    dp = data_parallel_from_cfg(tr)
+    params, opt_state = dp.prepare(params, opt_state, {
+        "batch_r": batch_r,
+        "batch_bc (inlet)": min(batch_bc, N_in),
+        "batch_bc (wall)": min(batch_bc, N_wall),
+        "batch_bc (upper)": min(batch_bc, N_up)})
+
     try:
         for ep in range(start_ep, epochs):
             # RAR: refresh the interior pool toward high-residual regions (shock)
@@ -245,7 +256,7 @@ def run_ramp(cfg) -> dict:
 
             params, opt_state, total, (pl, il, wl, ul) = step(
                 params, opt_state,
-                xy_r[ir], xy_in[iin], xy_wall[iw], xy_up[iu])
+                *dp.shard_all((xy_r[ir], xy_in[iin], xy_wall[iw], xy_up[iu])))
 
             loss_hist.append(float(total))
             pde_hist.append(float(pl))

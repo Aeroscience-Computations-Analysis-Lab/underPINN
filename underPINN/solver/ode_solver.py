@@ -73,6 +73,7 @@ class ODESolver(BaseSolver):
         config : :class:`TrainingConfig` — preferred production path
         """
         if config is not None:
+            data_parallel = config.data_parallel
             epochs = config.epochs
             log_every = config.log_every
             callbacks = list(config.callbacks)
@@ -85,6 +86,7 @@ class ODESolver(BaseSolver):
         else:
             callbacks = []
             n_scan = 1
+            data_parallel = False
 
         # ── Restart ──────────────────────────────────────────────────────────────
         _restart = None
@@ -114,6 +116,15 @@ class ODESolver(BaseSolver):
         u_ic = jnp.asarray(u_ic)
         u_ic_dot = jnp.asarray(u_ic_dot)
 
+        # ── Data parallelism (after restore). Full-batch: the collocation
+        # grid t_r is split once; the initial-condition values are a few
+        # points (often just t=0) and stay replicated. Inert when off.
+        from underPINN.training.parallel import make_data_parallel
+        dp = make_data_parallel(active=data_parallel)
+        self.params, self.state = dp.prepare(
+            self.params, self.state, {"n_collocation (len(t_r))": t_r.shape[0]})
+        t_r = dp.shard(t_r)
+
         start = time.time()
 
         # ------------------------------------------------------------------ #
@@ -129,7 +140,7 @@ class ODESolver(BaseSolver):
             try:
                 for outer in range(n_outer):
                     self.params, self.state, (losses, pde_ls, ic_ls, ic_dot_ls) = \
-                        scan_step(self.params, self.state, dummy_xs)
+                        scan_step(self.params, self.state, dummy_xs, t_r)
 
                     self.loss_hist.extend(losses.tolist())
                     self.pde_hist.extend(pde_ls.tolist())
@@ -284,39 +295,44 @@ class ODESolver(BaseSolver):
 
         Returns a function::
 
-            scan_step(params, state, dummy_xs: jnp.ndarray[n_steps])
+            scan_step(params, state, dummy_xs: jnp.ndarray[n_steps], t_r)
               → (new_params, new_state, (losses, pde_ls, ic_ls, ic_dot_ls))
 
         Call as::
 
-            scan_step(params, state, jnp.zeros(n_scan))
+            scan_step(params, state, jnp.zeros(n_scan), t_r)
+
+        ``t_r`` is an *argument*, not a closure capture: ``jit`` bakes a
+        closed-over array into the program as a full constant on every
+        device, which would silently defeat data parallelism. The *t_r*
+        passed to this builder is unused and kept only for signature
+        compatibility.
         """
         loss_fn = self.loss
         opt = self.opt
 
-        # Capture data in closure — arrays are static across all scan steps
-        t_r_ = t_r
+        # The (tiny) initial-condition arrays are captured; t_r is not.
         t_ic_ = t_ic
         u_ic_ = u_ic
         u_ic_dot_ = u_ic_dot
 
-        def scan_body(carry, _unused):
-            params, state = carry
-
-            def objective(p):
-                return loss_fn(p, t_r_, t_ic_, u_ic_, u_ic_dot_)
-
-            (loss, (pde_l, ic_l, ic_dot_l, _reg)), grads = jax.value_and_grad(
-                objective, has_aux=True
-            )(params)
-
-            updates, new_state = opt.update(grads, state)
-            new_params = optax.apply_updates(params, updates)
-            return (new_params, new_state), (loss, pde_l, ic_l, ic_dot_l)
-
         @jax.jit
-        def scan_step(params, state, dummy_xs):
+        def scan_step(params, state, dummy_xs, t_r_arg):
             # dummy_xs shape: (n_steps,) — values unused; shape drives iteration count
+            def scan_body(carry, _unused):
+                params, state = carry
+
+                def objective(p):
+                    return loss_fn(p, t_r_arg, t_ic_, u_ic_, u_ic_dot_)
+
+                (loss, (pde_l, ic_l, ic_dot_l, _reg)), grads = jax.value_and_grad(
+                    objective, has_aux=True
+                )(params)
+
+                updates, new_state = opt.update(grads, state)
+                new_params = optax.apply_updates(params, updates)
+                return (new_params, new_state), (loss, pde_l, ic_l, ic_dot_l)
+
             (new_params, new_state), aux = jax.lax.scan(
                 scan_body, (params, state), dummy_xs
             )

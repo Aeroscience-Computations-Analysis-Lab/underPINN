@@ -50,6 +50,7 @@ from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.utils.checkpoint import save_checkpoint
 from underPINN.utils.restart import RestartManager
 from underPINN.utils.sampling import rad_resample, safe_choice
+from underPINN.training.parallel import data_parallel_from_cfg
 from underPINN.utils.riemann import exact_riemann_1d
 
 
@@ -219,6 +220,15 @@ def run_toro3(cfg) -> dict:
         xt_r_j = jnp.asarray(saved_state["xt_r"])
         N_r = xt_r_j.shape[0]
 
+    # Optional data parallelism (training.data_parallel: true). Inert otherwise.
+    # Prepared after restore (params re-replicated on resume). Sizes are the
+    # *effective* per-step draws, which min(batch_bc, N) can make smaller.
+    dp = data_parallel_from_cfg(tr)
+    params, opt_state = dp.prepare(params, opt_state, {
+        "batch_r": batch_r,
+        "batch_bc (initial condition)": min(batch_bc, N_ic),
+        "batch_bc (boundary)": min(batch_bc, N_bc)})
+
     try:
         for ep in range(start_ep, epochs):
             # RAR: refresh the interior pool toward the strong shock
@@ -236,7 +246,8 @@ def run_toro3(cfg) -> dict:
 
             params, opt_state, total, (pl, il, bl) = step(
                 params, opt_state,
-                xt_r_j[ir], xt_ic_j[ii], ic_tgt[ii], xt_bcL_j[ib], xt_bcR_j[ib])
+                *dp.shard_all((xt_r_j[ir], xt_ic_j[ii], ic_tgt[ii],
+                               xt_bcL_j[ib], xt_bcR_j[ib])))
 
             loss_hist.append(float(total))
             eps_hist.append(pde.viscosity(params))

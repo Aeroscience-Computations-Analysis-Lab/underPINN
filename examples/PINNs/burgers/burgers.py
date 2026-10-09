@@ -110,6 +110,7 @@ def run_burgers(cfg) -> dict:
         resample_k          = cfg_get(tr, "resample_k",          default=1.0),
         out_dir             = out_dir,
         save_restart_every  = int(cfg_get(tr, "save_restart_every", default=500)),
+        data_parallel       = bool(cfg_get(tr, "data_parallel", default=False)),
     )
 
     data = _make_data(cfg.data, seed)

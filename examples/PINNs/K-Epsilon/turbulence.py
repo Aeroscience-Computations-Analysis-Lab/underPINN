@@ -234,6 +234,7 @@ def run_turbulence(cfg) -> dict:
         epochs=epochs, batch_size=batch_size, seed=seed,
         out_dir=out_dir,
         save_restart_every=int(cfg_get(tr, "save_restart_every", default=500)),
+        data_parallel=bool(cfg_get(tr, "data_parallel", default=False)),
     )
 
     # ── Save ──────────────────────────────────────────────────────────────────

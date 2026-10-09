@@ -53,6 +53,7 @@ from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.callbacks.early_stopping import EarlyStopping
 from underPINN.utils.io import save_predictions
 from underPINN.utils.sampling import safe_choice
+from underPINN.training.parallel import make_data_parallel
 
 
 # ── Architecture ─────────────────────────────────────────────────────────────
@@ -148,7 +149,7 @@ def rel_l2(u_pred, u_exact):
 
 def run_training(model, pde, data, epochs, lr, alpha,
                  init_params=None, seed=0, label="",
-                 val_every=100, val_t=None):
+                 val_every=100, val_t=None, dp=None):
     """
     Full training loop for UnsteadyHeat2DPDE.
 
@@ -180,12 +181,18 @@ def run_training(model, pde, data, epochs, lr, alpha,
     loss_hist = []
     err_hist  = []
 
+    # Data parallelism: only the collocation mini-batch is split; the IC/BC
+    # sets are closed over by the step and run replicated on every device.
+    if dp is None:
+        dp = make_data_parallel(active=False)
+    params, opt_state = dp.prepare(params, opt_state, {"BATCH_R": BATCH_R})
+
     try:
         for ep in range(epochs):
             key, k = jax.random.split(key)
             idx     = safe_choice(k, n_r, BATCH_R)
             params, opt_state, loss, _ = step_fn(
-                params, opt_state, xy_r[idx], t_r[idx]
+                params, opt_state, *dp.shard_all((xy_r[idx], t_r[idx]))
             )
             loss_hist.append(float(loss))
 
@@ -238,7 +245,13 @@ def plot_solution_row(axes_row, model, params, pde, alpha, t_slice, title_prefix
 # Strategy 1 — Parameter Transfer
 # ---------------------------------------------------------------------------
 
-def run_parameter_transfer():
+def run_parameter_transfer(data_parallel: bool = False):
+    # Optional data parallelism (`--data-parallel`). Inert otherwise.
+    dp = make_data_parallel(active=data_parallel)
+
+    def _train(*args, **kwargs):
+        return run_training(*args, dp=dp, **kwargs)
+
     print("\n" + "=" * 60)
     print("Strategy 1: Parameter Transfer  α=0.10 → α=0.01")
     print("=" * 60)
@@ -255,7 +268,7 @@ def run_parameter_transfer():
     print(f"\n[Source]  α=0.10, {N_SRC} epochs, T={T}")
     model_src = MLP(layers=LAYERS)
     pde_src   = UnsteadyHeat2DPDE(model_src, alpha=0.10)
-    src_params, src_loss, _ = run_training(
+    src_params, src_loss, _ = _train(
         model_src, pde_src, data, N_SRC, lr=1e-3, alpha=0.10, label="Source"
     )
 
@@ -263,7 +276,7 @@ def run_parameter_transfer():
     print(f"\n[Transfer]  α=0.01, {N_TGT} epochs from source weights")
     model_tf = MLP(layers=LAYERS)
     pde_tf   = UnsteadyHeat2DPDE(model_tf, alpha=0.01)
-    tf_params, tf_loss, tf_err = run_training(
+    tf_params, tf_loss, tf_err = _train(
         model_tf, pde_tf, data, N_TGT, lr=3e-4, alpha=0.01,
         init_params=src_params,
         label="Transfer", val_t=VAL_T,
@@ -273,7 +286,7 @@ def run_parameter_transfer():
     print(f"\n[Scratch]  α=0.01, {N_SC} epochs from random init")
     model_sc = MLP(layers=LAYERS)
     pde_sc   = UnsteadyHeat2DPDE(model_sc, alpha=0.01)
-    sc_params, sc_loss, sc_err = run_training(
+    sc_params, sc_loss, sc_err = _train(
         model_sc, pde_sc, data, N_SC, lr=1e-3, alpha=0.01,
         label="Scratch", val_t=VAL_T,
     )
@@ -341,7 +354,13 @@ def run_parameter_transfer():
 # Strategy 2 — Temporal Transfer
 # ---------------------------------------------------------------------------
 
-def run_temporal_transfer():
+def run_temporal_transfer(data_parallel: bool = False):
+    # Optional data parallelism (`--data-parallel`). Inert otherwise.
+    dp = make_data_parallel(active=data_parallel)
+
+    def _train(*args, **kwargs):
+        return run_training(*args, dp=dp, **kwargs)
+
     print("\n" + "=" * 60)
     print("Strategy 2: Temporal Transfer  t∈[0,0.3] → t∈[0,0.8]")
     print("=" * 60)
@@ -360,7 +379,7 @@ def run_temporal_transfer():
     print(f"\n[Phase 1]  α={ALPHA}, t∈[0,{T1}], {N_P1} epochs")
     model_p1 = MLP(layers=LAYERS)
     pde_p1   = UnsteadyHeat2DPDE(model_p1, alpha=ALPHA)
-    p1_params, p1_loss, _ = run_training(
+    p1_params, p1_loss, _ = _train(
         model_p1, pde_p1, data_p1, N_P1, lr=1e-3, alpha=ALPHA, label="Phase-1"
     )
 
@@ -368,7 +387,7 @@ def run_temporal_transfer():
     print(f"\n[Transfer]  α={ALPHA}, t∈[0,{T2}], {N_P2} epochs from phase-1")
     model_tf = MLP(layers=LAYERS)
     pde_tf   = UnsteadyHeat2DPDE(model_tf, alpha=ALPHA)
-    tf_params, tf_loss, tf_err = run_training(
+    tf_params, tf_loss, tf_err = _train(
         model_tf, pde_tf, data_p2, N_P2, lr=3e-4, alpha=ALPHA,
         init_params=p1_params,
         label="Temporal-TF", val_t=VAL_T,
@@ -378,7 +397,7 @@ def run_temporal_transfer():
     print(f"\n[Scratch]  α={ALPHA}, t∈[0,{T2}], {N_SC} epochs from random init")
     model_sc = MLP(layers=LAYERS)
     pde_sc   = UnsteadyHeat2DPDE(model_sc, alpha=ALPHA)
-    sc_params, sc_loss, sc_err = run_training(
+    sc_params, sc_loss, sc_err = _train(
         model_sc, pde_sc, data_p2, N_SC, lr=1e-3, alpha=ALPHA,
         label="Scratch", val_t=VAL_T,
     )
@@ -449,12 +468,16 @@ def run_temporal_transfer():
 # Entry point
 # ---------------------------------------------------------------------------
 
-def main():
+def main(data_parallel: bool = False):
     print("JAX devices:", jax.devices())
-    run_parameter_transfer()
-    run_temporal_transfer()
+    run_parameter_transfer(data_parallel=data_parallel)
+    run_temporal_transfer(data_parallel=data_parallel)
     print("\nAll 2-D heat transfer experiments complete.")
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    _ap = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
+    _ap.add_argument("--data-parallel", action="store_true",
+                     help="split each collocation batch across all visible devices")
+    main(data_parallel=_ap.parse_args().data_parallel)

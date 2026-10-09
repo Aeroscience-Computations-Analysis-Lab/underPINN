@@ -55,6 +55,7 @@ from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.utils.checkpoint import save_checkpoint
 from underPINN.utils.io import save_predictions
 from underPINN.utils.restart import RestartManager
+from underPINN.training.parallel import data_parallel_from_cfg
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +184,12 @@ def run_fbpinn_ode(cfg) -> dict:
     restart = RestartManager(out_dir, save_every=save_restart, cfg=cfg)
     start_ep, params, opt_state, hists = restart.maybe_restore(params, opt_state)
     loss_hist = hists.get("loss_hist", [])
+
+    # Optional data parallelism (training.data_parallel: true). Inert otherwise.
+    # Full-batch with a fixed point set: split it once, before the loop.
+    dp = data_parallel_from_cfg(tr)
+    params, opt_state = dp.prepare(params, opt_state, {"n_collocation": n_col})
+    x_col = dp.shard(x_col)
 
     logger = ConsoleLogger(log_every=log_every)
     for ep in range(start_ep, epochs):

@@ -38,6 +38,7 @@ from underPINN.utils.io import save_predictions
 from underPINN.utils.checkpoint import save_checkpoint
 from underPINN.utils.restart import RestartManager
 from underPINN.utils.sampling import safe_choice
+from underPINN.training.parallel import data_parallel_from_cfg
 
 
 def run_AAA_flow(cfg) -> dict:
@@ -148,6 +149,14 @@ def run_AAA_flow(cfg) -> dict:
     N_in  = xyz_in.shape[0]
     N_out = xyz_out.shape[0]
 
+    # Optional data parallelism (training.data_parallel: true). Inert otherwise.
+    # Sizes are the *effective* per-step draws -- inlet/outlet use min(., N).
+    dp = data_parallel_from_cfg(tr)
+    params, opt_state = dp.prepare(params, opt_state, {
+        "batch_r": batch_r, "batch_bc": batch_bc,
+        "batch_bc (inlet)": min(batch_bc, N_in),
+        "batch_bc (outlet)": min(batch_bc, N_out)})
+
     logger = ConsoleLogger(log_every=log_every)
     key    = jax.random.PRNGKey(seed + 99)
 
@@ -161,7 +170,7 @@ def run_AAA_flow(cfg) -> dict:
 
             params, opt_state, total, (pl, wl, il, ol) = step(
                 params, opt_state,
-                xyz_r[ir], xyz_w[iw], xyz_in[iin], xyz_out[iout])
+                *dp.shard_all((xyz_r[ir], xyz_w[iw], xyz_in[iin], xyz_out[iout])))
             loss_hist.append(float(total))
 
             logs = {"loss": float(total), "pde": float(pl),

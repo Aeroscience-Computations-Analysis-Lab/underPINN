@@ -29,6 +29,7 @@ from underPINN.callbacks.early_stopping import EarlyStopping
 from underPINN.utils.io import save_predictions
 from underPINN.utils.checkpoint import save_checkpoint
 from underPINN.utils.sampling import safe_choice
+from underPINN.training.parallel import data_parallel_from_cfg
 from underPINN.utils.restart import RestartManager
 
 
@@ -113,6 +114,11 @@ def run_wave(cfg) -> dict:
     stopper = EarlyStopping(patience=patience)
     key = jax.random.PRNGKey(seed + 99)
 
+    # Optional data parallelism (training.data_parallel: true). Inert otherwise.
+    dp = data_parallel_from_cfg(tr)
+    params, opt_state = dp.prepare(params, opt_state, {
+        "batch_r": bR, "batch_i": bI, "batch_b": bB})
+
     try:
         for ep in range(start_ep, epochs):
             key, k1, k2, k3 = jax.random.split(key, 4)
@@ -121,7 +127,8 @@ def run_wave(cfg) -> dict:
             ib = safe_choice(k3, N_BC, bB)
             params, opt_state, total, (pl, il, dl, bl) = step(
                 params, opt_state,
-                x_r[ir], t_r[ir], x_ic[ii], u_ic[ii], x_bc[ib], t_bc[ib])
+                *dp.shard_all((x_r[ir], t_r[ir], x_ic[ii], u_ic[ii],
+                               x_bc[ib], t_bc[ib])))
             loss_hist.append(float(total))
             logs = {"loss": float(total), "pde": float(pl),
                     "ic": float(il), "bc": float(bl)}

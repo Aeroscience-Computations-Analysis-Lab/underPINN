@@ -66,6 +66,8 @@ from underPINN.utils.checkpoint import (
     save_checkpoint,
 )
 from underPINN.utils.sampling import safe_choice
+from underPINN.training.parallel import (data_parallel_from_cfg,
+                                        make_data_parallel)
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +117,7 @@ def _window_data(pipe: Pipe, dT: float, d, seed: int):
 def _train_window(
     pde, model, data, *, R, V_max, V_amp, T_period, t0, dT,
     ic_uvw, epochs, lr, lr_alpha, weights, batch_r, batch_bc,
-    init_params, seed, label,
+    init_params, seed, label, dp=None,
 ):
     """Train one time window τ ∈ [0, dT] (absolute t = t0 + τ).
 
@@ -191,6 +193,16 @@ def _train_window(
     key = jax.random.PRNGKey(seed + 99)
     loss_hist = []
 
+    # Data parallelism, set up per window: each window warm-starts from the
+    # previous one's params with a fresh opt_state, so both are (re-)
+    # replicated here. The closed-over IC term runs replicated per device.
+    if dp is None:
+        dp = make_data_parallel(active=False)
+    params, opt_state = dp.prepare(params, opt_state, {
+        "batch_r": batch_r, "batch_bc": batch_bc,
+        "batch_bc (inlet)": min(batch_bc, N_in),
+        "batch_bc (outlet)": min(batch_bc, N_out)})
+
     for ep in range(epochs):
         key, k1, k2, k3, k4 = jax.random.split(key, 5)
         ir  = safe_choice(k1, N_r,   batch_r)
@@ -200,7 +212,8 @@ def _train_window(
 
         params, opt_state, total, (pl, wl, il, ol, icl) = step(
             params, opt_state,
-            xyzt_r[ir], xyzt_w[iw], xyzt_in[iin], xyzt_out[iout])
+            *dp.shard_all((xyzt_r[ir], xyzt_w[iw], xyzt_in[iin],
+                           xyzt_out[iout])))
         loss_hist.append(float(total))
 
         if ep % max(epochs // 5, 1) == 0 or ep == epochs - 1:
@@ -237,6 +250,7 @@ def run_pipe_flow_pulsatile_transfer(cfg) -> dict:
     d   = cfg.data
     lw  = cfg.loss
     tm  = cfg_get(cfg, "time_marching", default=None)
+    dp  = data_parallel_from_cfg(cfg_get(cfg, "training", default=None))
     out = cfg_get(cfg, "output", default=None)
     out_dir = (cfg_get(out, "dir", default="outputs/pipe_flow_pulsatile_transfer")
                if out else "outputs/pipe_flow_pulsatile_transfer")
@@ -428,7 +442,7 @@ def run_pipe_flow_pulsatile_transfer(cfg) -> dict:
             R=R, V_max=V_max, V_amp=V_amp, T_period=T_period, t0=t0, dT=dT,
             ic_uvw=ic_uvw, epochs=epochs, lr=lr, lr_alpha=lr_alpha,
             weights=weights, batch_r=batch_r, batch_bc=batch_bc,
-            init_params=prev_params, seed=seed + k, label=f"tf-w{k+1}")
+            init_params=prev_params, seed=seed + k, label=f"tf-w{k+1}", dp=dp)
         tf_params_list.append(params)
         tf_loss_all.append(lh)
         prev_params = params
@@ -465,7 +479,8 @@ def run_pipe_flow_pulsatile_transfer(cfg) -> dict:
                 R=R, V_max=V_max, V_amp=V_amp, T_period=T_period, t0=t0, dT=dT,
                 ic_uvw=ic_uvw, epochs=n_cold, lr=cold_lr, lr_alpha=lr_alpha,
                 weights=weights, batch_r=batch_r, batch_bc=batch_bc,
-                init_params=None, seed=seed + 500 + k, label=f"cold-w{k+1}")
+                init_params=None, seed=seed + 500 + k, label=f"cold-w{k+1}",
+                dp=dp)
             cold_loss_all.append(lh_c)
             prev_cold = params_c
 

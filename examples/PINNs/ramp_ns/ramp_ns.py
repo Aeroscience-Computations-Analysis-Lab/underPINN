@@ -50,6 +50,7 @@ from underPINN.utils.checkpoint import save_checkpoint
 from underPINN.utils.io import save_predictions
 from underPINN.utils.restart import RestartManager
 from underPINN.utils.sampling import rad_resample, safe_choice
+from underPINN.training.parallel import data_parallel_from_cfg
 
 
 def run_ramp_ns(cfg) -> dict:
@@ -229,6 +230,21 @@ def run_ramp_ns(cfg) -> dict:
     def _rar_candidate_sampler(n, s):
         return geom.sample_interior(n, seed=s, x_min=rar_x_min)
 
+    # Optional data parallelism (training.data_parallel: true). Inert otherwise.
+    # Prepared after restore (params re-replicated on resume). Sizes are the
+    # *effective* per-step draws, which min(batch_bc, N) can make smaller.
+    dp = data_parallel_from_cfg(tr)
+    params, opt_state = dp.prepare(params, opt_state, {
+        # the interior batch is three sub-batches derived from batch_r;
+        # each must divide on its own -- tune batch_r / adapt_frac / bl_frac
+        "interior uniform  (batch_r - adapt - bl)": batch_uni,
+        "interior b-layer  (round(bl_frac * batch_r))": batch_bl,
+        "interior adaptive (round(adapt_frac * batch_r))": batch_adapt,
+        "batch_bc (inlet)": min(batch_bc, N_in),
+        "batch_bc (wall)": min(batch_bc, N_w),
+        "batch_bc (slip)": min(batch_bc, N_slip),
+        "batch_bc (upper)": min(batch_bc, N_up)})
+
     try:
         for ep in range(start_ep, epochs):
             # RAR: migrate ONLY the adaptive pool toward high-residual regions
@@ -253,8 +269,9 @@ def run_ramp_ns(cfg) -> dict:
             iu  = safe_choice(k5,  N_up,   min(batch_bc, N_up))
 
             params, opt_state, total, (pl, il, wl, sl, ul) = step(
-                params, opt_state, xy_uniform[iru], xy_bl[irb], xy_adapt[ira],
-                xy_in[iin], xy_w[iw], xy_slip[isl], xy_up[iu])
+                params, opt_state, *dp.shard_all((
+                    xy_uniform[iru], xy_bl[irb], xy_adapt[ira],
+                    xy_in[iin], xy_w[iw], xy_slip[isl], xy_up[iu])))
 
             loss_hist.append(float(total))
             logger.on_epoch_end(ep, {"loss": float(total), "pde": float(pl),

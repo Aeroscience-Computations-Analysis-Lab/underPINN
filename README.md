@@ -976,7 +976,18 @@ Enable RAR-D (`resample_period > 0`) when the solution has sharp gradients or sh
 JAX defaults to float32, which is optimal on all GPUs. Do not enable `jax.config.update("jax_enable_x64", True)` unless you have a specific reason; it halves throughput on CUDA devices.
 
 ### Multi-GPU
-Use `CUDA_VISIBLE_DEVICES=1` to restrict to a specific GPU. Full multi-GPU sharded training is not currently implemented; single-device training on the fastest GPU is the recommended approach. To use several GPUs, launch one run per device (e.g. a parameter sweep with a different `CUDA_VISIBLE_DEVICES` per process).
+**Data parallelism** splits each mini-batch across all visible devices while replicating the parameters and optimizer state. **Every example and every solver supports it** — add one line to any example's YAML, no code change:
+
+```yaml
+training:
+  data_parallel: true
+```
+
+(or `TrainingConfig(data_parallel=True)` programmatically; `heat2d_transfer.py`, which has no YAML, takes `--data-parallel`). The gradient is mathematically the same as single-device full-batch training — `jax.jit` over `NamedSharding` is a global-view computation, so each loss-term mean becomes a cross-device all-reduce over the *global* point count; this is data parallelism, not a different algorithm. It works on the Python-loop and `lax.scan` paths, with RAR-D/RAD resampling, time-marching windows, and restart/resume, and is a no-op on one device.
+
+Every *effective* per-step batch must divide by the device count — checked before training starts, naming each offending size with the nearest valid values. The shipped configs were tuned for one GPU, so some need their batch sizes adjusted. Mini-batches are split; small sets evaluated whole every step (e.g. boundary sets in the full-batch flows, the time-marching IC term) stay replicated, which bounds the achievable speedup. Data parallelism scales *throughput*, not model size: parameters are replicated, so a model that does not fit on one device still won't.
+
+Correctness is CI-tested on 8 virtual CPU devices (`XLA_FLAGS=--xla_force_host_platform_device_count=8`): every example is trained with the flag off and on and must produce the same loss trajectory, while the test also verifies the sharding actually happened. That proves the gradients are right but says nothing about speedup, which needs real accelerators. To pin a run to one GPU instead, use `CUDA_VISIBLE_DEVICES=1`.
 
 ### TPU
 Install with `requirements-tpu.txt` (see Installation). On import, underPINN detects the TPU backend and sets `jax_default_matmul_precision = "float32"` automatically — the TPU's default bfloat16 matmuls corrupt second-order PDE residuals (Hessians), so full-float32 matmuls are required for PINN accuracy. Override via the `JAX_DEFAULT_MATMUL_PRECISION` env var. (Set it to the canonical `"float32"`, not the `"highest"` alias — JAX's validator accepts only `'bfloat16'`/`'tensorfloat32'`/`'float32'` and rejects the aliases; `"float32"` is `Precision.HIGHEST`.)

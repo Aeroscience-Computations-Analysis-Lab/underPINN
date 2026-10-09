@@ -40,6 +40,8 @@ from underPINN.pde.pipe_flow_unsteady import UnsteadyPipeFlowPDE
 from underPINN.utils.io import save_predictions
 from underPINN.utils.checkpoint import save_checkpoint
 from underPINN.utils.sampling import safe_choice
+from underPINN.training.parallel import (data_parallel_from_cfg,
+                                        make_data_parallel)
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +77,7 @@ def _run_training(pde, data, epochs: int, lr: float, R: float,
                   batch_r: int, batch_ic: int, batch_bc: int,
                   w_pde: float, w_ic: float, w_bc: float,
                   init_params=None, seed: int = 0, label: str = "",
-                  log_every: int = 500):
+                  log_every: int = 500, dp=None):
     """Train the unsteady pipe PDE; optionally warm-start from *init_params*."""
     yz_r, t_r, yz_ic, yz_bc, t_bc = data
 
@@ -110,6 +112,13 @@ def _run_training(pde, data, epochs: int, lr: float, R: float,
     key       = jax.random.PRNGKey(seed + 99)
     loss_hist = []
 
+    # Data parallelism, set up per training run (source / transfer / scratch
+    # each start from different params with a fresh opt_state).
+    if dp is None:
+        dp = make_data_parallel(active=False)
+    params, opt_state = dp.prepare(params, opt_state, {
+        "batch_r": batch_r, "batch_ic": batch_ic, "batch_bc": batch_bc})
+
     for ep in range(epochs):
         key, k1, k2, k3 = jax.random.split(key, 4)
         ir = safe_choice(k1, N_r,  batch_r)
@@ -118,7 +127,7 @@ def _run_training(pde, data, epochs: int, lr: float, R: float,
 
         params, opt_state, total, (pl, il, bl) = step(
             params, opt_state,
-            yz_r[ir], t_r[ir], yz_ic[ii], yz_bc[ib], t_bc[ib],
+            *dp.shard_all((yz_r[ir], t_r[ir], yz_ic[ii], yz_bc[ib], t_bc[ib])),
         )
         loss_hist.append(float(total))
 
@@ -153,6 +162,12 @@ def run_pipe_flow_unsteady_transfer(cfg) -> dict:
     ph  = cfg.physics
     d   = cfg.data
     lw  = cfg.loss
+    # Optional data parallelism (training.data_parallel: true). Inert otherwise.
+    # Bound once here so all six training runs below share it.
+    dp  = data_parallel_from_cfg(cfg_get(cfg, "training", default=None))
+
+    def _train(*args, **kwargs):
+        return _run_training(*args, dp=dp, **kwargs)
     out = cfg_get(cfg, "output", default=None)
     out_dir = (cfg_get(out, "dir", default="outputs/pipe_flow_unsteady_transfer")
                if out else "outputs/pipe_flow_unsteady_transfer")
@@ -198,21 +213,21 @@ def run_pipe_flow_unsteady_transfer(cfg) -> dict:
         print(f"\n[Source]   Re={src_Re}, {N_src} epochs")
         model_src = MLP(layers=layers)
         pde_src   = UnsteadyPipeFlowPDE(model_src, Re=src_Re, R=R, U_max=U_max)
-        src_params, _ = _run_training(
+        src_params, _ = _train(
             pde_src, data_src, N_src, src_lr, R, B_r, B_ic, B_bc,
             w_pde, w_ic, w_bc, seed=0, label="Source")
 
         print(f"\n[Transfer] Re={tgt_Re}, {N_tf} fine-tune epochs")
         model_tf = MLP(layers=layers)
         pde_tf   = UnsteadyPipeFlowPDE(model_tf, Re=tgt_Re, R=R, U_max=U_max)
-        tf_params, hist_tf = _run_training(
+        tf_params, hist_tf = _train(
             pde_tf, data_tgt, N_tf, tf_lr, R, B_r, B_ic, B_bc,
             w_pde, w_ic, w_bc, init_params=src_params, seed=1, label="Transfer")
 
         print(f"\n[Scratch]  Re={tgt_Re}, {N_sc} epochs from random init")
         model_sc = MLP(layers=layers)
         pde_sc   = UnsteadyPipeFlowPDE(model_sc, Re=tgt_Re, R=R, U_max=U_max)
-        sc_params, hist_sc = _run_training(
+        sc_params, hist_sc = _train(
             pde_sc, data_tgt, N_sc, sc_lr, R, B_r, B_ic, B_bc,
             w_pde, w_ic, w_bc, seed=2, label="Scratch")
 
@@ -322,21 +337,21 @@ def run_pipe_flow_unsteady_transfer(cfg) -> dict:
         print(f"\n[Phase 1]  Re={Re}, t∈[0,{T1}], {N_p1} epochs")
         model_p1 = MLP(layers=layers)
         pde_p1   = UnsteadyPipeFlowPDE(model_p1, Re=Re, R=R, U_max=U_max)
-        p1_params, _ = _run_training(
+        p1_params, _ = _train(
             pde_p1, data_p1, N_p1, p1_lr, R, B_r, B_ic, B_bc,
             w_pde, w_ic, w_bc, seed=0, label="Phase1")
 
         print(f"\n[Transfer] Re={Re}, t∈[0,{T2}], {N_tf} fine-tune epochs")
         model_p2 = MLP(layers=layers)
         pde_p2   = UnsteadyPipeFlowPDE(model_p2, Re=Re, R=R, U_max=U_max)
-        p2_params, hist_p2 = _run_training(
+        p2_params, hist_p2 = _train(
             pde_p2, data_p2, N_tf, tf_lr, R, B_r, B_ic, B_bc,
             w_pde, w_ic, w_bc, init_params=p1_params, seed=1, label="Transfer")
 
         print(f"\n[Scratch]  Re={Re}, t∈[0,{T2}], {N_sc} epochs from random init")
         model_sc2 = MLP(layers=layers)
         pde_sc2   = UnsteadyPipeFlowPDE(model_sc2, Re=Re, R=R, U_max=U_max)
-        sc2_params, hist_sc2 = _run_training(
+        sc2_params, hist_sc2 = _train(
             pde_sc2, data_p2, N_sc, sc_lr, R, B_r, B_ic, B_bc,
             w_pde, w_ic, w_bc, seed=2, label="Scratch")
 

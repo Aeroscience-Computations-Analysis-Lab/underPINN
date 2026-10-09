@@ -81,8 +81,10 @@ on CUDA devices and is not needed for PINN training.
 :::
 
 :::{grid-item-card} Multi-GPU
-Use `CUDA_VISIBLE_DEVICES=1` to restrict to a specific GPU. Full multi-GPU `pmap`
-training is not currently implemented — launch one run per device instead.
+Add `data_parallel: true` under `training:` in any example's YAML (or pass
+`TrainingConfig(data_parallel=True)`) to split each mini-batch across all visible
+devices with replicated parameters — same gradient as single-device training. See
+{ref}`data-parallelism`. Use `CUDA_VISIBLE_DEVICES=1` to pin a run to one GPU.
 :::
 ::::
 

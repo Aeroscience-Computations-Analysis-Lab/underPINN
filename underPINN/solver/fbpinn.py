@@ -125,6 +125,7 @@ class FBPINNSolver(BaseSolver):
             resample_candidates = config.resample_candidates
             resample_k = config.resample_k
             candidate_sampler = config.candidate_sampler
+            data_parallel = config.data_parallel
             if config.lr_schedule is not None:
                 self.opt = self._make_opt(config.lr, config.lr_schedule)
                 self._step = self._build_step()  # rebuild with new opt
@@ -136,6 +137,7 @@ class FBPINNSolver(BaseSolver):
             resample_candidates = 0
             resample_k = 1.0
             candidate_sampler = None
+            data_parallel = False
 
         # ------------------------------------------------------------------ #
         # Restart — attempt to resume from a previous interrupted run          #
@@ -179,6 +181,21 @@ class FBPINNSolver(BaseSolver):
         N_i = x_i.shape[0]
         N_b = x_b.shape[0]
 
+        # ------------------------------------------------------------------ #
+        # Data parallelism — split each mini-batch across devices             #
+        # ------------------------------------------------------------------ #
+        # Set up *after* the restart block: params/state restored from a
+        # snapshot arrive as plain single-device arrays and must be replicated
+        # here, or a resumed run would silently train on one device.
+        # The point pools (x_r, t_r, ...) stay where they are -- only each
+        # gathered mini-batch is sharded, so RAR-D resampling, which rewrites
+        # the pools, needs no changes.
+        from underPINN.training.parallel import make_data_parallel
+        dp = make_data_parallel(active=data_parallel)   # inert when flag is off
+        self.params, self.state = dp.prepare(
+            self.params, self.state,
+            {"batch_r": batch_r, "batch_i": batch_i, "batch_b": batch_b})
+
         key = jax.random.PRNGKey(seed)
         start = time.time()
 
@@ -217,6 +234,9 @@ class FBPINNSolver(BaseSolver):
                         x_i[idx_i], u_i[idx_i],
                         x_b[idx_b], t_b[idx_b], u_b[idx_b],
                     )
+                    # axis 1, not 0: axis 0 is the scan-step axis, and
+                    # splitting it would hand whole steps to devices.
+                    batches = dp.shard_all(batches, axis=1)
 
                     self.params, self.state, (losses, pde_ls, ic_ls, bc_ls, reg_ls) = \
                         scan_step(self.params, self.state, batches)
@@ -323,13 +343,15 @@ class FBPINNSolver(BaseSolver):
                 idx_i = safe_choice(k2, N_i, batch_i)
                 idx_b = safe_choice(k3, N_b, batch_b)
 
-                self.params, self.state, loss, pde_l, ic_l, bc_l, reg_l = self._step(
-                    self.params,
-                    self.state,
+                batch = (
                     x_r[idx_r], t_r[idx_r],
                     x_i[idx_i], u_i[idx_i],
                     x_b[idx_b], t_b[idx_b], u_b[idx_b],
                 )
+                batch = dp.shard_all(batch)
+
+                self.params, self.state, loss, pde_l, ic_l, bc_l, reg_l = self._step(
+                    self.params, self.state, *batch)
 
                 if _t_first is None:
                     _t_first = time.time() - _t0

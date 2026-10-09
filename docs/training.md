@@ -66,6 +66,10 @@ multiple calls.
   - `float`
   - `1.0`
   - Exponent in `p ∝ |residual|^k`
+* - `data_parallel`
+  - `bool`
+  - `False`
+  - Split each mini-batch across all visible devices — see {ref}`data-parallelism`
 * - `out_dir`
   - `str`
   - `""`
@@ -144,6 +148,120 @@ solver.train(*data, config=config)
   - 10
   - every 500 epochs
   - Long GPU runs, production
+```
+
+(data-parallelism)=
+## Data parallelism (multi-GPU)
+
+Split every mini-batch across all visible devices along its point axis, with the
+network parameters and optimizer state replicated on each device. **Every example
+and every solver supports it**, switched on with one line of YAML — no code change:
+
+```yaml
+training:
+  data_parallel: true
+```
+
+Programmatically, pass it to any solver (`FBPINNSolver`, `SteadySolver`,
+`LDCSolver`, `ODESolver`, `RANSSolver`, `OperatorSolver`, `DeepONetSolver`):
+
+```python
+config = TrainingConfig(epochs=20000, batch_r=8192, batch_b=512,
+                        data_parallel=True)
+solver.train(*data, config=config)
+```
+
+`examples/PINNs/transfer/heat2d_transfer.py` has no YAML; use
+`python heat2d_transfer.py --data-parallel`.
+
+**It does not change the optimisation.** `jax.jit` over `NamedSharding`-annotated
+arrays is a *global-view* computation: the program means exactly what it would
+unsharded, and the sharding only decides where work runs. Every underPINN loss term
+is a mean over its own point set, which the partitioner lowers to a cross-device
+all-reduce divided by the *global* point count — so the gradient equals the
+single-device full-batch gradient, up to float32 reduction-order noise.
+
+```{list-table}
+:header-rows: 1
+:widths: 26 74
+
+* - Behaviour
+  - Detail
+* - Divisibility
+  - Every *effective* per-step batch must divide evenly by the device count. This
+    includes draws like `min(batch_bc, N_inlet)` and derived sub-batches (e.g.
+    Ramp-NS splits `batch_r` into uniform / boundary-layer / adaptive parts). It is
+    checked before any training, and the error names each offending size with the
+    nearest valid values. The shipped configs were tuned for one GPU, so some need
+    their batch sizes adjusted for your device count.
+* - What is split
+  - The mini-batches — collocation points and their per-point targets / RBA state,
+    and for operators the batch of samples.
+* - What stays replicated
+  - Small or shared sets evaluated whole every step: boundary sets in the
+    full-batch flows (airfoil, cylinder, heat-inverse), the initial-condition term
+    in time-marching, RANS's inlet / wall / outlet / observation sets, DeepONet's
+    sensors and BC points. Correct, but not divided — they bound the speedup.
+* - Training paths
+  - Python loop and `lax.scan` (`n_scan_steps > 1`); scan stacks are split along
+    their point axis, not their scan-step axis.
+* - Restart / resume
+  - Parameters restored from a snapshot are re-replicated, so a resumed run stays
+    data-parallel. Checkpoints of replicated parameters save normally.
+* - Resampling
+  - RAR-D / RAD / QR-DEIM-R work unchanged: the point pools are not sharded, only
+    each gathered mini-batch is.
+* - Time-marching / transfer
+  - Set up per window / per run, since each warm-starts from the previous params
+    with a fresh optimizer state.
+* - Single device
+  - A no-op — no divisibility constraint, no behaviour change.
+```
+
+```{warning}
+Data parallelism scales **throughput, not model size**. Parameters are replicated, so
+a network that does not fit in one device's memory still will not fit. Sharding the
+parameters themselves (tensor / FSDP-style parallelism) is a different mechanism and
+is not implemented.
+```
+
+### In your own training loop
+
+The examples all use the same three calls; a custom loop can do the same:
+
+```python
+from underPINN.training import data_parallel_from_cfg
+
+dp = data_parallel_from_cfg(cfg.training)        # inert unless data_parallel: true
+# after any restart-restore, so restored params get replicated too:
+params, opt_state = dp.prepare(params, opt_state,
+                               {"batch_r": batch_r, "batch_bc": batch_bc})
+for ep in range(epochs):
+    ...
+    params, opt_state, loss = step(params, opt_state,
+                                   *dp.shard_all((x_r[ir], x_bc[ib])))
+```
+
+An inert instance makes every call a no-op, so the loop needs no
+`if data_parallel:` branches. For a `lax.scan` stack shaped
+`(n_scan, batch, ...)`, use `dp.shard_all(..., axis=1)`.
+
+```{important}
+Pass the data into the jitted step **as arguments**. `jax.jit` bakes a closed-over
+array into the compiled program as a full constant on *every* device — so a step
+that closes over its collocation points runs replicated, with no all-reduce and no
+speedup, and gives no error. (`ODESolver`'s `lax.scan` path and
+`examples/PINNs/heat/inverse.py` were restructured for exactly this reason.)
+```
+
+```{note}
+Correctness is CI-tested on 8 *virtual* CPU devices. `tests/test_parallel.py`
+checks the sharded gradient, every solver, and that the compiled `ODESolver` scan
+step contains a real all-reduce. `tests/test_parallel_examples.py` trains **every
+example** with the flag off and on and requires the loss trajectories to match —
+while counting the sharding each run performs, so an example that silently ignored
+the flag would fail rather than pass on identical numbers. Virtual devices prove the
+numerics; they cannot measure speedup, which needs real accelerators.
 ```
 
 ## RAR-D adaptive collocation resampling

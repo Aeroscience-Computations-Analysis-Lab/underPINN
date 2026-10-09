@@ -149,6 +149,7 @@ class RANSSolver(BaseSolver):
         out_dir: str = "",
         save_restart_every: int = 500,
         config: TrainingConfig = None,
+        data_parallel: bool = False,
     ):
         """Run the RANS RBA training loop.
 
@@ -171,6 +172,7 @@ class RANSSolver(BaseSolver):
         """
         # ── Unpack config or fall back to legacy kwargs ───────────────────────
         if config is not None:
+            data_parallel      = config.data_parallel
             epochs             = config.epochs
             batch_size         = config.batch_r
             seed               = config.seed
@@ -185,7 +187,7 @@ class RANSSolver(BaseSolver):
             else:
                 state = self.opt.init(params)
         else:
-            callbacks = []
+            callbacks = []           # data_parallel: legacy kwarg
             state = self.opt.init(params)
 
         key = jax.random.PRNGKey(seed)
@@ -217,6 +219,16 @@ class RANSSolver(BaseSolver):
         rsum4 = jnp.zeros(n_col)
         rsum5 = jnp.zeros(n_col)
 
+        # ── Data parallelism (after restore, so resumed params are re-replicated)
+        # The collocation mini-batch and its RBA running sums are split across
+        # devices. The full inlet / no-slip / outlet / data sets are passed
+        # whole every step and stay replicated, so their sizes carry no
+        # divisibility constraint. Inert when off.
+        from underPINN.training.parallel import make_data_parallel
+        dp = make_data_parallel(active=data_parallel)
+        params, state = dp.prepare(
+            params, state, {"batch_r (per-step batch)": batch_size})
+
         print(f"RBA Training on {n_col} points. Batch: {batch_size}. Steps/ep: {steps_per_epoch}")
         start_time = time.time()
         _t_first: float | None = None
@@ -246,14 +258,14 @@ class RANSSolver(BaseSolver):
                     idx_s = i * batch_size
                     idx_e = idx_s + batch_size
 
-                    col_batch = col_shuffled[idx_s:idx_e]
-                    rsum_batch = (
+                    col_batch = dp.shard(col_shuffled[idx_s:idx_e])
+                    rsum_batch = dp.shard_all((
                         rsum1_s[idx_s:idx_e],
                         rsum2_s[idx_s:idx_e],
                         rsum3_s[idx_s:idx_e],
                         rsum4_s[idx_s:idx_e],
                         rsum5_s[idx_s:idx_e],
-                    )
+                    ))
 
                     params, state, new_rsum_batch, loss, aux = self.step_fn(
                         params, state, rsum_batch,
@@ -271,12 +283,21 @@ class RANSSolver(BaseSolver):
                     r4_updates.append(new_rsum_batch[3])
                     r5_updates.append(new_rsum_batch[4])
 
-                # Rebuild global RBA state
-                rsum1 = jnp.concatenate(r1_updates, axis=0)
-                rsum2 = jnp.concatenate(r2_updates, axis=0)
-                rsum3 = jnp.concatenate(r3_updates, axis=0)
-                rsum4 = jnp.concatenate(r4_updates, axis=0)
-                rsum5 = jnp.concatenate(r5_updates, axis=0)
+                # Rebuild global RBA state.
+                # The updated sums come back in *shuffled* (perms) order. Scatter them
+                # to the original positions of the points they belong to, so next
+                # epoch's rsum[perms] hands each point its own history. (Assigning the
+                # concatenation directly left sums in permuted order -- every point got
+                # another point's weight from epoch 2 on -- and, when n_col is not a
+                # multiple of the batch size, shrank the state so later gathers read
+                # out of bounds, which JAX clamps silently.) Points in this epoch's
+                # unvisited remainder keep their previous values.
+                visited = perms[:steps_per_epoch * batch_size]
+                rsum1 = rsum1.at[visited].set(jnp.concatenate(r1_updates, axis=0))
+                rsum2 = rsum2.at[visited].set(jnp.concatenate(r2_updates, axis=0))
+                rsum3 = rsum3.at[visited].set(jnp.concatenate(r3_updates, axis=0))
+                rsum4 = rsum4.at[visited].set(jnp.concatenate(r4_updates, axis=0))
+                rsum5 = rsum5.at[visited].set(jnp.concatenate(r5_updates, axis=0))
 
                 if _t_first is None:
                     _t_first = time.time() - _t0

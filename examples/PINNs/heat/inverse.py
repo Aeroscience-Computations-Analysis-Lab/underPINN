@@ -34,6 +34,7 @@ from underPINN.utils.io import save_predictions
 from underPINN.utils.checkpoint import save_checkpoint
 from underPINN.utils.seed import set_seed
 from underPINN.utils.restart import RestartManager
+from underPINN.training.parallel import data_parallel_from_cfg
 
 
 def run_heat_inverse(cfg) -> dict:
@@ -120,7 +121,11 @@ def run_heat_inverse(cfg) -> dict:
 
     # ── JIT step ──────────────────────────────────────────────────────────────
     @jax.jit
-    def step(params, state):
+    # x_r / t_r are arguments, not closure captures: jit bakes a closed-over
+    # array into the program as a full per-device constant, which would
+    # silently defeat data parallelism. IC/BC/observation sets are small and
+    # stay closed over (evaluated, replicated, on every device).
+    def step(params, state, x_r, t_r):
         def loss_fn(p):
             alpha  = jnp.exp(p["log_alpha"])
             res    = pde.residual(p["nn"], jnp.stack([x_r, t_r], axis=1), alpha=alpha)
@@ -146,10 +151,16 @@ def run_heat_inverse(cfg) -> dict:
     logger  = ConsoleLogger(log_every=log_every)
     stopper = EarlyStopping(patience=patience)
 
+    # Optional data parallelism (training.data_parallel: true). Inert otherwise.
+    dp = data_parallel_from_cfg(tr)
+    all_params, opt_state = dp.prepare(all_params, opt_state,
+                                       {"n_collocation": N_r})
+    x_r, t_r = dp.shard_all((x_r, t_r))
+
     try:
         for ep in range(start_ep, epochs):
             all_params, opt_state, loss, (pde_l, ic_l, bc_l, data_l) = step(
-                all_params, opt_state)
+                all_params, opt_state, x_r, t_r)
             alpha_now = float(jnp.exp(all_params["log_alpha"]))
             loss_hist.append(float(loss))
             alpha_hist.append(alpha_now)

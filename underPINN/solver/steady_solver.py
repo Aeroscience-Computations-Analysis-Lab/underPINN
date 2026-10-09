@@ -66,6 +66,7 @@ class SteadySolver(BaseSolver):
         config : :class:`TrainingConfig` — preferred production path
         """
         if config is not None:
+            data_parallel = config.data_parallel
             epochs     = config.epochs
             batch_r    = config.batch_r
             batch_b    = config.batch_b
@@ -87,6 +88,7 @@ class SteadySolver(BaseSolver):
             resample_k          = 1.0
             resample_candidates = 0
             candidate_sampler   = None
+            data_parallel       = False
 
         # ── Restart / resume ──────────────────────────────────────────────────
         _restart = None
@@ -112,6 +114,15 @@ class SteadySolver(BaseSolver):
                     if _saved:
                         getattr(self, _attr).extend(_saved)
 
+        # ── Data parallelism ──────────────────────────────────────────────────
+        # After restore, so resumed params are re-replicated. Inert when off.
+        # Only mini-batches are sharded; the xy_r pool (rewritten by RAR-D)
+        # is not, so resampling needs no change.
+        from underPINN.training.parallel import make_data_parallel
+        dp = make_data_parallel(active=data_parallel)
+        self.params, self.state = dp.prepare(
+            self.params, self.state, {"batch_r": batch_r, "batch_b": batch_b})
+
         key = jax.random.PRNGKey(seed)
         start = time.time()
 
@@ -128,7 +139,7 @@ class SteadySolver(BaseSolver):
 
                 self.params, self.state, loss, pde_l, bc_l = self._step(
                     self.params, self.state,
-                    xy_r[idx_r], xy_b[idx_b], u_b[idx_b],
+                    *dp.shard_all((xy_r[idx_r], xy_b[idx_b], u_b[idx_b])),
                 )
                 if _t_first is None:
                     _t_first = time.time() - _t0

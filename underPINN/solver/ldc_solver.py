@@ -74,6 +74,7 @@ class LDCSolver(BaseSolver):
         config     : :class:`TrainingConfig` — preferred production path
         """
         if config is not None:
+            data_parallel = config.data_parallel
             epochs     = config.epochs
             batch_size = config.batch_r
             seed       = config.seed
@@ -85,6 +86,7 @@ class LDCSolver(BaseSolver):
                 self.state = self.opt.init(self.params)
         else:
             callbacks = []
+            data_parallel = False
 
         # ── Restart / resume ──────────────────────────────────────────────────
         _restart = None
@@ -121,6 +123,14 @@ class LDCSolver(BaseSolver):
         rsum2 = jnp.zeros(n_col)
         rsum3 = jnp.zeros(n_col)
 
+        # ── Data parallelism (after restore, so resumed params are re-replicated)
+        # Each mini-batch -- collocation points, their RBA running sums, and the
+        # inlet / no-slip draws -- is split across devices. Inert when off.
+        from underPINN.training.parallel import make_data_parallel
+        dp = make_data_parallel(active=data_parallel)
+        self.params, self.state = dp.prepare(
+            self.params, self.state, {"batch_r (per-step batch)": batch_size})
+
         key   = jax.random.PRNGKey(seed)
         start = time.time()
 
@@ -151,15 +161,16 @@ class LDCSolver(BaseSolver):
                 for i in range(steps):
                     s, e = i * batch_size, (i + 1) * batch_size
 
-                    col_batch = col_s[s:e]
-                    r_batch   = (r1_s[s:e], r2_s[s:e], r3_s[s:e])
+                    col_batch = dp.shard(col_s[s:e])
+                    r_batch   = dp.shard_all((r1_s[s:e], r2_s[s:e], r3_s[s:e]))
 
                     idx_in = jax.random.randint(k2, (batch_size,), 0, n_inlet)
                     idx_no = jax.random.randint(k3, (batch_size,), 0, n_noslip)
 
                     self.params, self.state, new_r, loss, aux = self._step(
                         self.params, self.state, r_batch,
-                        col_batch, inputs.inlet[idx_in], inputs.noslip[idx_no],
+                        col_batch,
+                        *dp.shard_all((inputs.inlet[idx_in], inputs.noslip[idx_no])),
                         is_init,
                     )
 
@@ -168,9 +179,18 @@ class LDCSolver(BaseSolver):
                     r2_ups.append(new_r[1])
                     r3_ups.append(new_r[2])
 
-                rsum1 = jnp.concatenate(r1_ups)
-                rsum2 = jnp.concatenate(r2_ups)
-                rsum3 = jnp.concatenate(r3_ups)
+                # The updated sums come back in *shuffled* (perms) order. Scatter them
+                # to the original positions of the points they belong to, so next
+                # epoch's rsum[perms] hands each point its own history. (Assigning the
+                # concatenation directly left sums in permuted order -- every point got
+                # another point's weight from epoch 2 on -- and, when n_col is not a
+                # multiple of the batch size, shrank the state so later gathers read
+                # out of bounds, which JAX clamps silently.) Points in this epoch's
+                # unvisited remainder keep their previous values.
+                visited = perms[:steps * batch_size]
+                rsum1 = rsum1.at[visited].set(jnp.concatenate(r1_ups))
+                rsum2 = rsum2.at[visited].set(jnp.concatenate(r2_ups))
+                rsum3 = rsum3.at[visited].set(jnp.concatenate(r3_ups))
 
                 if _t_first is None:
                     _t_first = time.time() - _t0

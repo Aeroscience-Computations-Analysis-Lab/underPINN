@@ -65,7 +65,8 @@ def _make_data(T: float, N_r: int, N_ic: int, N_bc: int, seed: int = 0):
     )
 
 
-def _build_solver(layers, nu, epochs, lr, ic_w, bc_w, rba, log_every, seed):
+def _build_solver(layers, nu, epochs, lr, ic_w, bc_w, rba, log_every, seed,
+                  data_parallel=False):
     model  = MLP(layers=layers)
     pde    = BurgersPDE(model, nu=nu)
     loss   = PINNLoss(model, pde, ic_weight=ic_w, bc_weight=bc_w,
@@ -78,6 +79,7 @@ def _build_solver(layers, nu, epochs, lr, ic_w, bc_w, rba, log_every, seed):
         batch_r=2048, batch_i=256, batch_b=256,
         log_every=log_every,
         callbacks=[ConsoleLogger(log_every=log_every)],
+        data_parallel=data_parallel,
     )
     return model, solver, config
 
@@ -103,6 +105,13 @@ def run_burgers_transfer(cfg) -> dict:
     out = cfg_get(cfg, "output", default=None)
     out_dir = cfg_get(out, "dir", default="outputs/burgers_transfer") if out else "outputs/burgers_transfer"
     os.makedirs(out_dir, exist_ok=True)
+
+    # training.data_parallel: true -- applied to all six solvers built below.
+    _dp = bool(cfg_get(cfg_get(cfg, "training", default=None),
+                       "data_parallel", default=False))
+
+    def _build(*args, **kwargs):
+        return _build_solver(*args, data_parallel=_dp, **kwargs)
 
     layers    = list(cfg.network.layers)
     T_default = float(cfg_get(cfg.physics, "T", default=2.0))
@@ -136,18 +145,18 @@ def run_burgers_transfer(cfg) -> dict:
         data_tgt = _make_data(T_default, N_r, N_ic, N_bc, seed=1)
 
         print(f"\n[Source]   ν={src_nu}, {N_src} epochs")
-        _, solver_src, cfg_src = _build_solver(
+        _, solver_src, cfg_src = _build(
             layers, src_nu, N_src, src_lr, ic_w, bc_w, rba, log_every, 0)
         solver_src.train(*data_src, config=cfg_src)
 
         print(f"\n[Transfer] ν={tgt_nu}, {N_tf} fine-tune epochs")
-        model_tf, solver_tf, cfg_tf = _build_solver(
+        model_tf, solver_tf, cfg_tf = _build(
             layers, tgt_nu, N_tf, tf_lr, ic_w, bc_w, rba, log_every, 1)
         solver_tf.load_params(solver_src.params)
         solver_tf.train(*data_tgt, config=cfg_tf)
 
         print(f"\n[Scratch]  ν={tgt_nu}, {N_sc} epochs from random init")
-        model_sc, solver_sc, cfg_sc = _build_solver(
+        model_sc, solver_sc, cfg_sc = _build(
             layers, tgt_nu, N_sc, sc_lr, ic_w, bc_w, rba, log_every, 2)
         solver_sc.train(*data_tgt, config=cfg_sc)
 
@@ -247,18 +256,18 @@ def run_burgers_transfer(cfg) -> dict:
         data_p2 = _make_data(T2, N_r, N_ic, N_bc, seed=0)
 
         print(f"\n[Phase 1]  ν={nu}, t∈[0,{T1}], {N_p1} epochs")
-        _, solver_p1, cfg_p1 = _build_solver(
+        _, solver_p1, cfg_p1 = _build(
             layers, nu, N_p1, p1_lr, ic_w, bc_w, rba, log_every, 0)
         solver_p1.train(*data_p1, config=cfg_p1)
 
         print(f"\n[Transfer] ν={nu}, t∈[0,{T2}], {N_tf} fine-tune epochs")
-        model_p2, solver_p2, cfg_p2 = _build_solver(
+        model_p2, solver_p2, cfg_p2 = _build(
             layers, nu, N_tf, tf_lr, ic_w, bc_w, rba, log_every, 1)
         solver_p2.load_params(solver_p1.params)
         solver_p2.train(*data_p2, config=cfg_p2)
 
         print(f"\n[Scratch]  ν={nu}, t∈[0,{T2}], {N_sc} epochs from random init")
-        model_sc, solver_sc, cfg_sc = _build_solver(
+        model_sc, solver_sc, cfg_sc = _build(
             layers, nu, N_sc, sc_lr, ic_w, bc_w, rba, log_every, 2)
         solver_sc.train(*data_p2, config=cfg_sc)
 

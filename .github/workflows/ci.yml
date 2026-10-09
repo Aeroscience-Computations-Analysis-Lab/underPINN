@@ -60,3 +60,28 @@ jobs:
           JAX_PLATFORMS: cpu
         run: |
           pytest tests/ --cov=underPINN --cov-report=xml
+
+      # The data-parallel tests need >1 device, and XLA_FLAGS only takes effect
+      # in a fresh process, so they skip inside the run above. This step runs
+      # them for real on 8 virtual CPU devices. UNDERPINN_REQUIRE_MULTI_DEVICE
+      # makes a misconfigured run (flag ignored -> 1 device) fail instead of
+      # passing green on skips. Verifies gradient equivalence, not speedup.
+      - name: Run data-parallel tests (8 virtual devices)
+        env:
+          JAX_PLATFORMS: cpu
+          XLA_FLAGS: --xla_force_host_platform_device_count=8
+          UNDERPINN_REQUIRE_MULTI_DEVICE: "1"
+        run: |
+          pytest tests/test_parallel.py -v
+
+      # Trains every example with training.data_parallel off and on and requires
+      # identical loss trajectories (and real sharding). Slow and independent of
+      # the Python version, so it runs once rather than across the whole matrix.
+      - name: Run every example with data parallelism on/off (8 virtual devices)
+        if: matrix.python-version == '3.11'
+        env:
+          JAX_PLATFORMS: cpu
+          XLA_FLAGS: --xla_force_host_platform_device_count=8
+          UNDERPINN_REQUIRE_MULTI_DEVICE: "1"
+        run: |
+          pytest tests/test_parallel_examples.py -v

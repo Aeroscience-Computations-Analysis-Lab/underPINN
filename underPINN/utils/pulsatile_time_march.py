@@ -40,6 +40,8 @@ from underPINN.config.loader import cfg_get, save_config
 from underPINN.nn.factory import build_model, network_config
 from underPINN.utils.checkpoint import load_checkpoint, read_metadata, save_checkpoint
 from underPINN.utils.sampling import safe_choice
+from underPINN.training.parallel import (data_parallel_from_cfg,
+                                        make_data_parallel)
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +82,7 @@ def _window_data(geom, dT: float, d, seed: int):
 def _train_window(
     pde, model, data, *, inlet_target_fn, t0, dT,
     ic_uvw, epochs, lr, lr_alpha, weights, batch_r, batch_bc,
-    init_params, seed, label,
+    init_params, seed, label, dp=None,
 ):
     w_pde, w_wall, w_inlet, w_outlet, w_ic = weights
 
@@ -140,6 +142,17 @@ def _train_window(
     key = jax.random.PRNGKey(seed + 99)
     loss_hist = []
 
+    # Data parallelism: set up per window -- each window warm-starts from the
+    # previous one's params and builds a fresh opt_state, so both are
+    # (re-)replicated here. The IC term is closed over by step() and runs
+    # replicated on every device; the mini-batches below are split.
+    if dp is None:
+        dp = make_data_parallel(active=False)
+    params, opt_state = dp.prepare(params, opt_state, {
+        "batch_r": batch_r, "batch_bc": batch_bc,
+        "batch_bc (inlet)": min(batch_bc, N_in),
+        "batch_bc (outlet)": min(batch_bc, N_out)})
+
     for ep in range(epochs):
         key, k1, k2, k3, k4 = jax.random.split(key, 5)
         ir  = safe_choice(k1, N_r,   batch_r)
@@ -149,7 +162,8 @@ def _train_window(
 
         params, opt_state, total, (pl, wl, il, ol, icl) = step(
             params, opt_state,
-            xyzt_r[ir], xyzt_w[iw], xyzt_in[iin], xyzt_out[iout])
+            *dp.shard_all((xyzt_r[ir], xyzt_w[iw], xyzt_in[iin],
+                           xyzt_out[iout])))
         loss_hist.append(float(total))
 
         if ep % max(epochs // 5, 1) == 0 or ep == epochs - 1:
@@ -192,6 +206,9 @@ def run_pulsatile_time_march(
     d   = cfg.data
     lw  = cfg.loss
     tm  = cfg_get(cfg, "time_marching", default=None)
+    # training.data_parallel: true  (these configs have no training: block by
+    # default; adding one with just that key is enough)
+    dp  = data_parallel_from_cfg(cfg_get(cfg, "training", default=None))
     out = cfg_get(cfg, "output", default=None)
     out_dir = (cfg_get(out, "dir", default=out_dir_default)
                if out else out_dir_default)
@@ -341,7 +358,7 @@ def run_pulsatile_time_march(
             inlet_target_fn=inlet_target, t0=t0, dT=dT,
             ic_uvw=ic_uvw, epochs=epochs, lr=lr, lr_alpha=lr_alpha,
             weights=weights, batch_r=batch_r, batch_bc=batch_bc,
-            init_params=prev_params, seed=seed + k, label=f"tf-w{k+1}")
+            init_params=prev_params, seed=seed + k, label=f"tf-w{k+1}", dp=dp)
         tf_params_list.append(params)
         tf_loss_all.append(lh)
         prev_params = params
@@ -375,7 +392,8 @@ def run_pulsatile_time_march(
                 inlet_target_fn=inlet_target, t0=t0, dT=dT,
                 ic_uvw=ic_uvw, epochs=n_cold, lr=cold_lr, lr_alpha=lr_alpha,
                 weights=weights, batch_r=batch_r, batch_bc=batch_bc,
-                init_params=None, seed=seed + 500 + k, label=f"cold-w{k+1}")
+                init_params=None, seed=seed + 500 + k, label=f"cold-w{k+1}",
+                dp=dp)
             cold_loss_all.append(lh_c)
             prev_cold = params_c
 

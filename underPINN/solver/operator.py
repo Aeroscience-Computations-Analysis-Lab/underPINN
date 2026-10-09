@@ -105,6 +105,7 @@ class OperatorSolver(BaseSolver):
         config     : :class:`TrainingConfig` — preferred production path.
         """
         if config is not None:
+            data_parallel = config.data_parallel
             epochs = config.epochs
             batch_size = config.batch_r
             seed = config.seed
@@ -118,6 +119,7 @@ class OperatorSolver(BaseSolver):
         else:
             callbacks = []
             n_scan = 1
+            data_parallel = False
 
         x_input = jnp.asarray(x_input)
         u_target = jnp.asarray(u_target)
@@ -141,6 +143,15 @@ class OperatorSolver(BaseSolver):
                     if saved:
                         getattr(self, attr).extend(saved)
 
+        # ── Data parallelism (after restore, so resumed params are re-replicated)
+        # Each step's batch of *samples* (input windows / target frames) is
+        # split across devices; the warmup pde-weight is a scalar schedule
+        # and stays replicated. Inert when off.
+        from underPINN.training.parallel import make_data_parallel
+        dp = make_data_parallel(active=data_parallel)
+        self.params, self.state = dp.prepare(
+            self.params, self.state, {"batch_r (samples per step)": batch_size})
+
         key = jax.random.PRNGKey(seed)
         start = time.time()
 
@@ -161,7 +172,9 @@ class OperatorSolver(BaseSolver):
                     )(scan_keys)                                     # (n_scan, batch)
 
                     w_seq = self._warmup_weight_seq(outer * n_scan, n_scan)
-                    batches = (x_input[idx], model_input[idx], u_target[idx], w_seq)
+                    # axis 1: axis 0 is the scan-step axis; w_seq is (n_scan,)
+                    batches = (*dp.shard_all((x_input[idx], model_input[idx],
+                                              u_target[idx]), axis=1), w_seq)
 
                     self.params, self.state, (losses, dls, pls) = scan_step(
                         self.params, self.state, batches)
@@ -227,7 +240,8 @@ class OperatorSolver(BaseSolver):
 
                 self.params, self.state, loss, dl, pl = self._step(
                     self.params, self.state,
-                    x_input[idx], model_input[idx], u_target[idx], w)
+                    *dp.shard_all((x_input[idx], model_input[idx], u_target[idx])),
+                    w)
 
                 if _t_first is None:
                     _t_first = time.time() - _t0
@@ -375,6 +389,7 @@ class DeepONetSolver(BaseSolver):
         x_range, t_range : sampling ranges for the residual collocation points.
         """
         if config is not None:
+            data_parallel = config.data_parallel
             epochs = config.epochs
             batch_size = config.batch_i
             seed = config.seed
@@ -386,10 +401,20 @@ class DeepONetSolver(BaseSolver):
                 self.state = self.opt.init(self.params)
         else:
             callbacks = []
+            data_parallel = False
 
         u_pool = jnp.asarray(u_pool)
         x_sensors = jnp.asarray(x_sensors)
         N = u_pool.shape[0]
+
+        # ── Data parallelism. The sampled IC functions, residual functions and
+        # their residual points are paired per sample and split together; the
+        # sensor locations and BC points are shared by every sample and stay
+        # replicated. Inert when off.
+        from underPINN.training.parallel import make_data_parallel
+        dp = make_data_parallel(active=data_parallel)
+        self.params, self.state = dp.prepare(
+            self.params, self.state, {"batch_i (samples per step)": batch_size})
         key = jax.random.PRNGKey(seed)
         start = time.time()
         _t_first = None
@@ -409,9 +434,12 @@ class DeepONetSolver(BaseSolver):
                 xt_r = jnp.stack([x_r, t_r], axis=1)
                 w = self._warmup_weight(ep)
 
+                u_ic_b, u_r_b, xt_r_b = dp.shard_all(
+                    (u_pool[idx_ic], u_pool[idx_r], xt_r))
+
                 self.params, self.state, loss, ics_l, bcs_l, res_l = self._step(
                     self.params, self.state,
-                    u_pool[idx_ic], x_sensors, u_pool[idx_r], xt_r,
+                    u_ic_b, x_sensors, u_r_b, xt_r_b,
                     xt_bc_lo, xt_bc_hi, w)
 
                 if _t_first is None:

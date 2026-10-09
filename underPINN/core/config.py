@@ -40,6 +40,13 @@ class TrainingConfig:
         When *None* (default) bootstrap resampling from the current
         collocation set is used — adequate for most problems but inferior to
         a proper domain sampler.
+    data_parallel : bool
+        Split every mini-batch across all visible devices along its point
+        axis, replicating parameters and optimizer state. The gradient is the
+        same as single-device full-batch training (it is data parallelism,
+        not a different algorithm). Requires ``batch_r``, ``batch_i`` and
+        ``batch_b`` each divisible by the device count. A no-op on a single
+        device. See :mod:`underPINN.training.parallel`.
 
     Examples
     --------
@@ -78,6 +85,9 @@ class TrainingConfig:
     resample_candidates: int = 0   # candidate pool size; 0 → 5 × batch_r
     resample_k: float = 1.0        # |residual|^k weighting exponent
     candidate_sampler: Optional[Any] = None  # fn(n, key) → (x, t) or None
+    data_parallel: bool = False    # split batches across all visible devices
+                                   # (see underPINN.training.parallel); each
+                                   # batch_* must be divisible by device count
 
     # ------------------------------------------------------------------ #
     # Restart / resume                                                     #

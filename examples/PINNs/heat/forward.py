@@ -93,6 +93,7 @@ def run_heat_forward(cfg) -> dict:
         ],
         out_dir            = out_dir,
         save_restart_every = int(cfg_get(tr, "save_restart_every", default=500)),
+        data_parallel = bool(cfg_get(tr, "data_parallel", default=False)),
     )
     solver.train(xy_r, xy_b, u_b, config=config)
     save_config(cfg, os.path.join(out_dir, "config.yaml"))

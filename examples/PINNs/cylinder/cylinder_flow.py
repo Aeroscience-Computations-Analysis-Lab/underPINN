@@ -53,6 +53,7 @@ from underPINN.callbacks.logging import ConsoleLogger
 from underPINN.utils.io import save_predictions
 from underPINN.utils.checkpoint import save_checkpoint
 from underPINN.utils.restart import RestartManager
+from underPINN.training.parallel import data_parallel_from_cfg
 
 
 # ---------------------------------------------------------------------------
@@ -258,11 +259,21 @@ def run_cylinder(cfg) -> dict:
     logger = ConsoleLogger(log_every=log_every)
 
     # ── Training loop ─────────────────────────────────────────────────────────
+    # Optional data parallelism (training.data_parallel: true). Inert otherwise.
+    # Full-batch: the interior collocation array -- the expensive PDE-residual
+    # term -- is split across devices. The small boundary sets are closed
+    # over by step(), so they are evaluated, replicated, on every device.
+    dp = data_parallel_from_cfg(tr)
+    params, opt_state = dp.prepare(params, opt_state, {
+        "collocation (n_interior + n_wake)": xy_col_j.shape[0]})
+    xy_col_j = dp.shard(xy_col_j)
+
     try:
         for ep in range(start_ep, epochs):
             if resample_period > 0 and ep > 0 and ep % resample_period == 0:
                 xy_col_j = jnp.array(_build_collocation(
                     cyl, n_interior, n_wake, dom, wake_box, buffer, seed + ep))
+                xy_col_j = dp.shard(xy_col_j)
 
             params, opt_state, loss, (l_pde, l_bc) = step(
                 params, opt_state, xy_col_j)
