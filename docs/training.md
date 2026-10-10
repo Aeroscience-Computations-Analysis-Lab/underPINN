@@ -74,6 +74,14 @@ multiple calls.
   - `int` / `None`
   - `None`
   - Use only the first N visible devices for `data_parallel` (`None` = all)
+* - `model_parallel`
+  - `bool`
+  - `False`
+  - Split an FBPINN's subdomain networks across devices — see {ref}`model-parallelism`
+* - `model_parallel_devices`
+  - `int` / `None`
+  - `None`
+  - Use only the first N visible devices for `model_parallel` (`None` = all)
 * - `out_dir`
   - `str`
   - `""`
@@ -260,9 +268,9 @@ you. Padding keeps every device's slice equal at the cost of ≤ D−1 repeated 
 
 ```{warning}
 Data parallelism scales **throughput, not model size**. Parameters are replicated, so
-a network that does not fit in one device's memory still will not fit. Sharding the
-parameters themselves (tensor / FSDP-style parallelism) is a different mechanism and
-is not implemented.
+a network that does not fit in one device's memory still will not fit. Splitting the
+parameters themselves is model parallelism — available for FBPINN subdomain networks,
+see {ref}`model-parallelism`.
 ```
 
 ### In your own training loop
@@ -303,6 +311,95 @@ example** with the flag off and on and requires the loss trajectories to match �
 while counting the sharding each run performs, so an example that silently ignored
 the flag would fail rather than pass on identical numbers. Virtual devices prove the
 numerics; they cannot measure speedup, which needs real accelerators.
+```
+
+(model-parallelism)=
+## Model parallelism (FBPINN subdomains)
+
+Data parallelism copies the whole network to every device and splits the *points*.
+Model parallelism splits the *network*: an FBPINN's subdomain networks are divided
+across devices, so with S subdomains on D devices each device holds and evaluates
+only S/D of them (on every point), and the contributions are summed. Per-device
+parameter memory, activation memory and compute all scale with S/D — this is what
+lets an FBPINN grow to many subdomains.
+
+```yaml
+training:
+  model_parallel: true
+  model_parallel_devices: 4    # optional: use only the first 4 visible devices
+```
+
+The FBPINN examples (`fbpinn_ode`, `LDC`, `K-Epsilon`) take this switch directly. In
+your own code, wrap the model **before** building the PDE (the PDE keeps a
+reference to it):
+
+```python
+from underPINN.training import model_parallel_from_cfg
+
+mp    = model_parallel_from_cfg(cfg.training)     # inert unless model_parallel: true
+model = mp.wrap(FBPINN(...))                       # -> StackedFBPINN, padded for D
+pde   = MyPDE(model, ...)
+params = model.init(key, x0)
+params, opt_state = mp.prepare(params, opt.init(params), model=model)  # after restore
+...
+save_checkpoint(mp.export(model, params), out_dir)  # ordinary FBPINN layout
+```
+
+With a solver, wrap the model the same way and pass
+`TrainingConfig(model_parallel=True)`; the solver does the `prepare` step.
+
+**It does not change the optimisation.** `mp.wrap` turns the FBPINN into a
+`StackedFBPINN` — the same networks with their weights stacked along a "subdomain"
+axis instead of kept in a Python list, which is what lets them be split. It is the
+same function (outputs, derivatives and gradients agree to float32 rounding),
+`init` reproduces FBPINN's random initialisation **bit-for-bit**, and splitting the
+stacked axis is a layout choice inside a global-view `jit`. Training follows the
+single-device loss trajectory exactly.
+
+```{list-table}
+:header-rows: 1
+:widths: 26 74
+
+* - Behaviour
+  - Detail
+* - Any device count
+  - If S does not divide by D, the model is padded with up to D−1 *dummy*
+    subdomains multiplied by an exact 0 mask: they add nothing to the output and
+    receive exactly zero gradient, so the optimiser never moves them.
+* - Checkpoints
+  - `mp.export(model, params)` returns the ordinary FBPINN layout
+    (`subnets_0 … subnets_{S-1}`, padding dropped), so a checkpoint from a
+    model-parallel run loads into a plain `FBPINN` and vice versa. The FBPINN
+    examples save this way.
+* - Restart / resume
+  - Restored parameters are re-split across devices.
+* - Solver coverage
+  - All solvers accept the flag. A non-FBPINN model is refused with an error
+    rather than silently trained on one device.
+* - Too few subdomains
+  - With fewer real subdomains than devices, some devices hold only padding and
+    do no useful work; a warning says so. `LDC` ships a **single** subdomain, so
+    model parallelism cannot speed it up — use data parallelism there.
+* - With data parallelism
+  - Not yet combined: enable one or the other. Doing both needs a 2-D device
+    mesh (points × subdomains).
+```
+
+```{note}
+Why only FBPINN: underPINN's other networks are far too small to split usefully
+(an MLP is ~0.2–0.6 MB; the largest shipped FNO ~38 MB). Splitting one across
+devices adds communication inside every layer, multiplied by the nested
+`jacfwd` / `hessian` passes a PDE residual needs — communication would outweigh
+compute. FBPINN's subdomains are independent networks joined only by a weighted
+sum, so they split cleanly. Use data parallelism for everything else.
+```
+
+```{note}
+Correctness is CI-tested on virtual CPU devices: exact initialisation and
+function equivalence, gradients on 2–8 devices including padded splits, a real
+all-reduce in the compiled step, dummy subdomains that never move under Adam,
+end-to-end training through `FBPINNSolver`, `LDCSolver` and `RANSSolver`, and the
+FBPINN examples with plain-layout checkpoints. Speedup needs real accelerators.
 ```
 
 ## RAR-D adaptive collocation resampling

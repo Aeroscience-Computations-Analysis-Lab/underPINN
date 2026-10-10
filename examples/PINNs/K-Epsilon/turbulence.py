@@ -35,6 +35,8 @@ import optax
 
 from underPINN.config.loader import cfg_get, save_config
 from underPINN.training.parallel import data_parallel_kwargs
+from underPINN.training.model_parallel import (model_parallel_from_cfg,
+                                              model_parallel_kwargs)
 from underPINN.nn.fbpinn import FBPINN
 from underPINN.pde.k_epsilon import KEpsilonPDE
 from underPINN.solver.rans_solver import RANSSolver, RANSInputWrapper
@@ -209,6 +211,11 @@ def run_turbulence(cfg) -> dict:
         smaxs        = smaxs,
         out_transform = k_eps_positivity,   # enforces k > 0, ε > 0
     )
+    # Optional model parallelism (training.model_parallel: true): split the
+    # subdomain networks across devices. Inert otherwise; same function and
+    # same initial weights. Must happen before the PDE takes the model.
+    mp    = model_parallel_from_cfg(tr)
+    model = mp.wrap(model)
 
     pde = KEpsilonPDE(model, Re=Re)
 
@@ -236,6 +243,7 @@ def run_turbulence(cfg) -> dict:
         out_dir=out_dir,
         save_restart_every=int(cfg_get(tr, "save_restart_every", default=500)),
         **data_parallel_kwargs(tr),
+        **model_parallel_kwargs(tr),
     )
 
     # ── Save ──────────────────────────────────────────────────────────────────
@@ -300,7 +308,8 @@ def run_turbulence(cfg) -> dict:
         plt.close(fig)
 
     # ── Checkpoint ────────────────────────────────────────────────────────────
-    save_checkpoint(final_params, out_dir, metadata={
+    # mp.export: ordinary FBPINN layout, whether or not this was model-parallel
+    save_checkpoint(mp.export(model, final_params), out_dir, metadata={
         "problem": "k_epsilon",
         "network": {"type": "fbpinn", "layers": layers},
         "physics": {"Re": Re},

@@ -1,6 +1,6 @@
 """underPINN.training — collocation-point management and training algorithms.
 
-Three distinct concerns live here:
+Four distinct concerns live here:
 
 * **Adaptive collocation** (``resample.py``) — RAR-D resampling that moves
   collocation points toward high-residual regions during training.
@@ -10,8 +10,17 @@ Three distinct concerns live here:
 * **Data parallelism** (``parallel.py``) — splitting each mini-batch across
   devices with replicated parameters; enabled per run via
   ``TrainingConfig(data_parallel=True)``.
+* **Model parallelism** (``model_parallel.py``) — splitting an FBPINN's
+  subdomain networks across devices; enabled per run via
+  ``TrainingConfig(model_parallel=True)``.
 """
 
+from underPINN.training.model_parallel import (
+    ModelParallel,
+    make_model_parallel,
+    model_parallel_from_cfg,
+    model_parallel_kwargs,
+)
 from underPINN.training.natural_gradient import (
     gauss_newton_step,
     train_gauss_newton,
@@ -31,6 +40,10 @@ __all__ = [
     "data_parallel_kwargs",
     "gauss_newton_step",
     "make_data_parallel",
+    "make_model_parallel",
+    "ModelParallel",
+    "model_parallel_from_cfg",
+    "model_parallel_kwargs",
     "pad_to_multiple",
     "rar_d_resample",
     "rar_d_resample_split",

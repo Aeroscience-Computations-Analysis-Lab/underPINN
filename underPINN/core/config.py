@@ -56,6 +56,16 @@ class TrainingConfig:
         devices than are visible raises; choose *which* GPUs with
         ``CUDA_VISIBLE_DEVICES``. Ignored, with a warning, when
         ``data_parallel`` is false.
+    model_parallel : bool
+        Split an FBPINN's subdomain networks across devices (model
+        parallelism); see :mod:`underPINN.training.model_parallel`. The
+        model must be built with ``mp.wrap(FBPINN(...))``. Same loss,
+        gradients and initialisation as single-device training. Cannot
+        yet be combined with ``data_parallel``.
+    model_parallel_devices : int, optional
+        How many devices ``model_parallel`` uses (first *N* visible;
+        ``None`` = all). Any count works: subdomains that do not divide
+        are padded with exact-zero dummies.
 
     Examples
     --------
@@ -99,6 +109,9 @@ class TrainingConfig:
                                    # not divisible by the count is padded
     data_parallel_devices: Optional[int] = None  # use only the first N
                                    # visible devices; None = all of them
+    model_parallel: bool = False   # split FBPINN subdomain networks across
+                                   # devices (underPINN.training.model_parallel)
+    model_parallel_devices: Optional[int] = None  # first N visible; None = all
 
     # ------------------------------------------------------------------ #
     # Restart / resume                                                     #
@@ -164,6 +177,20 @@ class TrainingConfig:
             raise ValueError(
                 f"TrainingConfig.data_parallel_devices must be a positive int "
                 f"or None (all visible devices), got {_dpd!r}"
+            )
+
+        _mpd = self.model_parallel_devices
+        if _mpd is not None and (isinstance(_mpd, bool)
+                                 or not isinstance(_mpd, int) or _mpd < 1):
+            raise ValueError(
+                f"TrainingConfig.model_parallel_devices must be a positive int "
+                f"or None (all visible devices), got {_mpd!r}"
+            )
+
+        if self.data_parallel and self.model_parallel:
+            raise ValueError(
+                "TrainingConfig: data_parallel and model_parallel are both on; "
+                "combining them in one run is not supported yet -- enable one."
             )
 
         if not isinstance(self.save_restart_every, int) or self.save_restart_every < 0:

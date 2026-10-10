@@ -27,6 +27,9 @@ import matplotlib.pyplot as plt
 
 from underPINN.config.loader import cfg_get, save_config
 from underPINN.training.parallel import data_parallel_kwargs
+from underPINN.training.model_parallel import (model_parallel_from_cfg,
+                                              model_parallel_kwargs)
+from underPINN.utils.checkpoint import save_checkpoint
 from underPINN.nn.fbpinn import FBPINN
 from underPINN.nn.attention import SimpleGate
 from underPINN.pde.navier_stokes import NavierStokesPDE
@@ -102,6 +105,11 @@ def run_ldc(cfg) -> dict:
         smaxs=smaxs,
         attention_cls=SimpleGate,
     )
+    # Optional model parallelism (training.model_parallel: true): split the
+    # subdomain networks across devices. Inert otherwise; same function and
+    # same initial weights. Must happen before the PDE takes the model.
+    mp    = model_parallel_from_cfg(tr)
+    model = mp.wrap(model)
     pde = NavierStokesPDE(model, Re=Re)
 
     # ── Optimizer ─────────────────────────────────────────────────────────────
@@ -129,6 +137,7 @@ def run_ldc(cfg) -> dict:
         out_dir            = out_dir,
         save_restart_every = int(cfg_get(tr, "save_restart_every", default=500)),
         **data_parallel_kwargs(tr),
+        **model_parallel_kwargs(tr),
     )
 
     # ── Geometry ──────────────────────────────────────────────────────────────
@@ -222,7 +231,8 @@ def run_ldc(cfg) -> dict:
              u=u_g, v=v_g, p=p_g, x=np.array(XX), y=np.array(YY))
 
     # ── Model checkpoint ──────────────────────────────────────────────────────
-    solver.save_checkpoint(out_dir, metadata={
+    # mp.export: ordinary FBPINN layout, whether or not this was model-parallel
+    save_checkpoint(mp.export(model, solver.params), out_dir, metadata={
         "problem": "ldc",
         "network": {"type": "fbpinn", "layers": layers},
         "physics": {"Re": Re},

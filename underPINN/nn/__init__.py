@@ -13,7 +13,12 @@ from underPINN.nn.mlp import (
     TemporalFourierMLP,
     SIREN,
 )
-from underPINN.nn.fbpinn import FBPINN
+from underPINN.nn.fbpinn import (
+    FBPINN,
+    StackedFBPINN,
+    stack_fbpinn_params,
+    unstack_fbpinn_params,
+)
 from underPINN.nn.operators import (
     FNO1D,
     FNO2D,
@@ -31,6 +36,9 @@ __all__ = [
     "TemporalFourierMLP",
     "SIREN",
     "FBPINN",
+    "StackedFBPINN",
+    "stack_fbpinn_params",
+    "unstack_fbpinn_params",
     "FNO1D",
     "FNO2D",
     "DeepONet1D",

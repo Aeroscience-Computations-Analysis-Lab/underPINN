@@ -107,6 +107,8 @@ class OperatorSolver(BaseSolver):
         if config is not None:
             data_parallel = config.data_parallel
             data_parallel_devices = config.data_parallel_devices
+            model_parallel = config.model_parallel
+            model_parallel_devices = config.model_parallel_devices
             epochs = config.epochs
             batch_size = config.batch_r
             seed = config.seed
@@ -122,6 +124,8 @@ class OperatorSolver(BaseSolver):
             n_scan = 1
             data_parallel = False
             data_parallel_devices = None
+            model_parallel = False
+            model_parallel_devices = None
 
         x_input = jnp.asarray(x_input)
         u_target = jnp.asarray(u_target)
@@ -150,6 +154,12 @@ class OperatorSolver(BaseSolver):
         # split across devices; the warmup pde-weight is a scalar schedule
         # and stays replicated. Inert when off.
         from underPINN.training.parallel import make_data_parallel
+        # Model parallelism: split FBPINN subdomain networks across devices
+        # (inert unless model_parallel; the model must be mp.wrap()-ed).
+        from underPINN.training.model_parallel import make_model_parallel
+        mp = make_model_parallel(
+            active=model_parallel, n_devices=model_parallel_devices)
+        self.params, self.state = mp.prepare(self.params, self.state, model=self.model)
         dp = make_data_parallel(
             active=data_parallel, n_devices=data_parallel_devices)
         self.params, self.state = dp.prepare(
@@ -394,6 +404,8 @@ class DeepONetSolver(BaseSolver):
         if config is not None:
             data_parallel = config.data_parallel
             data_parallel_devices = config.data_parallel_devices
+            model_parallel = config.model_parallel
+            model_parallel_devices = config.model_parallel_devices
             epochs = config.epochs
             batch_size = config.batch_i
             seed = config.seed
@@ -407,6 +419,8 @@ class DeepONetSolver(BaseSolver):
             callbacks = []
             data_parallel = False
             data_parallel_devices = None
+            model_parallel = False
+            model_parallel_devices = None
 
         u_pool = jnp.asarray(u_pool)
         x_sensors = jnp.asarray(x_sensors)
@@ -417,6 +431,12 @@ class DeepONetSolver(BaseSolver):
         # sensor locations and BC points are shared by every sample and stay
         # replicated. Inert when off.
         from underPINN.training.parallel import make_data_parallel
+        # Model parallelism: split FBPINN subdomain networks across devices
+        # (inert unless model_parallel; the model must be mp.wrap()-ed).
+        from underPINN.training.model_parallel import make_model_parallel
+        mp = make_model_parallel(
+            active=model_parallel, n_devices=model_parallel_devices)
+        self.params, self.state = mp.prepare(self.params, self.state, model=self.model)
         dp = make_data_parallel(
             active=data_parallel, n_devices=data_parallel_devices)
         self.params, self.state = dp.prepare(

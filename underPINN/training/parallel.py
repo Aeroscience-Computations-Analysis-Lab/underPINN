@@ -62,9 +62,9 @@ On one GPU this buys nothing: there is no second device to split work across,
 and the sharding annotations collapse to no-ops. Data parallelism pays off when
 a *global batch* is spread over several devices. It does not reduce per-device
 memory for the model itself -- parameters are replicated, so a model that does
-not fit on one device still will not fit. Sharding the parameters themselves
-(tensor / FSDP-style parallelism) is a different mechanism and is not what this
-module does.
+not fit on one device still will not fit. Splitting the parameters themselves
+is model parallelism -- see :mod:`underPINN.training.model_parallel`, which does
+it for FBPINN subdomain networks (the one underPINN network where it pays off).
 
 Testing without a multi-GPU box
 -------------------------------
@@ -249,7 +249,7 @@ class DataParallel:
         raise ValueError("\n".join(lines))
 
 
-def _check_n_devices(n_devices) -> None:
+def _check_n_devices(n_devices, key: str = "data_parallel_devices") -> None:
     """Reject anything but ``None`` or a positive integer.
 
     ``bool`` is refused explicitly: ``True`` is an ``int`` in Python, so
@@ -260,8 +260,8 @@ def _check_n_devices(n_devices) -> None:
     if (isinstance(n_devices, bool)
             or not isinstance(n_devices, (int, np.integer)) or n_devices < 1):
         raise ValueError(
-            f"data_parallel_devices must be a positive integer, or omitted to "
-            f"use every visible device; got {n_devices!r}.")
+            f"{key} must be a positive integer, or omitted to use every "
+            f"visible device; got {n_devices!r}.")
 
 
 def make_data_parallel(devices: Sequence | None = None,
@@ -291,7 +291,21 @@ def make_data_parallel(devices: Sequence | None = None,
     >>> dp = make_data_parallel(n_devices=4)           # doctest: +SKIP
     >>> dp.require_divisible({"batch_r": 4096})        # doctest: +SKIP
     """
-    _check_n_devices(n_devices)
+    devs = _select_devices(devices, active, n_devices, mode="data_parallel",
+                           what="data parallelism")
+    mesh = Mesh(np.array(devs), axis_names=(axis_name,))
+    return DataParallel(mesh=mesh, axis_name=axis_name, active=active)
+
+
+def _select_devices(devices, active: bool, n_devices, mode: str, what: str):
+    """The devices a parallel mode should use: the first *n_devices* visible
+    ones (all when None), or just one when the mode is off. Shared by data and
+    model parallelism so both validate and report identically.
+
+    *mode* is the config key prefix (``data_parallel`` / ``model_parallel``);
+    *what* is how messages name the mode.
+    """
+    _check_n_devices(n_devices, key=f"{mode}_devices")
     devs = list(devices) if devices is not None else jax.devices()
     if not devs:
         raise RuntimeError("No JAX devices visible; cannot build a mesh.")
@@ -299,20 +313,18 @@ def make_data_parallel(devices: Sequence | None = None,
         if n_devices is not None:
             import warnings
             warnings.warn(
-                f"data_parallel_devices={n_devices} is set but data parallelism "
-                f"is off, so training runs on a single device. Set "
-                f"data_parallel: true to use {n_devices} devices.",
-                UserWarning, stacklevel=2)
-        devs = devs[:1]
-    elif n_devices is not None:
+                f"{mode}_devices={n_devices} is set but {what} is off, so "
+                f"training runs on a single device. Set {mode}: true to use "
+                f"{n_devices} devices.", UserWarning, stacklevel=3)
+        return devs[:1]
+    if n_devices is not None:
         if n_devices > len(devs):
             raise ValueError(
-                f"data_parallel_devices={n_devices}, but only {len(devs)} "
-                f"device(s) are visible: {[str(d) for d in devs]}. Lower the "
-                f"count, or check CUDA_VISIBLE_DEVICES.")
+                f"{mode}_devices={n_devices}, but only {len(devs)} device(s) "
+                f"are visible: {[str(d) for d in devs]}. Lower the count, or "
+                f"check CUDA_VISIBLE_DEVICES.")
         devs = devs[:n_devices]
-    mesh = Mesh(np.array(devs), axis_names=(axis_name,))
-    return DataParallel(mesh=mesh, axis_name=axis_name, active=active)
+    return devs
 
 
 def data_parallel_kwargs(train_cfg) -> dict:

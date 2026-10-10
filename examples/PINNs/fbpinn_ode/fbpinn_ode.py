@@ -56,6 +56,7 @@ from underPINN.utils.checkpoint import save_checkpoint
 from underPINN.utils.io import save_predictions
 from underPINN.utils.restart import RestartManager
 from underPINN.training.parallel import data_parallel_from_cfg
+from underPINN.training.model_parallel import model_parallel_from_cfg
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +130,11 @@ def run_fbpinn_ode(cfg) -> dict:
         x_start, x_end, n_sub, overlap)
     model = FBPINN(layers=layers, shifts=shifts, xs_min=xs_min, xs_max=xs_max,
                    smins=smins, smaxs=smaxs)
+    # Optional model parallelism (training.model_parallel: true): the n_sub
+    # subdomain networks are split across devices. Inert otherwise. Wrapping
+    # keeps the same function and the same initial weights.
+    mp    = model_parallel_from_cfg(tr)
+    model = mp.wrap(model)
 
     omega_max = float(omegas.max())
     n_osc = omega_max * (x_end - x_start) / (2 * np.pi)
@@ -189,6 +195,7 @@ def run_fbpinn_ode(cfg) -> dict:
     # Full-batch with a fixed point set: split it once, before the loop.
     dp = data_parallel_from_cfg(tr)
     params, opt_state = dp.prepare(params, opt_state, {"n_collocation": n_col})
+    params, opt_state = mp.prepare(params, opt_state, model=model)
     x_col = dp.shard(x_col)
 
     logger = ConsoleLogger(log_every=log_every)
@@ -219,7 +226,8 @@ def run_fbpinn_ode(cfg) -> dict:
     )
     np.save(os.path.join(out_dir, "loss_hist.npy"), np.array(loss_hist))
     save_config(cfg, os.path.join(out_dir, "config.yaml"))
-    save_checkpoint(params, out_dir, metadata={
+    # mp.export: ordinary FBPINN layout, whether or not this was model-parallel
+    save_checkpoint(mp.export(model, params), out_dir, metadata={
         "problem": "fbpinn_ode",
         "network": {"type": "fbpinn", "layers": layers, "n_subdomains": n_sub,
                     "overlap": overlap},

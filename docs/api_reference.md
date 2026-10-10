@@ -62,7 +62,8 @@ class Pipe:
 * - `core/`
   - `BasePDE`, `BaseLoss`, `BaseSolver`, `TrainingConfig`
 * - `nn/`
-  - `MLP`, `GatedMLP`, `FourierMLP`, `FBPINN`, `HybridAttention`, `SimpleGate`,
+  - `MLP`, `GatedMLP`, `FourierMLP`, `FBPINN`, `StackedFBPINN` (FBPINN laid out for
+    model parallelism), `HybridAttention`, `SimpleGate`,
     `FNO1D`, `FNO2D`, `DeepONet1D`, `CViT`, `factory.py` (single model-building path)
 * - `pde/`
   - Burgers, Wave, Helmholtz, Heat, N-S 2-D/3-D (steady + unsteady), Carreau N-S,
@@ -79,7 +80,9 @@ class Pipe:
     `Ramp`, `Composite`, `ShapelyGeom`
 * - `training/`
   - `rar_d_resample`, `rar_d_resample_split` (RAR-D adaptive collocation);
-    `train_gauss_newton` (L-M-damped Gauss-Newton / natural-gradient training)
+    `train_gauss_newton` (L-M-damped Gauss-Newton / natural-gradient training);
+    `make_data_parallel`, `data_parallel_from_cfg` (data parallelism);
+    `make_model_parallel`, `model_parallel_from_cfg` (FBPINN model parallelism)
 * - `config/`
   - `load_config`, `generate_sweep_configs`, `cfg_get`
 * - `runner/`
@@ -104,7 +107,7 @@ underPINN/
 │
 ├── nn/
 │   ├── mlp.py             # MLP, FourierMLP
-│   ├── fbpinn.py          # FBPINN (domain-decomposed network)
+│   ├── fbpinn.py          # FBPINN (domain-decomposed network), StackedFBPINN
 │   ├── attention.py       # HybridAttention, SimpleGate
 │   ├── embeddings.py      # Fourier / positional embeddings
 │   ├── subdomain.py       # SubdomainNetwork
@@ -169,7 +172,9 @@ underPINN/
 │
 ├── training/
 │   ├── resample.py           # rar_d_resample, rar_d_resample_split  (RAR-D adaptive collocation)
-│   └── natural_gradient.py   # train_gauss_newton  (L-M-damped Gauss-Newton / natural gradient)
+│   ├── natural_gradient.py   # train_gauss_newton  (L-M-damped Gauss-Newton / natural gradient)
+│   ├── parallel.py           # DataParallel  (split batches across devices)
+│   └── model_parallel.py     # ModelParallel  (split FBPINN subdomains across devices)
 │
 ├── config/
 │   └── loader.py             # load_config, generate_sweep_configs, cfg_get

@@ -151,6 +151,8 @@ class RANSSolver(BaseSolver):
         config: TrainingConfig = None,
         data_parallel: bool = False,
         data_parallel_devices: int = None,
+        model_parallel: bool = False,
+        model_parallel_devices: int = None,
     ):
         """Run the RANS RBA training loop.
 
@@ -175,6 +177,8 @@ class RANSSolver(BaseSolver):
         if config is not None:
             data_parallel      = config.data_parallel
             data_parallel_devices = config.data_parallel_devices
+            model_parallel = config.model_parallel
+            model_parallel_devices = config.model_parallel_devices
             epochs             = config.epochs
             batch_size         = config.batch_r
             seed               = config.seed
@@ -227,6 +231,12 @@ class RANSSolver(BaseSolver):
         # whole every step and stay replicated, so their sizes carry no
         # divisibility constraint. Inert when off.
         from underPINN.training.parallel import make_data_parallel
+        # Model parallelism: split FBPINN subdomain networks across devices
+        # (inert unless model_parallel; the model must be mp.wrap()-ed).
+        from underPINN.training.model_parallel import make_model_parallel
+        mp = make_model_parallel(
+            active=model_parallel, n_devices=model_parallel_devices)
+        params, state = mp.prepare(params, state, model=self.model)
         dp = make_data_parallel(
             active=data_parallel, n_devices=data_parallel_devices)
         params, state = dp.prepare(

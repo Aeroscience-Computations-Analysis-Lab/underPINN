@@ -76,6 +76,8 @@ class Case:
     padded: bool = False
     # Called with the flag-on run's output dir after training.
     post_check: Optional[Callable] = None
+    # "data" (training.data_parallel) or "model" (training.model_parallel).
+    mode: str = "data"
 
 
 # Pipe / AAA family: interior, wall, inlet, outlet pools; inlet/outlet draws are
@@ -404,6 +406,43 @@ if _N_DEV >= 7:
     CASES += _PADDED
 
 
+
+# Model parallelism (FBPINN subdomains split across devices). The stacked model
+# starts from bit-identical weights, so these must match the single-device run
+# exactly, like the data-parallel cases. The saved checkpoint must still be in
+# the ordinary FBPINN layout (subnets_0 ... subnets_{S-1}, no padding).
+def _checkpoint_is_plain_fbpinn(n_sub):
+    def check(out_dir):
+        from flax.serialization import msgpack_restore
+        with open(out_dir / "params.msgpack", "rb") as fh:
+            keys = sorted(msgpack_restore(fh.read())["params"])
+        assert keys == sorted(f"subnets_{i}" for i in range(n_sub)), (
+            f"checkpoint layout {keys} is not plain FBPINN with {n_sub} "
+            f"subdomains -- mp.export was not applied")
+    return check
+
+
+_MP_ODE = {"data.n_collocation": 64, "subdomains.n": 4}
+if _N_DEV >= 3:
+    CASES += [
+        Case("fbpinn_ode_mp2", "PINNs/fbpinn_ode/fbpinn_ode.py",
+             "run_fbpinn_ode", "PINNs/fbpinn_ode/config.yaml", dict(_MP_ODE),
+             mode="model", devices=2, post_check=_checkpoint_is_plain_fbpinn(4)),
+        # 4 subdomains on 3 devices -> padded to 6 with 2 masked dummies
+        Case("fbpinn_ode_mp3", "PINNs/fbpinn_ode/fbpinn_ode.py",
+             "run_fbpinn_ode", "PINNs/fbpinn_ode/config.yaml", dict(_MP_ODE),
+             mode="model", devices=3, post_check=_checkpoint_is_plain_fbpinn(4)),
+        # LDC ships a single subdomain: correct but no speedup (and warns);
+        # covers the LDCSolver path and the export in its save.
+        Case("LDC_mp2", "PINNs/LDC/run_ldc.py", "run_ldc",
+             "PINNs/LDC/config.yaml",
+             {"data.n_collocation": 128, "data.n_bc": 40,
+              "training.batch_r": 64},
+             setup=_ldc_reference_csv, mode="model", devices=2,
+             post_check=_checkpoint_is_plain_fbpinn(1)),
+    ]
+
+
 # NOTE: the test machinery below must stay *after* every CASES definition --
 # parametrize snapshots the ids list at decoration time.
 
@@ -416,6 +455,7 @@ class _Spy:
         self.prepared = 0
         self.device_counts = []     # n_devices of every enabled prepare()
         self.padded_shards = 0      # shards that needed padding (uneven split)
+        self.mp_device_counts = []  # n_devices of every enabled model-parallel prepare()
         self.sharded_arrays = 0
         self.axes = set()
 
@@ -449,6 +489,15 @@ def spy(monkeypatch):
             s.axes.add(axis)
         return orig_shard(self, array, axis)
 
+    from underPINN.training import model_parallel as _mpar
+    orig_mp_prepare = _mpar.ModelParallel.prepare
+
+    def mp_prepare(self, params, state, model=None):
+        if self.enabled:
+            s.mp_device_counts.append(self.n_devices)
+        return orig_mp_prepare(self, params, state, model=model)
+
+    monkeypatch.setattr(_mpar.ModelParallel, "prepare", mp_prepare)
     monkeypatch.setattr(_par.DataParallel, "prepare", prepare)
     monkeypatch.setattr(_par.DataParallel, "shard", shard)
     return s
@@ -465,8 +514,8 @@ def _run(case: Case, data_parallel: bool, out_dir: pathlib.Path):
         **case.overrides,
         "training.epochs": case.epochs,
         "training.save_restart_every": 0,   # never resume the other run
-        "training.data_parallel": data_parallel,
-        **({"training.data_parallel_devices": case.devices}
+        f"training.{case.mode}_parallel": data_parallel,
+        **({f"training.{case.mode}_parallel_devices": case.devices}
            if data_parallel and case.devices is not None else {}),
         "output.dir": str(out_dir),
     })
@@ -489,6 +538,20 @@ def test_example_trains_identically_with_data_parallel(case, tmp_path, spy,
         "flag-off run sharded something; the inert path is not inert")
 
     par = _run(case, True, tmp_path / "par")
+    if case.mode == "model":
+        want = case.devices if case.devices is not None else _N_DEV
+        assert spy.mp_device_counts and set(spy.mp_device_counts) == {want}, (
+            f"{case.name}: model_parallel=True but the subdomains were split "
+            f"over {sorted(set(spy.mp_device_counts))} devices, expected {want}")
+        assert spy.prepared == 0 and spy.sharded_arrays == 0, (
+            "model-parallel run also engaged data parallelism")
+        if case.post_check is not None:
+            case.post_check(tmp_path / "par")
+        assert ref.shape == par.shape and np.all(np.isfinite(par))
+        np.testing.assert_allclose(
+            par, ref, rtol=case.rtol, atol=case.atol,
+            err_msg=f"{case.name}: loss trajectory changed with model parallelism")
+        return
     assert spy.prepared >= 1, (
         f"{case.name}: data_parallel=True never called dp.prepare() -- the "
         f"flag is being ignored, so params were never replicated")

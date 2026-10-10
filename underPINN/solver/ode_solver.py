@@ -75,6 +75,8 @@ class ODESolver(BaseSolver):
         if config is not None:
             data_parallel = config.data_parallel
             data_parallel_devices = config.data_parallel_devices
+            model_parallel = config.model_parallel
+            model_parallel_devices = config.model_parallel_devices
             epochs = config.epochs
             log_every = config.log_every
             callbacks = list(config.callbacks)
@@ -89,6 +91,8 @@ class ODESolver(BaseSolver):
             n_scan = 1
             data_parallel = False
             data_parallel_devices = None
+            model_parallel = False
+            model_parallel_devices = None
 
         # ── Restart ──────────────────────────────────────────────────────────────
         _restart = None
@@ -122,6 +126,12 @@ class ODESolver(BaseSolver):
         # grid t_r is split once; the initial-condition values are a few
         # points (often just t=0) and stay replicated. Inert when off.
         from underPINN.training.parallel import make_data_parallel
+        # Model parallelism: split FBPINN subdomain networks across devices
+        # (inert unless model_parallel; the model must be mp.wrap()-ed).
+        from underPINN.training.model_parallel import make_model_parallel
+        mp = make_model_parallel(
+            active=model_parallel, n_devices=model_parallel_devices)
+        self.params, self.state = mp.prepare(self.params, self.state, model=self.model)
         dp = make_data_parallel(
             active=data_parallel, n_devices=data_parallel_devices)
         self.params, self.state = dp.prepare(

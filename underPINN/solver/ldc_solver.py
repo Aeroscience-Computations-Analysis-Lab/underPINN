@@ -76,6 +76,8 @@ class LDCSolver(BaseSolver):
         if config is not None:
             data_parallel = config.data_parallel
             data_parallel_devices = config.data_parallel_devices
+            model_parallel = config.model_parallel
+            model_parallel_devices = config.model_parallel_devices
             epochs     = config.epochs
             batch_size = config.batch_r
             seed       = config.seed
@@ -89,6 +91,8 @@ class LDCSolver(BaseSolver):
             callbacks = []
             data_parallel = False
             data_parallel_devices = None
+            model_parallel = False
+            model_parallel_devices = None
 
         # ── Restart / resume ──────────────────────────────────────────────────
         _restart = None
@@ -129,6 +133,12 @@ class LDCSolver(BaseSolver):
         # Each mini-batch -- collocation points, their RBA running sums, and the
         # inlet / no-slip draws -- is split across devices. Inert when off.
         from underPINN.training.parallel import make_data_parallel
+        # Model parallelism: split FBPINN subdomain networks across devices
+        # (inert unless model_parallel; the model must be mp.wrap()-ed).
+        from underPINN.training.model_parallel import make_model_parallel
+        mp = make_model_parallel(
+            active=model_parallel, n_devices=model_parallel_devices)
+        self.params, self.state = mp.prepare(self.params, self.state, model=self.model)
         dp = make_data_parallel(
             active=data_parallel, n_devices=data_parallel_devices)
         self.params, self.state = dp.prepare(

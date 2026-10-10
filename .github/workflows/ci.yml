@@ -66,19 +66,22 @@ jobs:
       # them for real on 8 virtual CPU devices. UNDERPINN_REQUIRE_MULTI_DEVICE
       # makes a misconfigured run (flag ignored -> 1 device) fail instead of
       # passing green on skips. Verifies gradient equivalence, not speedup.
-      - name: Run data-parallel tests (8 virtual devices)
+      - name: Run data/model-parallel tests (8 virtual devices)
         env:
           JAX_PLATFORMS: cpu
           XLA_FLAGS: --xla_force_host_platform_device_count=8
           UNDERPINN_REQUIRE_MULTI_DEVICE: "1"
         run: |
-          # test_rba_state.py also covers RBA state with padded (uneven) batches
+          # test_rba_state.py also covers RBA state with padded (uneven) batches.
+          # Model-parallel core tests run on every Python version: they rely on
+          # Flax behaviour (nn.vmap layouts, nn.nowrap) that could differ.
           pytest tests/test_parallel.py tests/test_rba_state.py -v
+          pytest tests/test_model_parallel.py -k "not TestSolvers" -v
 
       # Trains every example with training.data_parallel off and on and requires
       # identical loss trajectories (and real sharding). Slow and independent of
       # the Python version, so it runs once rather than across the whole matrix.
-      - name: Run every example with data parallelism on/off (8 virtual devices)
+      - name: Run every example with data/model parallelism on/off (8 virtual devices)
         if: matrix.python-version == '3.11'
         env:
           JAX_PLATFORMS: cpu
@@ -86,3 +89,5 @@ jobs:
           UNDERPINN_REQUIRE_MULTI_DEVICE: "1"
         run: |
           pytest tests/test_parallel_examples.py -v
+          # end-to-end solver training with model parallelism (slow)
+          pytest tests/test_model_parallel.py -k TestSolvers -v
