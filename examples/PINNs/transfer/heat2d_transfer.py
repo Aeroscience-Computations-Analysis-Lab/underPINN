@@ -245,9 +245,9 @@ def plot_solution_row(axes_row, model, params, pde, alpha, t_slice, title_prefix
 # Strategy 1 — Parameter Transfer
 # ---------------------------------------------------------------------------
 
-def run_parameter_transfer(data_parallel: bool = False):
+def run_parameter_transfer(data_parallel: bool = False, n_devices=None):
     # Optional data parallelism (`--data-parallel`). Inert otherwise.
-    dp = make_data_parallel(active=data_parallel)
+    dp = make_data_parallel(active=data_parallel, n_devices=n_devices)
 
     def _train(*args, **kwargs):
         return run_training(*args, dp=dp, **kwargs)
@@ -354,9 +354,9 @@ def run_parameter_transfer(data_parallel: bool = False):
 # Strategy 2 — Temporal Transfer
 # ---------------------------------------------------------------------------
 
-def run_temporal_transfer(data_parallel: bool = False):
+def run_temporal_transfer(data_parallel: bool = False, n_devices=None):
     # Optional data parallelism (`--data-parallel`). Inert otherwise.
-    dp = make_data_parallel(active=data_parallel)
+    dp = make_data_parallel(active=data_parallel, n_devices=n_devices)
 
     def _train(*args, **kwargs):
         return run_training(*args, dp=dp, **kwargs)
@@ -468,10 +468,10 @@ def run_temporal_transfer(data_parallel: bool = False):
 # Entry point
 # ---------------------------------------------------------------------------
 
-def main(data_parallel: bool = False):
+def main(data_parallel: bool = False, n_devices=None):
     print("JAX devices:", jax.devices())
-    run_parameter_transfer(data_parallel=data_parallel)
-    run_temporal_transfer(data_parallel=data_parallel)
+    run_parameter_transfer(data_parallel=data_parallel, n_devices=n_devices)
+    run_temporal_transfer(data_parallel=data_parallel, n_devices=n_devices)
     print("\nAll 2-D heat transfer experiments complete.")
 
 
@@ -480,4 +480,8 @@ if __name__ == "__main__":
     _ap = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
     _ap.add_argument("--data-parallel", action="store_true",
                      help="split each collocation batch across all visible devices")
-    main(data_parallel=_ap.parse_args().data_parallel)
+    _ap.add_argument("--devices", type=int, default=None, metavar="N",
+                     help="with --data-parallel: use only the first N visible "
+                          "devices (default: all)")
+    _args = _ap.parse_args()
+    main(data_parallel=_args.data_parallel, n_devices=_args.devices)

@@ -34,6 +34,7 @@ import numpy as np
 import optax
 
 from underPINN.config.loader import cfg_get, save_config
+from underPINN.training.parallel import data_parallel_kwargs
 from underPINN.nn.fbpinn import FBPINN
 from underPINN.pde.k_epsilon import KEpsilonPDE
 from underPINN.solver.rans_solver import RANSSolver, RANSInputWrapper
@@ -234,7 +235,7 @@ def run_turbulence(cfg) -> dict:
         epochs=epochs, batch_size=batch_size, seed=seed,
         out_dir=out_dir,
         save_restart_every=int(cfg_get(tr, "save_restart_every", default=500)),
-        data_parallel=bool(cfg_get(tr, "data_parallel", default=False)),
+        **data_parallel_kwargs(tr),
     )
 
     # ── Save ──────────────────────────────────────────────────────────────────

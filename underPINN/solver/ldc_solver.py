@@ -75,6 +75,7 @@ class LDCSolver(BaseSolver):
         """
         if config is not None:
             data_parallel = config.data_parallel
+            data_parallel_devices = config.data_parallel_devices
             epochs     = config.epochs
             batch_size = config.batch_r
             seed       = config.seed
@@ -87,6 +88,7 @@ class LDCSolver(BaseSolver):
         else:
             callbacks = []
             data_parallel = False
+            data_parallel_devices = None
 
         # ── Restart / resume ──────────────────────────────────────────────────
         _restart = None
@@ -127,7 +129,8 @@ class LDCSolver(BaseSolver):
         # Each mini-batch -- collocation points, their RBA running sums, and the
         # inlet / no-slip draws -- is split across devices. Inert when off.
         from underPINN.training.parallel import make_data_parallel
-        dp = make_data_parallel(active=data_parallel)
+        dp = make_data_parallel(
+            active=data_parallel, n_devices=data_parallel_devices)
         self.params, self.state = dp.prepare(
             self.params, self.state, {"batch_r (per-step batch)": batch_size})
 
@@ -175,9 +178,13 @@ class LDCSolver(BaseSolver):
                     )
 
                     ep_loss += float(loss)
-                    r1_ups.append(new_r[0])
-                    r2_ups.append(new_r[1])
-                    r3_ups.append(new_r[2])
+                    # [:batch_size] drops data-parallel padding: a batch that does not
+                    # divide by the device count is padded with repeats of its first
+                    # rows, appended at the end, so the first batch_size outputs are the
+                    # real points in order. A no-op when nothing was padded.
+                    r1_ups.append(new_r[0][:batch_size])
+                    r2_ups.append(new_r[1][:batch_size])
+                    r3_ups.append(new_r[2][:batch_size])
 
                 # The updated sums come back in *shuffled* (perms) order. Scatter them
                 # to the original positions of the points they belong to, so next

@@ -23,6 +23,7 @@ import jax.numpy as jnp
 import optax
 
 from underPINN.config.loader import cfg_get, save_config
+from underPINN.training.parallel import data_parallel_kwargs
 from underPINN.nn.factory import build_model, network_config
 from underPINN.pde.burgers_deeponet import DeepONetBurgersPDE
 from underPINN.losses.operator_loss import DeepONetLoss
@@ -98,7 +99,7 @@ def run_deeponet1d_burgers(cfg) -> dict:
         epochs=epochs, lr=lr,
         lr_schedule=optax.cosine_decay_schedule(lr, epochs, alpha=lr_alpha),
         batch_i=batch_size, log_every=log_every, callbacks=callbacks,
-        data_parallel=bool(cfg_get(tr, "data_parallel", default=False)),
+        **data_parallel_kwargs(tr),
     )
     solver.train(u_pool, x_sensors, xt_bc_lo, xt_bc_hi,
                 n_r=cfg_get(cfg.loss, "n_r", default=2000),

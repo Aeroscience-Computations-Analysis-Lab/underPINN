@@ -19,6 +19,7 @@ from underPINN.training.natural_gradient import (
 from underPINN.training.parallel import (
     DataParallel,
     data_parallel_from_cfg,
+    data_parallel_kwargs,
     make_data_parallel,
     pad_to_multiple,
 )
@@ -27,6 +28,7 @@ from underPINN.training.resample import rar_d_resample, rar_d_resample_split
 __all__ = [
     "DataParallel",
     "data_parallel_from_cfg",
+    "data_parallel_kwargs",
     "gauss_newton_step",
     "make_data_parallel",
     "pad_to_multiple",

@@ -33,6 +33,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from underPINN.config.loader import cfg_get, save_config
+from underPINN.training.parallel import data_parallel_kwargs
 from underPINN.nn.mlp import MLP
 from underPINN.pde.burgers import BurgersPDE
 from underPINN.losses.loss import PINNLoss
@@ -66,7 +67,7 @@ def _make_data(T: float, N_r: int, N_ic: int, N_bc: int, seed: int = 0):
 
 
 def _build_solver(layers, nu, epochs, lr, ic_w, bc_w, rba, log_every, seed,
-                  data_parallel=False):
+                  data_parallel=False, data_parallel_devices=None):
     model  = MLP(layers=layers)
     pde    = BurgersPDE(model, nu=nu)
     loss   = PINNLoss(model, pde, ic_weight=ic_w, bc_weight=bc_w,
@@ -80,6 +81,7 @@ def _build_solver(layers, nu, epochs, lr, ic_w, bc_w, rba, log_every, seed,
         log_every=log_every,
         callbacks=[ConsoleLogger(log_every=log_every)],
         data_parallel=data_parallel,
+        data_parallel_devices=data_parallel_devices,
     )
     return model, solver, config
 
@@ -106,12 +108,11 @@ def run_burgers_transfer(cfg) -> dict:
     out_dir = cfg_get(out, "dir", default="outputs/burgers_transfer") if out else "outputs/burgers_transfer"
     os.makedirs(out_dir, exist_ok=True)
 
-    # training.data_parallel: true -- applied to all six solvers built below.
-    _dp = bool(cfg_get(cfg_get(cfg, "training", default=None),
-                       "data_parallel", default=False))
+    # training.data_parallel[_devices] -- applied to all six solvers below.
+    _dp_kw = data_parallel_kwargs(cfg_get(cfg, "training", default=None))
 
     def _build(*args, **kwargs):
-        return _build_solver(*args, data_parallel=_dp, **kwargs)
+        return _build_solver(*args, **_dp_kw, **kwargs)
 
     layers    = list(cfg.network.layers)
     T_default = float(cfg_get(cfg.physics, "T", default=2.0))

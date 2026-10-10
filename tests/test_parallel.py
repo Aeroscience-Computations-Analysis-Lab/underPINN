@@ -147,17 +147,17 @@ class TestDivisibilityGuard:
 
     @requires_multi_device
     def test_jax_itself_rejects_uneven_sharding(self):
-        """Pins the behaviour parallel.py's docstring relies on.
+        """Pins the JAX behaviour that makes padding necessary.
 
-        The divisibility guard is documented as a *usability* improvement over
-        JAX's own error, not a correctness safeguard -- because JAX refuses an
-        uneven split outright rather than mis-weighting it. If a future JAX
-        starts accepting uneven shards, this test fails and that docstring
-        must be revisited.
+        jax.device_put refuses to shard a dimension that does not divide the
+        device count, which is why DataParallel.shard pads first. If a future
+        JAX accepts uneven shards, this fails and the padding (and the module
+        docstring explaining it) should be revisited.
         """
         dp = make_data_parallel()
         with pytest.raises(ValueError):
-            dp.shard(jnp.arange(float(dp.n_devices * 4 + 1)))
+            jax.device_put(jnp.arange(float(dp.n_devices * 4 + 1)),
+                           dp.batch_sharding())
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +275,7 @@ class TestGradientEquivalence:
 # ---------------------------------------------------------------------------
 
 def _train_solver(data_parallel: bool, n_scan: int, epochs: int = 12,
-                  batch: int | None = None):
+                  batch: int | None = None, n_devices: int | None = None):
     """Train a real FBPINNSolver on Burgers; return (solver, loss_hist)."""
     from underPINN.core.config import TrainingConfig
     from underPINN.solver.fbpinn import FBPINNSolver
@@ -292,7 +292,8 @@ def _train_solver(data_parallel: bool, n_scan: int, epochs: int = 12,
     solver.init(jax.random.PRNGKey(0))
     cfg = TrainingConfig(epochs=epochs, lr=1e-3, batch_r=bs, batch_i=bs,
                          batch_b=bs, seed=0, n_scan_steps=n_scan,
-                         data_parallel=data_parallel, log_every=10_000)
+                         data_parallel=data_parallel,
+                         data_parallel_devices=n_devices, log_every=10_000)
     solver.train(x_r, t_r, x_i, u_i, x_b, t_b, u_b, config=cfg)
     return solver, np.asarray(solver.loss_hist)
 
@@ -335,10 +336,14 @@ class TestFBPINNSolverDataParallel:
         assert np.all(np.isfinite(np.asarray(out)))
 
     @requires_multi_device
-    def test_indivisible_batch_raises_named_error_before_training(self):
+    def test_indivisible_batch_trains_with_padding(self, capsys):
         d = jax.device_count()
-        with pytest.raises(ValueError, match="batch_r"):
-            _train_solver(True, n_scan=1, batch=8 * d + 1)
+        solver, hist = _train_solver(True, n_scan=1, batch=8 * d + 1)
+        assert hist.size > 0 and np.all(np.isfinite(hist))
+        out = capsys.readouterr().out
+        assert "padded" in out and f"batch_r = {8 * d + 1} -> {9 * d}" in out
+        for leaf in jax.tree_util.tree_leaves(solver.params):
+            assert len(leaf.addressable_shards) == d
 
     def test_flag_is_a_no_op_on_one_device(self):
         """data_parallel=True must not break single-device training."""
@@ -484,6 +489,156 @@ class TestSolverDataParallel:
 
 
 # ---------------------------------------------------------------------------
+# Choosing how many devices: data_parallel_devices / n_devices
+# ---------------------------------------------------------------------------
+
+requires_4_devices = pytest.mark.skipif(
+    _N_DEV < 4, reason=f"needs >=4 JAX devices, saw {_N_DEV}")
+
+
+class TestDeviceCount:
+    @requires_4_devices
+    def test_uses_only_the_first_n_devices(self):
+        dp = make_data_parallel(n_devices=4)
+        assert dp.n_devices == 4 and dp.enabled
+        assert dp.devices == tuple(jax.devices()[:4])
+        xs = dp.shard(jnp.arange(32.0))
+        assert len(xs.addressable_shards) == 4
+        assert all(s.data.shape == (8,) for s in xs.addressable_shards)
+
+    def test_more_than_visible_is_an_error_not_a_silent_cap(self):
+        with pytest.raises(ValueError, match="CUDA_VISIBLE_DEVICES") as exc:
+            make_data_parallel(n_devices=_N_DEV + 1)
+        assert f"data_parallel_devices={_N_DEV + 1}" in str(exc.value)
+
+    @pytest.mark.parametrize("bad", [0, -2, True, 2.5, "4"])
+    def test_rejects_non_positive_and_non_int(self, bad):
+        with pytest.raises(ValueError, match="positive integer"):
+            make_data_parallel(n_devices=bad)
+
+    def test_one_device_is_a_no_op(self):
+        dp = make_data_parallel(n_devices=1)
+        assert dp.n_devices == 1 and not dp.enabled
+        dp.require_divisible({"batch_r": 4097})      # nothing to violate
+
+    def test_count_without_flag_warns_and_stays_inert(self):
+        with pytest.warns(UserWarning, match="data parallelism is off"):
+            dp = make_data_parallel(active=False, n_devices=2)
+        assert not dp.enabled and dp.n_devices == 1
+
+    @requires_4_devices
+    def test_divisibility_follows_the_chosen_count(self):
+        """The practical reason to pick a count: 12 splits over 4, not 8."""
+        make_data_parallel(n_devices=4).require_divisible({"batch_r": 12})
+        if _N_DEV % 8 == 0:
+            with pytest.raises(ValueError, match="batch_r"):
+                make_data_parallel().require_divisible({"batch_r": 12})
+
+    @requires_4_devices
+    def test_read_from_yaml_training_block(self):
+        import types
+        from underPINN.training.parallel import (data_parallel_from_cfg,
+                                                 data_parallel_kwargs)
+        tr = types.SimpleNamespace(data_parallel=True, data_parallel_devices=4)
+        assert data_parallel_kwargs(tr) == {"data_parallel": True,
+                                            "data_parallel_devices": 4}
+        assert data_parallel_from_cfg(tr).n_devices == 4
+        absent = types.SimpleNamespace(data_parallel=True)
+        assert data_parallel_kwargs(absent)["data_parallel_devices"] is None
+        assert data_parallel_from_cfg(absent).n_devices == _N_DEV
+
+    @pytest.mark.parametrize("bad", [0, -1, True, 3.0])
+    def test_training_config_validates_eagerly(self, bad):
+        from underPINN.core.config import TrainingConfig
+        with pytest.raises(ValueError, match="data_parallel_devices"):
+            TrainingConfig(data_parallel=True, data_parallel_devices=bad)
+        TrainingConfig(data_parallel=True, data_parallel_devices=2)   # valid
+
+    @requires_4_devices
+    def test_solver_trains_identically_on_a_subset(self):
+        _, ref = _train_solver(False, n_scan=1)
+        solver, par = _train_solver(True, n_scan=1, n_devices=4)
+        np.testing.assert_allclose(par, ref, rtol=1e-3, atol=1e-5)
+        for leaf in jax.tree_util.tree_leaves(solver.params):
+            assert len(leaf.addressable_shards) == 4, (
+                "params replicated over the wrong number of devices")
+
+
+# ---------------------------------------------------------------------------
+# Any number of devices: non-divisible batches are padded, not rejected
+# ---------------------------------------------------------------------------
+
+_ODD_COUNTS = [d for d in (3, 5, 6, 7) if d <= _N_DEV]
+odd_counts = pytest.mark.parametrize("D", _ODD_COUNTS or [pytest.param(
+    3, marks=pytest.mark.skip(reason="needs >=3 devices"))])
+
+
+class TestAnyDeviceCount:
+    @odd_counts
+    def test_shard_pads_to_an_equal_split(self, D):
+        dp = make_data_parallel(n_devices=D)
+        n = 4 * D + 1                                   # never divisible by D
+        x = jnp.arange(float(n))
+        xs = dp.shard(x)
+        assert xs.shape[0] == 5 * D                     # next multiple of D
+        assert len({s.data.shape for s in xs.addressable_shards}) == 1
+        got = np.asarray(xs)
+        np.testing.assert_array_equal(got[:n], np.asarray(x))     # real rows
+        np.testing.assert_array_equal(got[n:], np.asarray(x)[:5 * D - n])
+
+    @odd_counts
+    def test_padding_is_the_only_difference(self, D):
+        """Sharded gradient on the padded batch == single-device gradient on
+        that same padded batch, exactly -- so nothing else is lost or skewed.
+        Paired arrays (points, targets) pad with the same rows and stay
+        aligned."""
+        dp = make_data_parallel(n_devices=D)
+        params, batch, loss_of = _problem(n_r=16 * D + 1, n_i=4 * D + 2,
+                                          n_b=4 * D)
+        padded = tuple(pad_to_multiple(a, D)[0] for a in batch)
+        ref_loss, ref_grad = _grad(params, padded, loss_of)
+        par_loss, par_grad = _grad(dp.replicate(params), dp.shard_all(batch),
+                                   loss_of)
+        assert par_loss == pytest.approx(ref_loss, rel=1e-5)
+        for a, b in zip(jax.tree_util.tree_leaves(ref_grad),
+                        jax.tree_util.tree_leaves(par_grad)):
+            np.testing.assert_allclose(np.asarray(a), np.asarray(b),
+                                       rtol=1e-4, atol=1e-6)
+
+    @odd_counts
+    def test_scan_stacks_pad_the_point_axis(self, D):
+        dp = make_data_parallel(n_devices=D)
+        stack = jnp.ones((4, 2 * D + 1, 3))         # (n_scan, batch, dim)
+        out = dp.shard(stack, axis=1)
+        assert out.shape == (4, 3 * D, 3)           # scan axis untouched
+
+    @odd_counts
+    def test_solver_trains_on_any_count(self, D, capsys):
+        solver, hist = _train_solver(True, n_scan=1, batch=4 * D + 1,
+                                     n_devices=D)
+        assert hist.size > 0 and np.all(np.isfinite(hist))
+        assert "padded" in capsys.readouterr().out
+        for leaf in jax.tree_util.tree_leaves(solver.params):
+            assert len(leaf.addressable_shards) == D
+
+    @odd_counts
+    def test_prepare_reports_padding_with_exact_alternatives(self, D, capsys):
+        dp = make_data_parallel(n_devices=D)
+        dp.prepare({}, {}, {"batch_r": 4 * D + 1, "batch_bc": 2 * D})
+        out = capsys.readouterr().out
+        assert f"batch_r = {4 * D + 1} -> {5 * D}" in out
+        assert f"use {4 * D} or {5 * D} for an exact split" in out
+        assert "batch_bc" not in out          # divisible sizes are not listed
+
+    def test_divisible_batches_are_not_padded(self):
+        dp = make_data_parallel()
+        if not dp.enabled:
+            pytest.skip("needs >=2 devices")
+        x = jnp.arange(float(8 * dp.n_devices))
+        assert dp.shard(x).shape == x.shape
+
+
+# ---------------------------------------------------------------------------
 # pad_to_multiple
 # ---------------------------------------------------------------------------
 
@@ -515,6 +670,10 @@ class TestPadToMultiple:
         assert n == 5
         assert out.shape == (8, 2)
         assert jnp.allclose(out[:5], x)
+
+    def test_empty_array_is_left_alone(self):
+        out, n = pad_to_multiple(jnp.zeros((0, 2)), 3)
+        assert n == 0 and out.shape == (0, 2)
 
     def test_rejects_bad_multiple(self):
         with pytest.raises(ValueError):

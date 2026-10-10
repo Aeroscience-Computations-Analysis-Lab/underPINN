@@ -304,7 +304,9 @@ def run_airfoil(cfg) -> dict:
     dp = data_parallel_from_cfg(tr)
     params, opt_state = dp.prepare(params, opt_state, {
         "collocation (n_interior + n_wake)": xy_col_j.shape[0]})
-    xy_col_j = dp.shard(xy_col_j)
+    # A separate, training-only copy: with an uneven split it is padded, and
+    # xy_col_j itself must stay exact for the predictions saved after training.
+    xy_col_dp = dp.shard(xy_col_j)
 
     try:
         for ep in range(start_ep, epochs):
@@ -313,10 +315,10 @@ def run_airfoil(cfg) -> dict:
                 xy_col_j = jnp.array(_build_collocation(
                     af, n_interior, n_wake, dom, wake_box, buffer,
                     seed + ep))   # fresh seed → new points; shape unchanged
-                xy_col_j = dp.shard(xy_col_j)
+                xy_col_dp = dp.shard(xy_col_j)
 
             params, opt_state, loss, (l_pde, l_bc) = step(
-                params, opt_state, xy_col_j)
+                params, opt_state, xy_col_dp)
             loss_hist.append(float(loss))
             pde_hist.append(float(l_pde))
             bc_hist.append(float(l_bc))

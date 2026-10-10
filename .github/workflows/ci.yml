@@ -72,7 +72,8 @@ jobs:
           XLA_FLAGS: --xla_force_host_platform_device_count=8
           UNDERPINN_REQUIRE_MULTI_DEVICE: "1"
         run: |
-          pytest tests/test_parallel.py -v
+          # test_rba_state.py also covers RBA state with padded (uneven) batches
+          pytest tests/test_parallel.py tests/test_rba_state.py -v
 
       # Trains every example with training.data_parallel off and on and requires
       # identical loss trajectories (and real sharding). Slow and independent of

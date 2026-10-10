@@ -20,6 +20,7 @@ import jax.numpy as jnp
 import optax
 
 from underPINN.config.loader import cfg_get, save_config
+from underPINN.training.parallel import data_parallel_kwargs
 from underPINN.nn.factory import build_model, network_config
 from underPINN.pde.burgers_grid import BurgersGrid2D
 from underPINN.losses.operator_loss import OperatorLoss
@@ -102,7 +103,7 @@ def run_fno2d_burgers(cfg) -> dict:
         lr_schedule=optax.cosine_decay_schedule(lr, epochs, alpha=lr_alpha),
         batch_r=batch_size, log_every=log_every, callbacks=callbacks,
         n_scan_steps=cfg_get(tr, "n_scan_steps", default=1),
-        data_parallel=bool(cfg_get(tr, "data_parallel", default=False)),
+        **data_parallel_kwargs(tr),
         out_dir=out_dir,
         save_restart_every=int(cfg_get(tr, "save_restart_every", default=0)),
     )

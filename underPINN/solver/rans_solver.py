@@ -150,6 +150,7 @@ class RANSSolver(BaseSolver):
         save_restart_every: int = 500,
         config: TrainingConfig = None,
         data_parallel: bool = False,
+        data_parallel_devices: int = None,
     ):
         """Run the RANS RBA training loop.
 
@@ -173,6 +174,7 @@ class RANSSolver(BaseSolver):
         # ── Unpack config or fall back to legacy kwargs ───────────────────────
         if config is not None:
             data_parallel      = config.data_parallel
+            data_parallel_devices = config.data_parallel_devices
             epochs             = config.epochs
             batch_size         = config.batch_r
             seed               = config.seed
@@ -225,7 +227,8 @@ class RANSSolver(BaseSolver):
         # whole every step and stay replicated, so their sizes carry no
         # divisibility constraint. Inert when off.
         from underPINN.training.parallel import make_data_parallel
-        dp = make_data_parallel(active=data_parallel)
+        dp = make_data_parallel(
+            active=data_parallel, n_devices=data_parallel_devices)
         params, state = dp.prepare(
             params, state, {"batch_r (per-step batch)": batch_size})
 
@@ -277,11 +280,15 @@ class RANSSolver(BaseSolver):
                     epoch_loss += loss
                     last_aux = aux
 
-                    r1_updates.append(new_rsum_batch[0])
-                    r2_updates.append(new_rsum_batch[1])
-                    r3_updates.append(new_rsum_batch[2])
-                    r4_updates.append(new_rsum_batch[3])
-                    r5_updates.append(new_rsum_batch[4])
+                    # [:batch_size] drops data-parallel padding: a batch that does not
+                    # divide by the device count is padded with repeats of its first
+                    # rows, appended at the end, so the first batch_size outputs are the
+                    # real points in order. A no-op when nothing was padded.
+                    r1_updates.append(new_rsum_batch[0][:batch_size])
+                    r2_updates.append(new_rsum_batch[1][:batch_size])
+                    r3_updates.append(new_rsum_batch[2][:batch_size])
+                    r4_updates.append(new_rsum_batch[3][:batch_size])
+                    r5_updates.append(new_rsum_batch[4][:batch_size])
 
                 # Rebuild global RBA state.
                 # The updated sums come back in *shuffled* (perms) order. Scatter them

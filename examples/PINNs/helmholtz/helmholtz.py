@@ -22,6 +22,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from underPINN.config.loader import cfg_get, save_config
+from underPINN.training.parallel import data_parallel_kwargs
 from underPINN.nn.mlp import FourierMLP, MLP
 from underPINN.pde.helmholtz import HelmholtzPDE
 from underPINN.losses.steady_loss import SteadyLoss
@@ -90,7 +91,7 @@ def run_helmholtz(cfg) -> dict:
         ],
         out_dir            = out_dir,
         save_restart_every = int(cfg_get(tr, "save_restart_every", default=500)),
-        data_parallel = bool(cfg_get(tr, "data_parallel", default=False)),
+        **data_parallel_kwargs(tr),
     )
     solver.train(xy_r, xy_b, u_b, config=config)
     save_config(cfg, os.path.join(out_dir, "config.yaml"))

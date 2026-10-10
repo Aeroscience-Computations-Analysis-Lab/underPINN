@@ -70,6 +70,10 @@ multiple calls.
   - `bool`
   - `False`
   - Split each mini-batch across all visible devices — see {ref}`data-parallelism`
+* - `data_parallel_devices`
+  - `int` / `None`
+  - `None`
+  - Use only the first N visible devices for `data_parallel` (`None` = all)
 * - `out_dir`
   - `str`
   - `""`
@@ -160,19 +164,27 @@ and every solver supports it**, switched on with one line of YAML — no code ch
 ```yaml
 training:
   data_parallel: true
+  data_parallel_devices: 4    # optional: use only the first 4 visible devices
 ```
+
+Omit `data_parallel_devices` to use every visible device; **any count works**
+(2, 3, 5, 7, …), with any batch size. A smaller count leaves the remaining GPUs free
+for other jobs.
+Asking for more devices than are visible is an error rather than a silent cap; to
+choose *which* GPUs are used, restrict visibility with `CUDA_VISIBLE_DEVICES`. A
+count set while `data_parallel` is off is ignored with a warning.
 
 Programmatically, pass it to any solver (`FBPINNSolver`, `SteadySolver`,
 `LDCSolver`, `ODESolver`, `RANSSolver`, `OperatorSolver`, `DeepONetSolver`):
 
 ```python
 config = TrainingConfig(epochs=20000, batch_r=8192, batch_b=512,
-                        data_parallel=True)
+                        data_parallel=True, data_parallel_devices=4)
 solver.train(*data, config=config)
 ```
 
 `examples/PINNs/transfer/heat2d_transfer.py` has no YAML; use
-`python heat2d_transfer.py --data-parallel`.
+`python heat2d_transfer.py --data-parallel [--devices N]`.
 
 **It does not change the optimisation.** `jax.jit` over `NamedSharding`-annotated
 arrays is a *global-view* computation: the program means exactly what it would
@@ -181,19 +193,47 @@ is a mean over its own point set, which the partitioner lowers to a cross-device
 all-reduce divided by the *global* point count — so the gradient equals the
 single-device full-batch gradient, up to float32 reduction-order noise.
 
+**Batches that do not divide the device count are padded.** Each device gets an
+equal slice, so a batch of N points on D devices is padded to the next multiple of
+D by repeating its first `(-N) % D` rows — at most D−1 points. Runs are reported at
+start-up:
+
+```text
+[data_parallel] each batch split across 3 gpu devices; params replicated
+[data_parallel] batches not divisible by 3 are padded by repeating up to 2 of their own points:
+    batch_r = 2048 -> 2049  (+1; use 2046 or 2049 for an exact split)
+```
+
+The only effect is that those repeated points count twice in that step's mean
+(here 1 point in 2049). For randomly drawn mini-batches the repeated points are
+themselves random, so the gradient stays an unbiased estimate; for a fixed
+full-batch set it is a fixed reweighting of at most D−1 points. **When every batch
+divides the device count nothing is padded**, and training is exactly equivalent to
+one device. Points and their paired targets / RBA state are padded with the same
+rows, so they stay aligned; solvers that return per-point state (RBA in
+`LDCSolver` / `RANSSolver`) drop the padding again, and saved predictions use the
+original, unpadded points.
+
+```{note}
+Why pad instead of splitting unevenly: JAX can split an uneven array only *inside*
+a single compiled program. An unevenly split array passed between compiled steps
+comes back fully **replicated** — correct, but nothing is split and nothing warns
+you. Padding keeps every device's slice equal at the cost of ≤ D−1 repeated points.
+```
+
 ```{list-table}
 :header-rows: 1
 :widths: 26 74
 
 * - Behaviour
   - Detail
-* - Divisibility
-  - Every *effective* per-step batch must divide evenly by the device count. This
-    includes draws like `min(batch_bc, N_inlet)` and derived sub-batches (e.g.
-    Ramp-NS splits `batch_r` into uniform / boundary-layer / adaptive parts). It is
-    checked before any training, and the error names each offending size with the
-    nearest valid values. The shipped configs were tuned for one GPU, so some need
-    their batch sizes adjusted for your device count.
+* - Batch sizes
+  - Any size, on any device count. Batches that do not divide are padded (above);
+    the start-up report lists each one — including derived sizes such as
+    `min(batch_bc, N_inlet)` and Ramp-NS's uniform / boundary-layer / adaptive
+    sub-batches — with the nearest sizes that avoid padding. For a run that must
+    be exactly equivalent to one device, choose those, or call
+    `dp.require_divisible(...)` to make any padding an error.
 * - What is split
   - The mini-batches — collocation points and their per-point targets / RBA state,
     and for operators the batch of samples.
@@ -215,7 +255,7 @@ single-device full-batch gradient, up to float32 reduction-order noise.
   - Set up per window / per run, since each warm-starts from the previous params
     with a fresh optimizer state.
 * - Single device
-  - A no-op — no divisibility constraint, no behaviour change.
+  - A no-op — no padding, no behaviour change.
 ```
 
 ```{warning}
@@ -232,7 +272,8 @@ The examples all use the same three calls; a custom loop can do the same:
 ```python
 from underPINN.training import data_parallel_from_cfg
 
-dp = data_parallel_from_cfg(cfg.training)        # inert unless data_parallel: true
+dp = data_parallel_from_cfg(cfg.training)        # inert unless data_parallel: true;
+                                                 # honours data_parallel_devices
 # after any restart-restore, so restored params get replicated too:
 params, opt_state = dp.prepare(params, opt_state,
                                {"batch_r": batch_r, "batch_bc": batch_bc})

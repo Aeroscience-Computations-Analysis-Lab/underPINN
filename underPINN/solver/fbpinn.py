@@ -126,6 +126,7 @@ class FBPINNSolver(BaseSolver):
             resample_k = config.resample_k
             candidate_sampler = config.candidate_sampler
             data_parallel = config.data_parallel
+            data_parallel_devices = config.data_parallel_devices
             if config.lr_schedule is not None:
                 self.opt = self._make_opt(config.lr, config.lr_schedule)
                 self._step = self._build_step()  # rebuild with new opt
@@ -138,6 +139,7 @@ class FBPINNSolver(BaseSolver):
             resample_k = 1.0
             candidate_sampler = None
             data_parallel = False
+            data_parallel_devices = None
 
         # ------------------------------------------------------------------ #
         # Restart — attempt to resume from a previous interrupted run          #
@@ -191,7 +193,8 @@ class FBPINNSolver(BaseSolver):
         # gathered mini-batch is sharded, so RAR-D resampling, which rewrites
         # the pools, needs no changes.
         from underPINN.training.parallel import make_data_parallel
-        dp = make_data_parallel(active=data_parallel)   # inert when flag is off
+        dp = make_data_parallel(
+            active=data_parallel, n_devices=data_parallel_devices)   # inert when flag is off
         self.params, self.state = dp.prepare(
             self.params, self.state,
             {"batch_r": batch_r, "batch_i": batch_i, "batch_b": batch_b})

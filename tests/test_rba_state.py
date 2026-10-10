@@ -131,3 +131,42 @@ def test_rans_rba_sums_stay_with_their_points(n_col, batch):
     steps = n_col // batch
     assert len(calls) == 4 * steps
     _check_alignment(calls, n_comp=5, steps=steps)
+
+
+# ---------------------------------------------------------------------------
+# Under data parallelism with an uneven split, each batch is padded with
+# repeats of its first rows, so the step returns *padded* RBA state. The
+# solvers must trim it back before scattering -- a missing trim fails on the
+# length mismatch, a wrong one fails the per-point alignment check.
+# Needs >=3 devices (run with XLA_FLAGS=--xla_force_host_platform_device_count=8).
+# ---------------------------------------------------------------------------
+
+_needs_3 = pytest.mark.skipif(jax.device_count() < 3,
+                              reason="needs >=3 JAX devices")
+
+
+@_needs_3
+@pytest.mark.parametrize("n_col, batch", [(12, 4), (10, 4)],
+                         ids=["divisible-pool", "remainder"])
+def test_ldc_rba_alignment_with_padded_batches(n_col, batch, capsys):
+    from underPINN.core.config import TrainingConfig
+    solver, inputs, calls = _ldc_solver(n_col)
+    solver.train(inputs, config=TrainingConfig(
+        epochs=4, batch_r=batch, seed=0,
+        data_parallel=True, data_parallel_devices=3))   # 4 % 3 -> padded to 6
+    assert "padded" in capsys.readouterr().out
+    assert all(np.asarray(c).shape[0] == 6 for c, _ in calls)
+    _check_alignment(calls, n_comp=3, steps=n_col // batch)
+
+
+@_needs_3
+@pytest.mark.parametrize("n_col, batch", [(12, 4), (10, 4)],
+                         ids=["divisible-pool", "remainder"])
+def test_rans_rba_alignment_with_padded_batches(n_col, batch, capsys):
+    solver, params, inputs, calls = _rans_solver(n_col)
+    solver.train(params, inputs, epochs=4, batch_size=batch, seed=0,
+                 save_restart_every=0, data_parallel=True,
+                 data_parallel_devices=3)
+    assert "padded" in capsys.readouterr().out
+    assert all(np.asarray(c).shape[0] == 6 for c, _ in calls)
+    _check_alignment(calls, n_comp=5, steps=n_col // batch)

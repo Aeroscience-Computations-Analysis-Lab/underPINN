@@ -106,6 +106,7 @@ class OperatorSolver(BaseSolver):
         """
         if config is not None:
             data_parallel = config.data_parallel
+            data_parallel_devices = config.data_parallel_devices
             epochs = config.epochs
             batch_size = config.batch_r
             seed = config.seed
@@ -120,6 +121,7 @@ class OperatorSolver(BaseSolver):
             callbacks = []
             n_scan = 1
             data_parallel = False
+            data_parallel_devices = None
 
         x_input = jnp.asarray(x_input)
         u_target = jnp.asarray(u_target)
@@ -148,7 +150,8 @@ class OperatorSolver(BaseSolver):
         # split across devices; the warmup pde-weight is a scalar schedule
         # and stays replicated. Inert when off.
         from underPINN.training.parallel import make_data_parallel
-        dp = make_data_parallel(active=data_parallel)
+        dp = make_data_parallel(
+            active=data_parallel, n_devices=data_parallel_devices)
         self.params, self.state = dp.prepare(
             self.params, self.state, {"batch_r (samples per step)": batch_size})
 
@@ -390,6 +393,7 @@ class DeepONetSolver(BaseSolver):
         """
         if config is not None:
             data_parallel = config.data_parallel
+            data_parallel_devices = config.data_parallel_devices
             epochs = config.epochs
             batch_size = config.batch_i
             seed = config.seed
@@ -402,6 +406,7 @@ class DeepONetSolver(BaseSolver):
         else:
             callbacks = []
             data_parallel = False
+            data_parallel_devices = None
 
         u_pool = jnp.asarray(u_pool)
         x_sensors = jnp.asarray(x_sensors)
@@ -412,7 +417,8 @@ class DeepONetSolver(BaseSolver):
         # sensor locations and BC points are shared by every sample and stay
         # replicated. Inert when off.
         from underPINN.training.parallel import make_data_parallel
-        dp = make_data_parallel(active=data_parallel)
+        dp = make_data_parallel(
+            active=data_parallel, n_devices=data_parallel_devices)
         self.params, self.state = dp.prepare(
             self.params, self.state, {"batch_i (samples per step)": batch_size})
         key = jax.random.PRNGKey(seed)

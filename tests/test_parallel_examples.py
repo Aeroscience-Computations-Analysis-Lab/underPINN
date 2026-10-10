@@ -67,6 +67,15 @@ class Case:
     extract: Optional[Callable[[dict], list]] = None
     # Called as setup(tmp_path, monkeypatch) before both runs (e.g. fixtures).
     setup: Optional[Callable] = None
+    # training.data_parallel_devices for the flag-on run (None = all visible).
+    devices: Optional[int] = None
+    # True when batch sizes deliberately do NOT divide the device count, so
+    # batches get padded. The reference run is then single-device training on
+    # the *same padded batches* (see _PAD_REFERENCE), so the two must still
+    # match exactly -- padding changes the arithmetic, not the equivalence.
+    padded: bool = False
+    # Called with the flag-on run's output dir after training.
+    post_check: Optional[Callable] = None
 
 
 # Pipe / AAA family: interior, wall, inlet, outlet pools; inlet/outlet draws are
@@ -325,6 +334,76 @@ CASES += [
           "data.pairs_per_traj": 2, "data.poisson_iters": 15}),
 ]
 
+
+# Choosing a device count. Batches of 60 / 12 divide by 4 but NOT by 8, so this
+# can only pass if data_parallel_devices really restricts the run to 4 devices
+# (on all 8 it would be rejected before training).
+if _N_DEV >= 4:
+    CASES += [
+        Case("pipe_flow_4_devices", "PINNs/pipe_flow/pipe_flow.py",
+             "run_pipe_flow", "PINNs/pipe_flow/pipe_flow.yaml",
+             {**_PIPE_SIZES, "training.batch_r": 60, "training.batch_bc": 12},
+             devices=4),
+    ]
+
+
+
+# Any number of devices. Sizes deliberately do NOT divide the device count, so
+# batches are padded with repeats of their own first rows. Covers each distinct
+# sharding path: hand-written mini-batch loop, fixed full-batch set (and that
+# saved predictions stay unpadded), RBA state trimming (LDC), paired operator
+# samples (DeepONet), the operator scan stack (axis 1), the ODE full batch,
+# and RAR resampling with replicated params.
+def _airfoil_predictions_unpadded(out_dir):
+    x = np.load(out_dir / "predictions.npz")["x"]
+    assert x.shape[0] == 96, (
+        f"saved predictions have {x.shape[0]} rows, expected the 96 real "
+        f"collocation points -- padding leaked into the output")
+
+
+_PADDED = []
+if _N_DEV >= 7:
+    _PADDED = [
+        # batch_r 64 -> 66, batch_bc 32 -> 33: one or two repeats per batch
+        Case("pipe_flow_3dev", "PINNs/pipe_flow/pipe_flow.py", "run_pipe_flow",
+             "PINNs/pipe_flow/pipe_flow.yaml",
+             {**_PIPE_SIZES, "training.batch_bc": 32},
+             devices=3, padded=True),
+        Case("airfoil_5dev", "PINNs/airfoil/airfoil_flow.py", "run_airfoil",
+             "PINNs/airfoil/config.yaml", dict(_FULL_BATCH_FLOW), min_shards=2,
+             devices=5, padded=True, post_check=_airfoil_predictions_unpadded),
+        Case("LDC_3dev", "PINNs/LDC/run_ldc.py", "run_ldc",
+             "PINNs/LDC/config.yaml",
+             {"data.n_collocation": 128, "data.n_bc": 40,
+              "training.batch_r": 64},
+             setup=_ldc_reference_csv, devices=3, padded=True),
+        Case("deeponet1d_burgers_3dev",
+             "operators/deeponet1d_burgers/deeponet1d_burgers.py",
+             "run_deeponet1d_burgers",
+             "operators/deeponet1d_burgers/config.yaml",
+             {"training.batch_size": 64, "data.n_ic_pool": 64,
+              "loss.n_r": 64, "loss.n_bc": 16}, devices=3, padded=True),
+        Case("fno1d_periodic_scan_3dev",
+             "operators/fno1d_periodic/fno1d_periodic.py",
+             "run_fno1d_periodic", "operators/fno1d_periodic/config.yaml",
+             {**_OP, "training.n_scan_steps": 2, "data.Nt": 60,
+              "data.n_train": 16, "data.n_test": 8, "data.pairs_per_traj": 2},
+             min_shards=2, devices=3, padded=True),
+        Case("ode_7dev", "PINNs/ode/ode_test.py", "run_ode",
+             "PINNs/ode/config.yaml",
+             {"training.early_stopping_patience": 9999,
+              "data.n_collocation": 64}, min_shards=2,
+             extract=lambda r: [r["exp_decay_rel_l2"], r["harmonic_rel_l2"]],
+             devices=7, padded=True),
+        Case("sod_shock_6dev", "PINNs/sod_shock/sod_shock.py", "run_sod_shock",
+             "PINNs/sod_shock/config.yaml",
+             {**_RAR, "data.n_interior": 128, "data.n_ic": 32, "data.n_bc": 32,
+              "training.batch_r": 64, "training.batch_bc": 16},
+             devices=6, padded=True),
+    ]
+    CASES += _PADDED
+
+
 # NOTE: the test machinery below must stay *after* every CASES definition --
 # parametrize snapshots the ids list at decoration time.
 
@@ -335,8 +414,16 @@ CASES += [
 class _Spy:
     def __init__(self):
         self.prepared = 0
+        self.device_counts = []     # n_devices of every enabled prepare()
+        self.padded_shards = 0      # shards that needed padding (uneven split)
         self.sharded_arrays = 0
         self.axes = set()
+
+
+# When set to D, an *inert* DataParallel pads every batch to a multiple of D
+# without sharding it. The reference run of a padded case uses this, so it
+# trains on one device on exactly the batches the multi-device run sees.
+_PAD_REFERENCE = {"D": None}
 
 
 @pytest.fixture
@@ -348,11 +435,17 @@ def spy(monkeypatch):
     def prepare(self, params, state, sizes):
         if self.enabled:
             s.prepared += 1
+            s.device_counts.append(self.n_devices)
         return orig_prepare(self, params, state, sizes)
 
     def shard(self, array, axis=0):
+        d = _PAD_REFERENCE["D"]
+        if not self.enabled and d and array.shape[axis] % d:
+            return _par.pad_to_multiple(array, d, axis=axis)[0]
         if self.enabled:
             s.sharded_arrays += 1
+            if array.shape[axis] % self.n_devices:
+                s.padded_shards += 1
             s.axes.add(axis)
         return orig_shard(self, array, axis)
 
@@ -373,6 +466,8 @@ def _run(case: Case, data_parallel: bool, out_dir: pathlib.Path):
         "training.epochs": case.epochs,
         "training.save_restart_every": 0,   # never resume the other run
         "training.data_parallel": data_parallel,
+        **({"training.data_parallel_devices": case.devices}
+           if data_parallel and case.devices is not None else {}),
         "output.dir": str(out_dir),
     })
     result = getattr(mod, case.entry)(cfg)
@@ -385,7 +480,11 @@ def test_example_trains_identically_with_data_parallel(case, tmp_path, spy,
                                                         monkeypatch):
     if case.setup is not None:
         case.setup(tmp_path, monkeypatch)
-    ref = _run(case, False, tmp_path / "ref")
+    _PAD_REFERENCE["D"] = case.devices if case.padded else None
+    try:
+        ref = _run(case, False, tmp_path / "ref")
+    finally:
+        _PAD_REFERENCE["D"] = None
     assert spy.prepared == 0 and spy.sharded_arrays == 0, (
         "flag-off run sharded something; the inert path is not inert")
 
@@ -393,11 +492,25 @@ def test_example_trains_identically_with_data_parallel(case, tmp_path, spy,
     assert spy.prepared >= 1, (
         f"{case.name}: data_parallel=True never called dp.prepare() -- the "
         f"flag is being ignored, so params were never replicated")
+    want = case.devices if case.devices is not None else _N_DEV
+    assert set(spy.device_counts) == {want}, (
+        f"{case.name}: ran on {sorted(set(spy.device_counts))} devices, "
+        f"expected {want}")
     need = case.epochs if case.min_shards is None else case.min_shards
     assert spy.sharded_arrays >= need, (
         f"{case.name}: only {spy.sharded_arrays} arrays sharded (expected >= "
         f"{need}) -- batches are not being split")
 
+    if case.padded:
+        assert spy.padded_shards > 0, (
+            f"{case.name}: marked padded but no batch needed padding -- the "
+            f"uneven-device-count path was not exercised")
+    else:
+        assert spy.padded_shards == 0, (
+            f"{case.name}: {spy.padded_shards} batches were padded, so this "
+            f"run is no longer exactly equivalent; pick divisible sizes")
+    if case.post_check is not None:
+        case.post_check(tmp_path / "par")
     assert ref.shape == par.shape and ref.size >= (
         1 if case.extract else case.epochs)
     assert np.all(np.isfinite(par)), f"{case.name}: non-finite loss with DP"
@@ -447,7 +560,9 @@ def test_heat2d_transfer_orchestrators_route_through_dp():
     mod = _heat2d()
     for fn in (mod.run_parameter_transfer, mod.run_temporal_transfer):
         src = inspect.getsource(fn)
-        assert "make_data_parallel(active=data_parallel)" in src
+        # both the on/off flag and the device count must reach the factory
+        assert ("make_data_parallel(active=data_parallel, n_devices=n_devices)"
+                in src), fn.__name__
         assert src.count("= _train(") == 3, fn.__name__
         assert "= run_training(" not in src, (
             f"{fn.__name__} calls run_training directly, bypassing dp")

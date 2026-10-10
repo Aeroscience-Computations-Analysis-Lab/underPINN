@@ -67,6 +67,7 @@ class SteadySolver(BaseSolver):
         """
         if config is not None:
             data_parallel = config.data_parallel
+            data_parallel_devices = config.data_parallel_devices
             epochs     = config.epochs
             batch_r    = config.batch_r
             batch_b    = config.batch_b
@@ -89,6 +90,7 @@ class SteadySolver(BaseSolver):
             resample_candidates = 0
             candidate_sampler   = None
             data_parallel       = False
+            data_parallel_devices = None
 
         # ── Restart / resume ──────────────────────────────────────────────────
         _restart = None
@@ -119,7 +121,8 @@ class SteadySolver(BaseSolver):
         # Only mini-batches are sharded; the xy_r pool (rewritten by RAR-D)
         # is not, so resampling needs no change.
         from underPINN.training.parallel import make_data_parallel
-        dp = make_data_parallel(active=data_parallel)
+        dp = make_data_parallel(
+            active=data_parallel, n_devices=data_parallel_devices)
         self.params, self.state = dp.prepare(
             self.params, self.state, {"batch_r": batch_r, "batch_b": batch_b})
 

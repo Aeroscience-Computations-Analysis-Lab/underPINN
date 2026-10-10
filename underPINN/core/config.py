@@ -44,9 +44,18 @@ class TrainingConfig:
         Split every mini-batch across all visible devices along its point
         axis, replicating parameters and optimizer state. The gradient is the
         same as single-device full-batch training (it is data parallelism,
-        not a different algorithm). Requires ``batch_r``, ``batch_i`` and
-        ``batch_b`` each divisible by the device count. A no-op on a single
-        device. See :mod:`underPINN.training.parallel`.
+        not a different algorithm). Any batch size works on any device
+        count: a batch that does not divide is padded by repeating at most
+        D-1 of its own points (reported at start-up); divisible batches are
+        not padded and stay exactly equivalent. A no-op on a single device.
+        See :mod:`underPINN.training.parallel`.
+    data_parallel_devices : int, optional
+        How many devices ``data_parallel`` uses: the first *N* visible ones.
+        ``None`` (default) uses all of them. Any count works; batches that
+        do not divide by it are padded (see ``data_parallel``). Asking for more
+        devices than are visible raises; choose *which* GPUs with
+        ``CUDA_VISIBLE_DEVICES``. Ignored, with a warning, when
+        ``data_parallel`` is false.
 
     Examples
     --------
@@ -86,8 +95,10 @@ class TrainingConfig:
     resample_k: float = 1.0        # |residual|^k weighting exponent
     candidate_sampler: Optional[Any] = None  # fn(n, key) → (x, t) or None
     data_parallel: bool = False    # split batches across all visible devices
-                                   # (see underPINN.training.parallel); each
-                                   # batch_* must be divisible by device count
+                                   # (see underPINN.training.parallel); a batch
+                                   # not divisible by the count is padded
+    data_parallel_devices: Optional[int] = None  # use only the first N
+                                   # visible devices; None = all of them
 
     # ------------------------------------------------------------------ #
     # Restart / resume                                                     #
@@ -144,6 +155,15 @@ class TrainingConfig:
         if self.resample_candidates < 0:
             raise ValueError(
                 f"TrainingConfig.resample_candidates must be >= 0, got {self.resample_candidates!r}"
+            )
+
+        _dpd = self.data_parallel_devices
+        # bool is an int in Python; refuse it so `true` is not read as 1 device.
+        if _dpd is not None and (isinstance(_dpd, bool)
+                                 or not isinstance(_dpd, int) or _dpd < 1):
+            raise ValueError(
+                f"TrainingConfig.data_parallel_devices must be a positive int "
+                f"or None (all visible devices), got {_dpd!r}"
             )
 
         if not isinstance(self.save_restart_every, int) or self.save_restart_every < 0:
