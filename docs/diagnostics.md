@@ -39,7 +39,8 @@ import optax
 from underPINN import diagnostics as dg
 from underPINN.nn import MLP
 
-m, c, k, F0, Om, T = 1.0, 1.2, 40.0, 20.0, 4.0, 3.0      # m u'' + c u' + k u = F0 cos(Om t)
+# m u'' + c u' + k u = F0 cos(Om t),  u(0) = 1,  u'(0) = 0
+m, c, k, F0, Om, T = 1.0, 1.2, 40.0, 20.0, 4.0, 3.0
 model = MLP(layers=[1, 32, 32, 1])
 params0 = model.init(jax.random.PRNGKey(0), jnp.zeros((1, 1)))
 
@@ -48,21 +49,24 @@ def u(p, t):
 u_t = jax.grad(u, 1)
 u_tt = jax.grad(u_t, 1)
 
-def residual_fn(p, x):                      # (N, 1) points -> (N, 1) residual rows
+def residual_fn(p, x):          # (N, 1) points -> (N, 1) residual rows
     def r(t):
-        return (m * u_tt(p, t) + c * u_t(p, t) + k * u(p, t) - F0 * jnp.cos(Om * t)) / k
+        lhs = m * u_tt(p, t) + c * u_t(p, t) + k * u(p, t)
+        return (lhs - F0 * jnp.cos(Om * t)) / k
     return jax.vmap(r)(x[:, 0])[:, None]
 
-def ic(p):                                  # u(0) = 1, u'(0) = 0, velocity scaled by omega_0
+def ic(p):                      # velocity error scaled by omega_0
     return u(p, 0.0) - 1.0, u_t(p, 0.0) / jnp.sqrt(k / m)
 
-def loss_terms(p, x):                       # weighted terms; the loss is their sum
+def loss_terms(p, x):           # weighted terms; the loss is their sum
     a, b = ic(p)
-    return {"residual": jnp.mean(residual_fn(p, x) ** 2), "ic": a ** 2 + b ** 2}
+    r = residual_fn(p, x)
+    return {"residual": jnp.mean(r ** 2), "ic": a ** 2 + b ** 2}
 
-def rho_fn(p, x):                           # the same loss as a vector: loss == sum(rho**2)
+def rho_fn(p, x):               # the same loss as a vector: sum(rho**2)
     a, b = ic(p)
-    return jnp.concatenate([residual_fn(p, x)[:, 0] / jnp.sqrt(x.shape[0]), jnp.stack([a, b])])
+    r = residual_fn(p, x)[:, 0] / jnp.sqrt(x.shape[0])
+    return jnp.concatenate([r, jnp.stack([a, b])])
 
 x = jnp.linspace(0.0, T, 256)[:, None]
 problem = dg.Problem(
@@ -88,22 +92,27 @@ def step(p, s):
 
 mon = dg.TrainingMonitor(problem, params0, every=100)
 for it in range(3000):
-    mon.update(it, params)                  # log theta_k before the step
+    mon.update(it, params)      # log theta_k before the step
     params, opt_state, _ = step(params, opt_state)
 mon.save("monitor.npz")
 
-best = mon.best_params()                    # report the best iterate, not the last one
-print("k(1e-3) =", dg.iterations_to(mon.total(), 1e-3, steps=mon.rec["step"]))
+best = mon.best_params()        # report the best iterate, not the last
+k_hit = dg.iterations_to(mon.total(), 1e-3, steps=mon.rec["step"])
+print("k(1e-3) =", k_hit)
 ```
 
 Then run the checkpoint diagnostics on the trained network:
 
 ```python
-cfg = dg.Config(refit_layer="Dense_2", prune=True, x_dense=jnp.linspace(0.0, T, 4096)[:, None])
-res = dg.run_checkpoint(problem, best, params0=params0, cfg=cfg, out_dir="diag", step=mon.best_step)
+x_dense = jnp.linspace(0.0, T, 4096)[:, None]
+cfg = dg.Config(refit_layer="Dense_2", prune=True, x_dense=x_dense)
+res = dg.run_checkpoint(problem, best, params0=params0, cfg=cfg,
+                        out_dir="diag", step=mon.best_step)
 
-print(res["curvature"]["lambda_max"], res["curvature"]["n_eff"], res["curvature"]["kappa_top"])
-print(res["gauss_newton"]["gn_rel_err"], res["output_refit"]["ratio"], res["offgrid"]["ratio"])
+curv = res["curvature"]
+print(curv["lambda_max"], curv["n_eff"], curv["kappa_top"])
+print(res["gauss_newton"]["gn_rel_err"], res["output_refit"]["ratio"])
+print(res["offgrid"]["ratio"])
 print({name: h["erank"] for name, h in res["hidden"].items()})
 print(res.get("skipped", "nothing skipped"))
 ```
@@ -243,7 +252,12 @@ other rows come from `run_checkpoint` or the standalone functions.
   - representation vs loss formulation
 ```
 
-## Training dynamics: `TrainingMonitor`
+## Definitions
+
+Each family below gives the definitions used in the notes, what a value means, and the
+function that computes it.
+
+### Training dynamics: `TrainingMonitor`
 
 `mon.update(k, params)` returns immediately unless `k % every == 0`. On logged steps it
 evaluates the following on the fixed diagnostic batch:
@@ -269,11 +283,11 @@ at a new training stage or time window.
 Two efficiency measures from a loss history:
 
 ```python
-dg.best_so_far(losses)                           # b_k = min_{j<=k} L(theta_j): ignores Adam spikes
-dg.iterations_to(losses, 1e-4, steps=steps)      # k(eps) = min{k : L(theta_k) <= eps}, or None
+dg.best_so_far(losses)                       # b_k = min_{j<=k} L(theta_j)
+dg.iterations_to(losses, 1e-4, steps=steps)  # k(eps), or None if never reached
 ```
 
-## Curvature
+### Curvature
 
 ```{list-table}
 :header-rows: 1
@@ -316,7 +330,7 @@ The functions are also available individually: `sharpness`, `top_eigenvalues`,
 `spectrum_slq`, `effective_dimension`, `full_hessian`, `jacobi_scaled_spectrum`,
 `layer_sharpness` and `gauss_newton_fidelity`.
 
-## Residual neural tangent kernel
+### Residual neural tangent kernel
 
 With {math}`J_{ij}=\partial r_\theta(x_i)/\partial\theta_j`, the residual NTK is
 {math}`K=JJ^\top/N`. Under gradient flow on the residual loss,
@@ -332,7 +346,7 @@ describes training.
 corrupt exactly the small eigenvalues the spectrum is about. The kernel uses at most `n_ntk`
 points, because J is stored as rows × P floats.
 
-## Loss landscape
+### Loss landscape
 
 `slice_1d` evaluates {math}`f(\alpha)=\mathcal L(\theta^*+\alpha d)` along random
 **filter-normalised** directions (Li et al., 2018). Each neuron's incoming weights in *d*, a
@@ -349,7 +363,7 @@ point has at least one extremum; **more than one proves the slice is non-convex*
 a lower bound, because a slice with a single minimum can still be non-convex. Differences below
 `rtol·|f|` are ignored, so rounding noise in a flat basin is not counted.
 
-## Representation
+### Representation
 
 `feature_gram(phi)` computes the correlation matrix {math}`G_\Phi=\tilde\Phi^\top\tilde\Phi/N`
 of standardised features, its eigenvalues and {math}`\kappa(G_\Phi)`. For the spring problem
@@ -385,7 +399,7 @@ On hidden activations:
   by the trained loss. It ranks units for plotting. To size a layer, use refit-pruning
   instead: near a minimum, removing any unit raises the loss by orders of magnitude.
 
-## Network design
+### Network design
 
 **Output-layer refit** (`output_layer_refit`, `Config.refit_layer`). With the hidden layers
 fixed, {math}`u=Wh+b` is linear in the output layer. For a linear PDE with linear boundary
@@ -411,13 +425,15 @@ whenever the residual is linear in the output layer.
 dense independent grid divided by its RMS on the collocation points. A ratio well above 1
 means the network fits the training points at the expense of the gaps.
 
-## Spectral analysis of error and residual
+### Spectral analysis of error and residual
 
 On a uniform 1-D grid:
 
 ```python
-omega, amp = dg.amplitude_spectrum(e, dt)                # Hann window, angular frequency
-frac = dg.energy_fraction_below(r, dt, 2 * omega_0)      # share of residual energy below 2 omega_0
+# Hann window; omega is the angular frequency
+omega, amp = dg.amplitude_spectrum(e, dt)
+# share of the residual's energy below 2 omega_0
+frac = dg.energy_fraction_below(r, dt, 2 * omega_0)
 ```
 
 Applied to the error {math}`e=u_\theta-u^*` at each checkpoint, the spectrum shows spectral
@@ -434,15 +450,18 @@ Set `Config.reference_fn` (the exact solution) together with `x_dense` to get th
 L² error in `run_checkpoint`. On a uniform 1-D grid the report also includes the error
 spectrum.
 
-## Modal analysis (Dirichlet problems)
+### Modal analysis (Dirichlet problems)
 
 On {math}`[x_0,x_0+L]` with zero boundary values, the error splits into sine modes with
 coefficients {math}`c_n=\tfrac2L\int u\sin\tfrac{n\pi(x-x_0)}{L}\,dx`:
 
 ```python
-da = dg.modal_error(u_theta, u_star, x, n_modes=80)            # delta a_n: which modes carry the error
-mu = dg.modal_kernel(problem.apply_fn, params, x, n_modes=80)  # mu_n = ||grad_theta c_n||^2
-w = dg.laplacian_mode_weights(80, scale=S)                     # w_n = (n pi / L)^4 / S^2 for -u'' = f
+# delta a_n: which modes carry the error
+da = dg.modal_error(u_theta, u_star, x, n_modes=80)
+# mu_n = ||grad_theta c_n||^2: how fast the network can move mode n
+mu = dg.modal_kernel(problem.apply_fn, params, x, n_modes=80)
+# w_n = (n pi / L)^4 / S^2: how much the loss of -u'' = f weighs mode n
+w = dg.laplacian_mode_weights(80, scale=S)
 ```
 
 Under gradient flow with a diagonal kernel,
@@ -460,7 +479,9 @@ multiscale problems, so check the error against a reference.
 Adam and feature learning break the diagonal-kernel assumption. Use {math}`\mu_n w_n` to
 order the modes, not to predict iteration counts.
 
-## `Config` reference
+## Configuration, cost and caveats
+
+### `Config` fields
 
 ```{list-table}
 :header-rows: 1
@@ -501,7 +522,7 @@ order the modes, not to predict iteration counts.
   - per-equation weights in the NTK
 ```
 
-## Cost and precision
+### Cost and precision
 
 ```{list-table}
 :header-rows: 1
@@ -532,7 +553,7 @@ minimum, are rounding noise. For spectra, small `eps` or slice counts, enable
 float64. Keep training itself in float32 (see {doc}`performance`).
 ```
 
-## Caveats
+### Caveats
 
 - **Local view.** Random 1-D and 2-D slices are low-dimensional views of a high-dimensional
   surface; the Hessian spectrum is the full local picture.

@@ -115,7 +115,7 @@ Unlike the point networks above (one collocation point in, one value out), these
 - **Representation** — feature conditioning `κ(G_Φ)` (and the operator-mapped `κ(G_DΦ)`), effective rank, saturation, linear probes, CKA, mean-ablation importance
 - **Network design** — exact least-squares **output-layer refit** (float64 SVD; a free check of whether Adam converged the last layer), **refit-pruning** for effective width, off-grid residual ratio
 - **Spectral & modal analysis** — Hann-windowed error/residual spectra and energy below a cutoff; sine-mode error `δa_n` and modal tangent kernel `μ_n` for Dirichlet problems
-- **`run_checkpoint(problem, params, cfg=Config(...))`** runs them all, skips (with the reason) any that the `Problem` cannot support, and writes `ckpt_<step>.json` + `.npz`. See [docs/diagnostics.md](docs/diagnostics.md)
+- **`run_checkpoint(problem, params, cfg=Config(...))`** runs them all, skips (with the reason) any that the `Problem` cannot support, and writes `ckpt_<step>.json` + `.npz`. See the [Diagnostics guide](https://docs.underpinn.dev/diagnostics.html)
 
 ### Benchmark Suite
 - One command (`python -m underPINN bench`) runs all registered problems across multiple epoch budgets
