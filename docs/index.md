@@ -114,6 +114,7 @@ checkpointing
 transfer_learning
 inverse_problems
 neural_operators
+diagnostics
 ```
 
 ```{toctree}

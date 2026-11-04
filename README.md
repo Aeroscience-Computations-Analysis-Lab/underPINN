@@ -107,6 +107,16 @@ Unlike the point networks above (one collocation point in, one value out), these
 - Log-parameterisation (`log_alpha = log(α)`) ensures positivity without constraints
 - Gradient flows simultaneously through the PDE residual and the observation loss
 
+### Diagnostics
+`underPINN.diagnostics` explains *why* a network trained the way it did — method-agnostic (any solver, optimizer or network) through a small `Problem` adapter (loss terms on a fixed batch, plus optionally the residual, `rho` with `loss == sum(rho**2)`, the network output and hidden activations):
+- **`TrainingMonitor`** — one call per step: loss-term balance and per-term gradient norms, per-layer update ratio `‖Δθ_ℓ‖/‖θ_ℓ‖`, distance from initialisation (lazy vs feature learning), and the best iterate (`best_params()`); `best_so_far` / `iterations_to` give `min_{j≤k} L` and `k(ε)`
+- **Curvature** — sharpness `λ_max`, effective dimension `#{λ_i > 10⁻³ λ_max}`, top-ten condition number `κ₁₀` and its Jacobi-scaled (Adam-like) version, per-layer block curvature, and Gauss-Newton fidelity `‖H − 2JᵀJ‖₂/‖H‖₂`; exact Hessian for small networks, Lanczos / stochastic Lanczos quadrature (Hessian-vector products only) above that
+- **Residual NTK** spectrum and drift; **filter-normalised loss slices** (Li et al., 2018) with a non-convexity count
+- **Representation** — feature conditioning `κ(G_Φ)` (and the operator-mapped `κ(G_DΦ)`), effective rank, saturation, linear probes, CKA, mean-ablation importance
+- **Network design** — exact least-squares **output-layer refit** (float64 SVD; a free check of whether Adam converged the last layer), **refit-pruning** for effective width, off-grid residual ratio
+- **Spectral & modal analysis** — Hann-windowed error/residual spectra and energy below a cutoff; sine-mode error `δa_n` and modal tangent kernel `μ_n` for Dirichlet problems
+- **`run_checkpoint(problem, params, cfg=Config(...))`** runs them all, skips (with the reason) any that the `Problem` cannot support, and writes `ckpt_<step>.json` + `.npz`. See [docs/diagnostics.md](docs/diagnostics.md)
+
 ### Benchmark Suite
 - One command (`python -m underPINN bench`) runs all registered problems across multiple epoch budgets
 - Two-tier epoch budgets: smooth PDEs (Burgers, wave, Helmholtz, …) use the default `[500, 1000, 2000, 5000]`; problems marked `complex=True` on their evaluator (shocks / viscous SBLI / 3-D N-S — `ramp`, `toro3`, `pipe_flow`, `ramp_ns`) automatically get a much larger `[2000, 5000, 15000, 40000]` — they converge far slower and the shared small budget was under-training them. Both are overridable (`--epochs`, `--complex-epochs`)
@@ -684,7 +694,7 @@ underPINN/
 │
 ├── nn/
 │   ├── mlp.py             # MLP, FourierMLP
-│   ├── fbpinn.py          # FBPINN (domain-decomposed network)
+│   ├── fbpinn.py          # FBPINN (domain-decomposed network), StackedFBPINN (model-parallel layout)
 │   ├── attention.py       # HybridAttention, SimpleGate
 │   ├── embeddings.py      # Fourier / positional embeddings
 │   ├── subdomain.py       # SubdomainNetwork
@@ -749,7 +759,21 @@ underPINN/
 │
 ├── training/
 │   ├── resample.py        # rar_d_resample, rar_d_resample_split  (RAR-D adaptive collocation)
-│   └── natural_gradient.py # train_gauss_newton — L-M-damped Gauss-Newton / natural-gradient training
+│   ├── natural_gradient.py # train_gauss_newton — L-M-damped Gauss-Newton / natural-gradient training
+│   ├── parallel.py        # DataParallel  (split batches across devices)
+│   └── model_parallel.py  # ModelParallel  (split FBPINN subdomains across devices)
+│
+├── diagnostics/           # method-agnostic training & network diagnostics (docs/diagnostics.md)
+│   ├── core.py            # Problem adapter, param_groups, flax_hidden_fn
+│   ├── monitor.py         # TrainingMonitor, best_so_far, iterations_to
+│   ├── curvature.py       # sharpness, n_eps, kappa_10, Jacobi scaling, Gauss-Newton fidelity
+│   ├── kernel.py          # residual NTK, drift
+│   ├── landscape.py       # filter-normalised 1-D / 2-D slices, extrema count
+│   ├── representation.py  # feature_gram, erank, saturation, linear_probe, linear_cka, ablation
+│   ├── design.py          # output_layer_refit, refit_pruning, offgrid_residual_ratio
+│   ├── spectral.py        # amplitude_spectrum, energy_fraction_below
+│   ├── modal.py           # sine coefficients, modal error, modal tangent kernel
+│   └── report.py          # run_checkpoint + Config (all checkpoint diagnostics -> json/npz)
 │
 ├── config/
 │   └── loader.py          # load_config, generate_sweep_configs, cfg_get

@@ -608,4 +608,6 @@ reference: {doc}`checkpointing`.
 Combine early stopping with **cosine LR decay** (`optax.cosine_decay_schedule`) for
 runs longer than 2 000 epochs — it delivers free accuracy improvement at no extra cost.
 
-See {doc}`performance` for a full GPU throughput tuning guide.
+See {doc}`performance` for a full GPU throughput tuning guide, and {doc}`diagnostics` to
+find out *why* a run trained the way it did (loss-term balance, curvature, representation,
+output-layer refit, width).

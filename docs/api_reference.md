@@ -83,6 +83,11 @@ class Pipe:
     `train_gauss_newton` (L-M-damped Gauss-Newton / natural-gradient training);
     `make_data_parallel`, `data_parallel_from_cfg` (data parallelism);
     `make_model_parallel`, `model_parallel_from_cfg` (FBPINN model parallelism)
+* - `diagnostics/`
+  - `Problem` adapter, `TrainingMonitor`, `run_checkpoint` + `Config`; curvature (sharpness,
+    effective dimension, κ₁₀, Gauss–Newton fidelity), residual NTK, loss slices,
+    representation (erank, probes, CKA), output-layer refit and refit-pruning, error spectra,
+    modal analysis — see {doc}`diagnostics`
 * - `config/`
   - `load_config`, `generate_sweep_configs`, `cfg_get`
 * - `runner/`
@@ -175,6 +180,18 @@ underPINN/
 │   ├── natural_gradient.py   # train_gauss_newton  (L-M-damped Gauss-Newton / natural gradient)
 │   ├── parallel.py           # DataParallel  (split batches across devices)
 │   └── model_parallel.py     # ModelParallel  (split FBPINN subdomains across devices)
+│
+├── diagnostics/              # method-agnostic training & network diagnostics
+│   ├── core.py               # Problem adapter, param_groups, flax_hidden_fn
+│   ├── monitor.py            # TrainingMonitor, best_so_far, iterations_to
+│   ├── curvature.py          # sharpness, n_eps, kappa_10, Jacobi scaling, Gauss-Newton fidelity
+│   ├── kernel.py             # residual NTK, drift
+│   ├── landscape.py          # filter-normalised 1-D / 2-D slices, extrema count
+│   ├── representation.py     # feature_gram, erank, saturation, linear_probe, linear_cka, ablation
+│   ├── design.py             # output_layer_refit, refit_pruning, offgrid_residual_ratio
+│   ├── spectral.py           # amplitude_spectrum, energy_fraction_below
+│   ├── modal.py              # sine coefficients, modal error, modal tangent kernel
+│   └── report.py             # run_checkpoint + Config (all checkpoint diagnostics -> json/npz)
 │
 ├── config/
 │   └── loader.py             # load_config, generate_sweep_configs, cfg_get
