@@ -1,20 +1,16 @@
 """Gauss-Newton / natural-gradient training for PINNs.
 
-A reviewer noted the absence of second-order / natural-gradient training
-(citing recent "D-NGD"-style work) alongside underPINN's Adam-based solvers.
-Plain first-order Adam treats the PDE-residual loss landscape as if it were
+This module adds second-order training alongside underPINN's Adam-based
+solvers. Plain first-order Adam treats the PDE-residual loss landscape as if it were
 well-conditioned; PINN loss surfaces are notoriously not (Wang et al. 2022's
 "respecting causality" line of work, and the broader natural-gradient PINN
 literature, motivate this), and a Gauss-Newton step -- which approximates the
 loss's curvature from the residual's own Jacobian rather than from gradient
 statistics -- is the classical way to correct for that.
 
-This module is not a transcription of a specific published "D-NGD" algorithm
-(the review comment does not pin one down precisely enough to reproduce
-verbatim); it is a standard Levenberg-Marquardt-damped Gauss-Newton method,
-in the same "natural-gradient-flavored second-order PINN training" spirit,
-offered as a genuine alternative to Adam rather than a literal reproduction
-of any one paper.
+The method is a standard Levenberg-Marquardt-damped Gauss-Newton method, in
+the spirit of natural-gradient PINN training, offered as an alternative to
+Adam rather than a reproduction of any one published algorithm.
 
 Algorithm
 ---------

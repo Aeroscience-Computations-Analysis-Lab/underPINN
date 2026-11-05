@@ -6,8 +6,7 @@ computing far more entries than are ever used.
 
 **Kept fused** (measured faster under the real outer
 jax.value_and_grad(loss)(params, ...) a training step actually needs, not
-just as an isolated forward residual call -- see
-benchmarks/rebuttal/README.md section 6): diffusion.py, heat2d_unsteady.py,
+just as an isolated forward residual call): diffusion.py, heat2d_unsteady.py,
 pipe_flow_unsteady.py, burgers_deeponet.py. Each is checked two ways below:
 against hand-derived analytic derivatives on an exactly-representable
 function (where one was practical), and against its own pre-rewrite

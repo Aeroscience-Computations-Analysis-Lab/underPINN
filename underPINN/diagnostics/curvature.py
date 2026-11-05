@@ -1,4 +1,4 @@
-"""Hessian diagnostics (pinn_math_notes Secs. 6.2, 7; twolayer notes Secs. 3.4, 5.3).
+"""Hessian diagnostics.
 
     sharpness              lambda_max of H = grad^2 L (gradient descent is stable only for eta < 2/lambda_max)
     effective dimension    n_eps = #{i : lambda_i > eps lambda_max}, eps = 1e-3: directions with
@@ -10,8 +10,8 @@
                            the correlations a poor representation puts into the Jacobian
     per-layer curvature    lambda_max of the diagonal block H_ll of each layer
     Gauss-Newton fidelity  ||H - 2 J^T J||_2 / ||H||_2 with loss = ||rho||^2 and J = d rho / d theta
-                           (eq. 17 of the notes): small means the curvature IS the Gram matrix of the
-                           residual Jacobian, which is what carries the input representation
+                           (the residual-curvature term of H is neglected): small means the curvature
+                           IS the Gram matrix of the residual Jacobian, which is what carries the input representation
 
 Small P: exact (``full_hessian``). Large P: Hessian-vector products only (no P x P matrix),
 Lanczos with full reorthogonalisation for extreme eigenvalues and spectral norms, and

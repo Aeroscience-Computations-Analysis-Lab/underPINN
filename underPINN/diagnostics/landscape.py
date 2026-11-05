@@ -1,12 +1,11 @@
-"""Loss-landscape slices (Li et al., NeurIPS 2018) and a non-convexity count
-(pinn_math_notes Secs. 6.3-6.4).
+"""Loss-landscape slices (Li et al., NeurIPS 2018) and a non-convexity count.
 
 Filter normalisation: a random direction d with N(0, 1) entries is rescaled unit by unit
 to the norm of the trained weights, so slices of different networks are comparable. A
-"unit" is one neuron's incoming weights: a row of W in the notes' W x convention, i.e.
+"unit" is one neuron's incoming weights: a row of W in the u = W x convention, i.e.
 one column of a flax Dense kernel (shape (in, out)) or of the Fourier matrix B (shape
 (in, n_fourier)); each bias vector is rescaled as one block. A 1-D slice is
-f(a) = L(theta* + a d) on a in [-span, span] (notes: 141 points, 7 directions); a 2-D
+f(a) = L(theta* + a d) on a in [-span, span] (``report.Config`` defaults: 141 points, 7 directions); a 2-D
 slice uses d1 and d2 with d2 made orthogonal to d1 and rescaled to ||d1||.
 
 Non-convexity count: with D_j = f(a_{j+1}) - f(a_j), E = #{j : sgn D_j != sgn D_{j+1}}.

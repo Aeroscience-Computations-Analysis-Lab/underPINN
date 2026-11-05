@@ -123,10 +123,8 @@ def qr_deim_resample(
     (mutually independent) as possible, rather than sampling proportional
     to magnitude alone.
 
-    This function is not a transcription of a specific published "QR-DEIM-R"
-    algorithm (we are not aware of one pinned down precisely enough by the
-    review comment to reproduce verbatim); it is our own construction
-    *inspired by* that selection philosophy. A collocation batch needs far
+    This function is not a transcription of a specific published algorithm;
+    it is our own construction *inspired by* that selection philosophy. A collocation batch needs far
     more points (``n_keep`` in the thousands to tens of thousands) than a
     natural residual/coordinate feature basis has columns (``r0``, a
     handful), and plain QR-DEIM is capped at exactly one point per basis

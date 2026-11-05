@@ -71,7 +71,7 @@ def run_AAA_rheology(cfg) -> dict:
     x0    = float(cfg_get(ph, "x0",       default=-2.0))
     La    = float(cfg_get(ph, "L_AAA",    default=1.5))
     V_max = float(cfg_get(ph, "V_max",    default=2.0))
-    # Carreau rheology (blood: β=16, n=0.3568 from the paper Table II)
+    # Carreau rheology (blood: β=16, n=0.3568 from Nagargoje, Mishra & Gupta 2021, Table II)
     beta  = float(cfg_get(ph, "beta",     default=16.0))
     Cu    = float(cfg_get(ph, "Cu",       default=10.0))
     n     = float(cfg_get(ph, "n",        default=0.3568))

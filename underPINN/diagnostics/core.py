@@ -17,8 +17,8 @@ The batch is FIXED, so every curvature or landscape number is a deterministic
 function of the parameters, not of the stochastic mini-batch used in training.
 
 ``rho_fn`` must contain every loss term, scaled so that sum(rho**2) equals the
-loss: for a mean-squared residual over N points use r_i / sqrt(N) (pinn_math_notes
-Sec. 7.1). ``Problem.check_rho`` verifies this before any diagnostic relies on it.
+loss: for a mean-squared residual over N points use r_i / sqrt(N).
+``Problem.check_rho`` verifies this before any diagnostic relies on it.
 """
 from __future__ import annotations
 

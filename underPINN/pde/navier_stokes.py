@@ -49,8 +49,7 @@ class NavierStokesPDE(BasePDE):
         # substantially more than backpropagating through XLA's single
         # fused jax.hessian primitive, outweighing the forward-only saving.
         # Reverted to jax.hessian for that reason -- see
-        # benchmarks/rebuttal/README.md section 6 for the full measurement,
-        # and underPINN/pde/helmholtz.py for the same lesson on a simpler
+        # underPINN/pde/helmholtz.py for the same lesson on a simpler
         # single-output problem.
         H = jax.vmap(jax.hessian(u_fn))(x)
         u_xx, u_yy = H[:, 0, 0, 0], H[:, 0, 1, 1]

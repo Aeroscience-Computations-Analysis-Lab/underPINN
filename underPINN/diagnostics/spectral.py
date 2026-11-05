@@ -2,13 +2,13 @@
 
     amplitude_spectrum     |s^(omega)| with a Hann window. Applied to the error e = u_theta - u* at
                            each checkpoint it shows spectral bias: which frequencies of the error
-                           are removed first and which linger (twolayer notes Sec. 3.6). Squared,
-                           on the residual, it is the power spectrum of pinn_math_notes Fig. 6b.
+                           are removed first and which linger. Squared, on the residual, it is the
+                           residual power spectrum.
     energy_fraction_below  share of the spectral energy below omega_c. For a residual this says how
                            much of it sits where the operator passes it into the error: for the
                            damped oscillator, residual near or below resonance is amplified and
-                           high-frequency residual is suppressed (pinn_math_notes Sec. 8), so equal
-                           losses can give very different errors.
+                           high-frequency residual is suppressed, so equal losses can give very
+                           different errors.
 
 Frequencies are angular, omega = 2 pi f, in radians per unit of the grid variable.
 """

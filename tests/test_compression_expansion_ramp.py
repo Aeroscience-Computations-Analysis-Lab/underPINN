@@ -9,9 +9,7 @@
   two-corner (compression + expansion) wall geometry, alongside the
   existing single-corner ``RampGeometry``.
 
-Verified against the same textbook values and physical sanity checks used
-when this feature was built (see ``benchmarks/rebuttal/ablations
-/ablate_qr_deim_ramp_ce.py``'s module docstring for the full narrative):
+Verified against textbook values and physical sanity checks:
 standard Prandtl-Meyer function values, and the fact that an oblique shock
 followed by an isentropic expansion back to the original flow angle lands
 close to but not exactly at the original freestream state -- the expected

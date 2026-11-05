@@ -27,7 +27,6 @@ physics:
   L    : 7.0       # total length  (x_lo to x_lo + L)
   x_lo : -3.5      # inlet x-coordinate → pipe spans x ∈ [-3.5, 3.5]
   U_max: 2.0       # inlet centreline velocity (matches Newtonian U_max)
-  # Carreau rheology (blood values from the paper)
   # Carreau rheology (Nagargoje, Mishra & Gupta 2021, Table II — blood):
   #   λ = 3.131 s, n = 0.3568, μ0 = 0.056 Pa·s, μ∞ = 0.0035 Pa·s → β = 16
   # Non-dim groups in this sim are diameter/mean-velocity based:

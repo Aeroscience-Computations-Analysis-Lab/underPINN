@@ -1,4 +1,4 @@
-"""Modal (sine-series) analysis for Dirichlet problems on an interval (poisson notes Secs. 3.2-3.3).
+"""Modal (sine-series) analysis for Dirichlet problems on an interval.
 
 On [x0, x0 + L] with zero boundary values, sin(n pi (x - x0) / L) diagonalises -d^2/dx^2, so
 the error of a 1-D network splits into modes with coefficients
@@ -87,6 +87,7 @@ def modal_kernel(apply_fn: Callable, params, x, n_modes: int, full: bool = False
 
 def laplacian_mode_weights(n_modes: int, length: float = 1.0, scale: float = 1.0) -> np.ndarray:
     """w_n = (n pi / L)^4 / S^2, n = 1..n_modes: the strong-form weight of mode n for -u'' = f
-    with the residual divided by S (poisson notes eq. 6)."""
+    with the residual divided by S. By Parseval, the mean squared residual of an error with
+    sine coefficients da_n is (1/2) sum_n w_n da_n^2."""
     n = np.arange(1, n_modes + 1)
     return (n * np.pi / length) ** 4 / scale ** 2

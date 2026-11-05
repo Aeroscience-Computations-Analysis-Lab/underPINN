@@ -34,7 +34,7 @@ class Config:
     slq_k: int = 60
     slq_probes: int = 4
     eps: float = 1e-3                 # effective dimension n_eps = #{lambda_i > eps lambda_max}
-    n_top: int = 10                   # kappa_top = lambda_1 / lambda_{n_top}  (notes: kappa_10)
+    n_top: int = 10                   # kappa_top = lambda_1 / lambda_{n_top}  (kappa_10 by default)
     layer_k: int = 25
     n_ntk: int = 192
     n_dir: int = 7

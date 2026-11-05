@@ -52,16 +52,13 @@ class HelmholtzPDE(BasePDE):
         # jax.value_and_grad(loss)(params, ...) an actual training step
         # needs -- differentiating the *whole* residual w.r.t. network
         # parameters, not just evaluating it -- it measured 0.84x (~16%
-        # *slower*), reproducibly across repeated runs of
-        # benchmarks/rebuttal/physicsnemo/compare_underpinn_multi.py
-        # --problems helmholtz2d. Backpropagating through several
+        # *slower*), reproducibly across repeated runs. Backpropagating through several
         # independently-traced nested vjp/jvp subgraphs costs more than
         # backpropagating through XLA's single fused jax.hessian primitive,
         # even though the forward evaluation alone is cheaper. Reverted to
-        # this jax.hessian formulation for that reason -- see
-        # benchmarks/rebuttal/README.md section 6 for the full measurement and
-        # the general lesson (verify under the real outer parameter-
-        # gradient, not a forward-only microbenchmark).
+        # this jax.hessian formulation for that reason. The general lesson:
+        # verify under the real outer parameter-gradient, not a forward-only
+        # microbenchmark.
         H = jax.vmap(jax.hessian(u_single))(xy)
         u = self.model.apply(params, xy)[:, 0]
         laplacian = H[:, 0, 0] + H[:, 1, 1]

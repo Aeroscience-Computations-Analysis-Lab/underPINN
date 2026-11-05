@@ -7,10 +7,7 @@ function), then:
     mon = TrainingMonitor(problem, params0, every=200)      # one call per training step
     res = run_checkpoint(problem, params, params0=params0)  # Hessian, NTK, slices, representation, refit
 
-See core.py for the Problem contract and each module for its definitions, which follow the
-companion notes: "Representation and the Geometry of the PINN Loss" (pinn_math_notes),
-"Representation, Operator and the PINN Loss Landscape" (poisson notes) and "Post-processing a
-Two-Layer PINN" (twolayer notes).
+See core.py for the Problem contract and each module for its definitions.
 """
 from .core import Problem, default_group, flax_hidden_fn, param_groups
 from .curvature import (effective_dimension, full_hessian, full_hessian_spectrum, gauss_newton_fidelity,

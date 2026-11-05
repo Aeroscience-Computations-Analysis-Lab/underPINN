@@ -1,9 +1,8 @@
-"""Tests of underPINN.diagnostics against exact identities and the numbers quoted in the
-companion notes: "Representation and the Geometry of the PINN Loss" (spring oscillator,
-pinn_math_notes), "Representation, Operator and the PINN Loss Landscape" (multiscale Poisson)
-and "Post-processing a Two-Layer PINN".
+"""Tests of underPINN.diagnostics against exact identities and reference values for two
+problems with known answers: the forced, damped spring m u'' + c u' + k u = F0 cos(Om t) and
+the multiscale Poisson problem -u'' = f with u* = sin(2 pi x) + 0.1 sin(50 pi x) on [0, 1].
 
-Checked against the notes: feature conditioning kappa(G_Phi) (spring and Poisson), the
+Reference values: feature conditioning kappa(G_Phi) (spring and Poisson), the
 operator-mapped kappa(G_DPhi), the exact-solution constants, the Poisson mode weights.
 Checked against exact identities: Lanczos/SLQ vs the full Hessian, kappa_10 and Jacobi scaling,
 Gauss-Newton (exact and Lanczos paths), NTK vs the Jacobian, the output-layer refit and
@@ -45,7 +44,7 @@ def features(kind, t, xp=np):
 
 
 def exact_constants():
-    """X, delta, C1, C2 of the exact solution (pinn_math_notes eqs. 3-4)."""
+    """X, delta, C1, C2 of u = exp(-zeta w0 t)(C1 cos wd t + C2 sin wd t) + X cos(Om t - delta)."""
     X = (F0 / M_) / np.sqrt((W0 ** 2 - OM ** 2) ** 2 + (2 * ZETA * W0 * OM) ** 2)
     delta = np.arctan2(2 * ZETA * W0 * OM, W0 ** 2 - OM ** 2)
     C1 = U0 - X * np.cos(delta)
@@ -66,7 +65,7 @@ class Net(nn.Module):
 
 
 def make_spring(kind="B", n=256, seed=0):
-    """The spring PINN of the notes: 5 -> 32 tanh -> 1 (P = 225) on standardised features."""
+    """Spring PINN: 5 -> 32 tanh -> 1 (P = 225) on standardised features."""
     t_grid = np.linspace(0, T, n)
     P = features(kind, t_grid)
     mu, sd = P.mean(0), P.std(0)
@@ -134,8 +133,8 @@ def spring_b(x64):
     return prob, p0, train(prob, p0, 1500), model, ms
 
 
-# --------------------------------------------------------------------------- the notes' numbers
-def test_exact_solution_matches_notes():
+# --------------------------------------------------------------------------- reference values
+def test_exact_solution_reference_values():
     X, delta, C1, C2 = exact_constants()
     np.testing.assert_allclose([W0, ZETA, WD, ZETA * W0], [6.3246, 0.09487, 6.2960, 0.60], atol=1e-4)
     np.testing.assert_allclose([X, delta, C1, C2, np.hypot(C1, C2)], [0.8172, 0.1974, 0.1987, -0.0829, 0.2153],
@@ -147,7 +146,7 @@ def test_exact_solution_matches_notes():
     assert abs(u(0.0) - U0) < 1e-12 and abs(u1(0.0) - V0) < 1e-12
 
 
-def test_feature_gram_matches_notes():
+def test_feature_gram_reference_values():
     t = np.linspace(0, T, 256)
     _, evA, kA = dg.feature_gram(features("A", t))
     _, evB, kB = dg.feature_gram(features("B", t))
@@ -165,7 +164,7 @@ def _operator_mapped_features(kind, t):
     return (phi - mu) / sd + (C_ / K_) * d1 / sd + (M_ / K_) * d2 / sd
 
 
-def test_operator_mapped_gram_matches_notes():
+def test_operator_mapped_gram_reference_values():
     """kappa(G_DPhi) = 990.0 (A), 33.0 (B): the operator-mapped features, NOT re-standardised."""
     t = jnp.linspace(0, T, 256)
     _, _, kA = dg.feature_gram(_operator_mapped_features("A", t), standardise=False)
@@ -175,7 +174,7 @@ def test_operator_mapped_gram_matches_notes():
     assert dg.feature_gram(_operator_mapped_features("B", t))[2] < 3.0
 
 
-def test_poisson_feature_gram_matches_notes():
+def test_poisson_feature_gram_reference_values():
     x = np.linspace(0, 1, 512)
     tau = 2 * x - 1
     phiA = np.stack([tau ** p for p in range(1, 6)], -1)
@@ -417,7 +416,7 @@ def test_monitor_tracks_terms_updates_and_best(spring_b):
 
 
 def test_monitor_update_ratio_is_relative_to_previous_iterate(spring_b):
-    """rho_l(k) = ||theta_l(k+1) - theta_l(k)|| / ||theta_l(k)|| (twolayer notes Sec. 3.2)."""
+    """rho_l(k) = ||theta_l(k+1) - theta_l(k)|| / ||theta_l(k)|| per layer."""
     prob, p0, *_ = spring_b
     mon = dg.TrainingMonitor(prob, p0, every=1, grad_terms=False)
     grads = jax.jit(jax.grad(prob.loss))
@@ -460,8 +459,8 @@ def test_amplitude_spectrum_and_energy_fraction():
         dg.grid_step(t ** 2)
 
 
-# --------------------------------------------------------------------------- modal (Poisson notes)
-def test_sine_coefficients_and_mode_weights_match_poisson_notes():
+# --------------------------------------------------------------------------- modal (Poisson)
+def test_poisson_sine_coefficients_and_mode_weights():
     x = np.linspace(0, 1, 2001)
     u_star = np.sin(2 * np.pi * x) + 0.1 * np.sin(50 * np.pi * x)
     c = dg.sine_coefficients(u_star, x, 80)
@@ -472,7 +471,7 @@ def test_sine_coefficients_and_mode_weights_match_poisson_notes():
     assert S == pytest.approx(2467.4, abs=0.05)
     w = dg.laplacian_mode_weights(80, scale=S)
     assert w[1] / w[49] == pytest.approx((2 / 50) ** 4) and w[1] / w[49] == pytest.approx(2.6e-6, rel=0.02)
-    # Parseval (poisson notes eq. 6): the mean squared residual of an error e is 1/2 sum_n w_n da_n^2
+    # Parseval: the mean squared residual of an error e is 1/2 sum_n w_n da_n^2
     da = np.zeros(80)
     da[1], da[49] = 0.3, 0.01
     xc = np.linspace(0, 1, 512)

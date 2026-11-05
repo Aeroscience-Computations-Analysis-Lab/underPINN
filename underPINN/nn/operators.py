@@ -242,7 +242,8 @@ class FNO2D(nn.Module):
             x = jnp.pad(x, ((0, 0), (0, self.padding), (0, self.padding), (0, 0)),
                        mode="constant")
 
-        # Last stage is linear — not in the paper, but matches the reference impl.
+        # Last stage is linear: not stated in Li et al. (2020), but matches the
+        # authors' public FNO implementation.
         for depthnum in range(self.depth):
             activation = self.activation if depthnum < self.depth - 1 else (lambda z: z)
             x = FourierStage(self.width, self.modes1, self.modes2, activation)(x)

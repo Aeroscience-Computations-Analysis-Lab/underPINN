@@ -16,15 +16,9 @@ The diagnostics are **method-agnostic**: they do not depend on which solver, opt
 network produced the parameters. You describe the problem once with a small `Problem`
 adapter. Then you call one function per training step and one per checkpoint.
 
-The definitions follow three companion notes, which apply every diagnostic to two PINNs that
-differ only in their input representation (polynomial vs frequency-matched features):
-
-- *Representation and the Geometry of the PINN Loss*: forced, damped spring; curvature,
-  slices, residual-to-error analysis.
-- *Representation, Operator and the PINN Loss Landscape*: multiscale Poisson problem;
-  modal error and modal tangent kernel.
-- *Post-processing a Two-Layer PINN*: the eighteen-item checklist covering training
-  dynamics, representation and network design.
+Every diagnostic is checked in `tests/test_diagnostics.py`, both against exact identities
+and on two problems with known answers: the forced, damped spring of the quick start and a
+multiscale Poisson equation.
 
 ## Quick start
 
@@ -254,8 +248,8 @@ other rows come from `run_checkpoint` or the standalone functions.
 
 ## Definitions
 
-Each family below gives the definitions used in the notes, what a value means, and the
-function that computes it.
+Each family below gives the definition, what a value means, and the function that
+computes it.
 
 ### Training dynamics: `TrainingMonitor`
 
@@ -352,7 +346,7 @@ points, because J is stored as rows × P floats.
 **filter-normalised** directions (Li et al., 2018). Each neuron's incoming weights in *d*, a
 column of a flax kernel, are rescaled to the norm of the trained neuron's weights, and each
 bias is rescaled as one block. The result is that slices of different networks are
-comparable. The notes use seven directions of 141 points.
+comparable. The defaults are seven directions of 141 points.
 
 `slice_2d` adds a second direction, orthogonalised against the first and rescaled to its
 norm. It returns `F[i, j]` = loss at {math}`(\alpha_j,\beta_i)`, ready for
@@ -366,9 +360,16 @@ a lower bound, because a slice with a single minimum can still be non-convex. Di
 ### Representation
 
 `feature_gram(phi)` computes the correlation matrix {math}`G_\Phi=\tilde\Phi^\top\tilde\Phi/N`
-of standardised features, its eigenvalues and {math}`\kappa(G_\Phi)`. For the spring problem
-this is 567.7 for polynomial features and 2.7 for frequency-matched ones. The test suite
-reproduces both numbers, along with 568 and 8.0 for the Poisson problem.
+of standardised features, its eigenvalues and {math}`\kappa(G_\Phi)`. For the quick-start
+spring on 256 points of {math}`[0,3]`, with {math}`\tau=2t/T-1`, the two input
+representations give very different values:
+
+- polynomial features {math}`(\tau,\tau^2,\dots,\tau^5)` give {math}`\kappa=567.7`;
+- frequency-matched features {math}`(\tau,\sin\omega_d t,\cos\omega_d t,\sin\Omega t,\cos\Omega t)`
+  give {math}`\kappa=2.7`, where {math}`\omega_d=\sqrt{k/m-(c/2m)^2}` is the damped
+  natural frequency.
+
+The test suite checks both values.
 
 ```{admonition} The operator-mapped Gram matrix
 :class: tip
@@ -376,8 +377,8 @@ The physics loss sees {math}`\mathcal D u_\theta`, so the relevant conditioning 
 the *operator-mapped* features {math}`G_{\mathcal D\Phi}=(\mathcal D\tilde\Phi)^\top(\mathcal D\tilde\Phi)/N`.
 Apply the differential operator to the standardised features, including its action on the
 constant shift, and call `feature_gram(D_phi, standardise=False)`. Re-standardising would
-remove exactly the operator's scaling of each feature. For the spring this gives 990.0 vs
-33.0, as in the notes, whereas re-standardised it gives 990 vs 2.7.
+remove exactly the operator's scaling of each feature. For the spring this gives 990.0
+(polynomial) vs 33.0 (frequency-matched); re-standardised, it would give 990 vs 2.7.
 ```
 
 On hidden activations:
@@ -443,8 +444,8 @@ representation.
 
 The residual's spectrum matters as much as its size. For the damped oscillator, the error is
 the residual filtered through the operator's response {math}`\hat G(\omega)`. Residual near
-resonance is amplified, while high-frequency residual is suppressed. This is why equal losses
-can give errors 15× apart.
+resonance is amplified, while high-frequency residual is suppressed. This is why two
+networks with similar losses can have very different errors.
 
 Set `Config.reference_fn` (the exact solution) together with `x_dense` to get the relative
 L² error in `run_checkpoint`. On a uniform 1-D grid the report also includes the error
@@ -471,9 +472,10 @@ two parts:
 - {math}`\mu_n` is set by the **representation**: how easily the network can move mode *n*.
 - {math}`w_n` is set by the **operator and loss**: how much the loss cares about mode *n*.
 
-In the strong form of {math}`-u''=f`, {math}`w_n\propto(n\pi)^4`. For the Poisson problem in
-the notes, the slow mode therefore counts {math}`2.6\times10^{-6}` times as much as the fast
-one. No input representation can fix that. A small loss does not mean a small error on
+In the strong form of {math}`-u''=f`, {math}`w_n\propto(n\pi)^4`. Take
+{math}`u^*=\sin 2\pi x+0.1\sin 50\pi x` on {math}`[0,1]`: the slow mode (*n* = 2) counts
+{math}`(2/50)^4\approx2.6\times10^{-6}` times as much in the loss as the fast one (*n* = 50).
+No input representation can fix that. A small loss does not mean a small error on
 multiscale problems, so check the error against a reference.
 
 Adam and feature learning break the diagonal-kernel assumption. Use {math}`\mu_n w_n` to
@@ -546,7 +548,7 @@ order the modes, not to predict iteration counts.
 
 ```{admonition} Run post-processing in float64 when you need small eigenvalues
 :class: note
-The numbers in the notes were computed in double precision. In float32, Hessian or NTK
+Spectra that span many decades need double precision. In float32, Hessian or NTK
 eigenvalues below about {math}`10^{-6}\lambda_{\max}`, and loss differences near a converged
 minimum, are rounding noise. For spectra, small `eps` or slice counts, enable
 `jax_enable_x64` for the **post-processing run only** and cast the trained parameters to

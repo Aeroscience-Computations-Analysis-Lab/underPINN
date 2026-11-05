@@ -1,6 +1,6 @@
-"""Checks that inform network and training design (twolayer notes Sec. 5).
+"""Checks that inform network and training design.
 
-output_layer_refit (Sec. 5.1)
+output_layer_refit
     With the hidden layers fixed, the output u = W h + b is linear in the output-layer
     parameters s. For a linear PDE with linear boundary terms rho(s) = J s + c is affine,
     so min ||rho||^2 over s is an exact linear least-squares problem and one solve gives
@@ -11,14 +11,14 @@ output_layer_refit (Sec. 5.1)
     a linear problem). The solve is an SVD least-squares solve in float64 on J itself,
     not on the normal equations, which would square its condition number.
 
-refit_pruning (Sec. 5.2)
+refit_pruning
     Effective width: remove units of the last hidden layer one at a time, each time the
     one whose removal -- after refitting the output layer -- raises the loss least. A
     network that keeps its loss with far fewer units is wider than its representation
     needs. Plain mean-ablation without a refit is not a substitute: near a minimum,
     removing any unit raises the loss by orders of magnitude.
 
-offgrid_residual_ratio (Sec. 5.4)
+offgrid_residual_ratio
     RMS of the residual on a dense independent point set over its RMS on the collocation
     points. A ratio well above 1 means the network fits the points it was trained on at
     the expense of the gaps (too few points, or points that should follow the residual).

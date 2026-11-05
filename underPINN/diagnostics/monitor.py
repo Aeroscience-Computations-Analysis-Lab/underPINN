@@ -1,4 +1,4 @@
-"""Training monitor: attach to ANY loop with one call per step (twolayer notes Secs. 3.1-3.3, 3.7).
+"""Training monitor: attach to ANY loop with one call per step.
 
     mon = TrainingMonitor(problem, params0, every=200)
     for step in range(n):
@@ -12,7 +12,7 @@ Every ``every`` steps it evaluates, on the problem's fixed diagnostic batch:
     grad_term    ||grad of each term|| (all of them in one backward pass): which term drives the
                  update; compare with ``terms`` before reweighting
     update       rho_l = ||theta_l(k) - theta_l(k')|| / ||theta_l(k')|| per layer, k' the previous
-                 logged step (every=1 gives the notes' per-step ratio): layers orders of magnitude
+                 logged step (every=1 gives the per-step ratio): layers orders of magnitude
                  below the rest are effectively frozen; late values above ~1e-2 mean the steps are
                  too large
     dist0        delta_l = ||theta_l(k) - theta_l(0)|| / ||theta_l(0)|| per layer: lazy (<<1) vs
@@ -22,8 +22,8 @@ Every ``every`` steps it evaluates, on the problem's fixed diagnostic batch:
 The diagnostic loss is whatever ``problem`` defines (normally the steady objective), whatever
 objective the training loop is currently minimising (for example an implicit-Euler step).
 
-``best_so_far`` and ``iterations_to`` turn a recorded loss history into the efficiency measures
-of pinn_math_notes Sec. 6.5.
+``best_so_far`` and ``iterations_to`` turn a recorded loss history into efficiency measures:
+the running best loss and the iterations needed to reach a target.
 """
 from __future__ import annotations
 

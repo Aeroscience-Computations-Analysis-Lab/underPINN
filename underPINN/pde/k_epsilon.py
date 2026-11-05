@@ -108,8 +108,7 @@ class KEpsilonPDE(BasePDE):
         # with backpropagating through *more* independently-traced
         # nested vjp/jvp subgraphs (8 here, vs. helmholtz's 2 and
         # navier_stokes's 4) costing correspondingly more. Reverted to
-        # jax.hessian for that reason -- see
-        # benchmarks/rebuttal/README.md section 6 for the full measurement.
+        # jax.hessian for that reason.
         H = jax.vmap(jax.hessian(u_fn))(x)
         u_xx, u_yy = H[:, 0, 0, 0], H[:, 0, 1, 1]
         v_xx, v_yy = H[:, 1, 0, 0], H[:, 1, 1, 1]

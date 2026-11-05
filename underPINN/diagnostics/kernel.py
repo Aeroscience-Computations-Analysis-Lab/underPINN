@@ -1,4 +1,4 @@
-"""Residual neural tangent kernel (twolayer notes Sec. 3.5).
+"""Residual neural tangent kernel.
 
 With J_ij = d r_theta(x_i) / d theta_j (rows: collocation points x equations) the residual
 NTK is K = J J^T / N. Under gradient flow on the residual loss, r' = -(2/N) J J^T r, so the

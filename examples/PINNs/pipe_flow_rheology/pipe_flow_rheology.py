@@ -71,7 +71,7 @@ def run_pipe_flow_rheology(cfg) -> dict:
     L     = float(cfg_get(ph, "L",     default=7.0))
     x_lo  = float(cfg_get(ph, "x_lo",  default=-3.5))
     U_max = float(cfg_get(ph, "U_max", default=2.0))
-    # Carreau rheology (blood: β=16, n=0.3568 from the paper Table II)
+    # Carreau rheology (blood: β=16, n=0.3568 from Nagargoje, Mishra & Gupta 2021, Table II)
     beta  = float(cfg_get(ph, "beta",  default=16.0))
     Cu    = float(cfg_get(ph, "Cu",    default=10.0))
     n     = float(cfg_get(ph, "n",     default=0.3568))

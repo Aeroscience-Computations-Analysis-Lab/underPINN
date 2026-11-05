@@ -1,4 +1,4 @@
-"""What the network and its input representation do (twolayer notes Sec. 4; pinn_math_notes Sec. 6.1).
+"""What the network and its input representation do.
 
     feature_gram          kappa of the feature Gram matrix of an input representation
     erank                 exp(entropy of the normalised singular values) of centred activations
@@ -23,10 +23,10 @@ def feature_gram(phi, standardise: bool = True):
     """G = Phi~^T Phi~ / N, its eigenvalues (ascending) and condition number kappa(G).
 
     With ``standardise`` each column is mapped to zero mean and unit variance over the
-    grid (population std, notes eq. 8), so G is the correlation matrix of the features
+    grid (population std, ddof=0), so G is the correlation matrix of the features
     and kappa measures correlation, not scale.
 
-    The operator-mapped Gram G_DPhi = (D Phi~)^T (D Phi~) / N (notes Sec. 6.1) is the one
+    The operator-mapped Gram G_DPhi = (D Phi~)^T (D Phi~) / N is the one
     the physics loss sees: apply the differential operator to the STANDARDISED features
     (rows D phi~(t_i), including the operator acting on the constant shift) and pass the
     result with ``standardise=False``; re-standardising would remove exactly the
