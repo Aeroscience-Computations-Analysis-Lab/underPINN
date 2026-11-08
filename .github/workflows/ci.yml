@@ -32,7 +32,10 @@ jobs:
 
   test:
     needs: lint
-    runs-on: ubuntu-latest
+    # Python 3.9 is end-of-life and actions/setup-python has no 3.9 build for
+    # Ubuntu 26.04, which ubuntu-latest now resolves to. Run that one entry on
+    # 24.04 while pyproject.toml still declares requires-python >= 3.9.
+    runs-on: ${{ matrix.python-version == '3.9' && 'ubuntu-24.04' || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
