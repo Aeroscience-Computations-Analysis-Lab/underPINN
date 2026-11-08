@@ -32,9 +32,21 @@ from underPINN.callbacks.early_stopping import EarlyStopping
 from underPINN.utils.io import save_predictions
 
 
+def _net_meta(net_cfg) -> dict:
+    """The ``network`` dict the factory consumes (and checkpoints store)."""
+    from types import SimpleNamespace
+    from underPINN.nn.factory import network_config
+    return network_config(SimpleNamespace(network=net_cfg))
+
+
 def _build_model(net_cfg):
-    layers = net_cfg.layers
-    if cfg_get(net_cfg, "type", default="mlp") == "fourier_mlp":
+    layers = cfg_get(net_cfg, "layers", default=None)   # not every architecture has one
+    t = cfg_get(net_cfg, "type", default="mlp")
+    if t not in ("mlp", "fourier_mlp"):
+        # Any other registered architecture (gated_mlp, siren, chebykan, kan, ...)
+        from underPINN.nn.factory import build_model
+        return build_model(_net_meta(net_cfg))
+    if t == "fourier_mlp":
         return FourierMLP(
             layers=layers,
             n_fourier=cfg_get(net_cfg, "n_fourier", default=16),
@@ -162,8 +174,10 @@ def run_burgers(cfg) -> dict:
         net_cfg = cfg.network
         solver.save_checkpoint(out_dir, metadata={
             "problem": "burgers",
-            "network": {"type": cfg_get(net_cfg, "type", default="mlp"),
-                        "layers": list(net_cfg.layers)},
+            "network": ({"type": cfg_get(net_cfg, "type", default="mlp"),
+                         "layers": list(net_cfg.layers)}
+                        if cfg_get(net_cfg, "type", default="mlp") in ("mlp", "fourier_mlp")
+                        else _net_meta(net_cfg)),
             "physics": {"nu": float(cfg.physics.nu)},
         })
 

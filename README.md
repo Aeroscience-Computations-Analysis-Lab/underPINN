@@ -15,6 +15,10 @@ underPINN is a research-grade PINN engine that combines classical collocation-ba
 - **FourierMLP** — random Fourier feature embeddings (trainable σ) prepended to a standard MLP; essential for oscillatory solutions (Helmholtz, wave, high-Re flows) where plain MLPs fail to represent high spatial frequencies
 - **FBPINN** — overlapping subdomain decomposition with sigmoid partition-of-unity windows; each subdomain gets its own network so training is never dominated by one region
 - **HybridAttention + SimpleGate** — gated residual blocks inside each FBPINN subdomain; SimpleGate multiplies the hidden state element-wise by a learnable gate for compact, expressive feature modulation
+- **ChebyKAN / BSplineKAN (PIKANs)** — Kolmogorov–Arnold networks with a learnable 1-D function on every edge: a Chebyshev series in `tanh x` (cPIKAN, `network.type: chebykan`) or B-splines plus a SiLU base (`network.type: kan`). Same `layers=[in, …, out]` contract as `MLP`; `refine_bspline_kan` refits a checkpoint onto a finer spline grid between runs
+- **PirateNet** — residual adaptive network (Wang et al., JMLR 2024; `network.type: piratenet`): Fourier features, U/V gates and residual blocks whose skip weights α start at 0, so the network starts linear in its features and switches depth on during training; random weight factorisation on every layer. `pirate_output_init` fits the output layer to the initial condition by least squares
+- **PINNsFormer / PINNMamba** — sequence models over a short pseudo-time window built inside the network: a transformer encoder–decoder with wavelet activations (Zhao et al., ICLR 2024; `network.type: pinnsformer`) or Mamba selective state-space blocks (Xu et al., ICML 2025; `network.type: pinnmamba`). Both keep the point contract `(N, D) → (N, out)`, so every PDE, loss and solver works unchanged. PINNMamba is memory-heavy: about 3.3 GB of XLA temporaries per step for the Burgers config at `batch_r: 2048`
+- **PeriodicInput** — wraps any network so chosen coordinates enter as `(cos, sin)`; the result is exactly periodic in them, derivatives included, so periodic boundary conditions hold by construction
 
 ### Neural Operators (PINO / DeepONet / CViT)
 Unlike the point networks above (one collocation point in, one value out), these map an entire **function** — sampled on a grid or at sensors — to another function, so one trained model generalizes across a *distribution* of ICs / PDE parameters instead of re-solving from scratch each time.
@@ -31,7 +35,11 @@ Unlike the point networks above (one collocation point in, one value out), these
 - **RAR/RAD shock-focused resampling** — `rad_resample` (Wu et al., 2023; `p ∝ r^k/E[r^k] + c`) refreshes the interior pool toward shocks/contacts in the compressible cases (`ramp`, `sod_shock`, `toro3`); config knobs `rar_period`, `rar_candidates`, `rar_k`, `rar_c`
 - **QR-DEIM-R adaptive collocation resampling** — `qr_deim_resample` (`underPINN/utils/sampling.py`): column-pivoted-QR DEIM anchors (Chaturantabut & Sorensen, 2010; Drmac & Gugercin, 2016) plus a leverage-score-weighted randomized fill (Drineas, Mahoney & Muthukrishnan, 2006) — selects points *deterministically well-spread* across every high-residual region instead of RAD's magnitude-proportional random draw, which can cluster redundantly on one narrow shock spike; `O(n_candidates × r0)` throughout, no dense `(n_candidates, n_keep)` matrix ever formed
 - **Artificial viscosity for shocks** — global Laplacian dissipation `−ε∇²U` on the conserved variables in the compressible Euler cases; ε can be **fixed** (`art_visc`) or **learned** as `ε = softplus(log_av)` jointly with the network (`trainable_visc: true`). When learned, the parameters become a `{"net", "log_av"}` pytree optimized by a single `optax` chain, so `log_av` currently shares the network's optimizer, learning rate and cosine schedule
-- **Gauss-Newton / natural-gradient training** — `underPINN.training.train_gauss_newton`: Levenberg-Marquardt-damped Gauss-Newton second-order optimizer (`(JᵀJ + λI)Δθ = Jᵀr`, trust-region damping adapted step-to-step) as an alternative to Adam; explicit dense solve is `O(n_params³)` per step, so it is scoped to small networks (low hundreds to a few thousand parameters) — not a replacement for underPINN's Adam-based solvers on the large 3-D / compressible-flow benchmarks, where `optax.lbfgs` limited-memory quasi-Newton refinement after Adam is the scalable second-order option instead
+- **Gauss-Newton / natural-gradient training** — `underPINN.training.train_gauss_newton`: Levenberg-Marquardt-damped Gauss-Newton second-order optimizer (`(JᵀJ + λI)Δθ = Jᵀr`, trust-region damping adapted step-to-step) as an alternative to Adam; explicit dense solve is `O(n_params³)` per step, so it is scoped to small networks (low hundreds to a few thousand parameters) — not a replacement for underPINN's Adam-based solvers on the large 3-D / compressible-flow benchmarks, where L-BFGS refinement after Adam (`lbfgs_refine`, below) is the scalable second-order option instead
+- **Causal training** — `causal_pde_loss` (Wang, Sankaran & Perdikaris 2022): the residual is binned in time and bin *k* is weighted by `exp(−ε Σ_{j<k} L_j)`, so late times only count once early times are resolved
+- **Gradient-norm loss balancing** — `grad_norm_weights` gives `λ_i = Σ_j ‖∇L_j‖ / ‖∇L_i‖` so every weighted term pulls equally; smooth with `ema_update`
+- **L-BFGS refinement** — `lbfgs_refine`: optax L-BFGS with a zoom line search on a fixed loss, the usual finishing phase after Adam; stops on an iteration count, a time budget (compilation excluded), stagnation or a non-finite loss, and returns the best iterate
+- **Periodic and initial-velocity conditions in `PINNLoss`** — `periodic_length=L` replaces the Dirichlet BC term by `u(x_b, t) = u(x_b + L, t)`; `ic_velocity_weight` adds `u_t(x, 0) = 0` for second-order-in-time problems started from rest
 - **Time-marching transfer learning** — long-horizon unsteady problems split into windows; each window warm-starts from the previous one and chains its end-state as the next initial condition (pulsatile pipe flow), with per-window checkpoints and window-level restart
 - **RBA element-wise loss weighting** — residual-based adaptivity assigns per-point weights so that boundary and collocation losses are automatically balanced during training
 - **EarlyStopping** — monitors a metric (default: total loss) and halts training after `patience` epochs without improvement
@@ -65,6 +73,7 @@ Unlike the point networks above (one collocation point in, one value out), these
 - Unsteady pipe cross-section (`(y, z, t) → u`)
 - Harmonic oscillator (`d²u/dt² + ω²u = 0`)
 - Exponential decay ODE (`du/dt + λu = 0`)
+- **PINN failure-mode benchmarks** (`underPINN.pde.failure_modes`) — convection `u_t + βu_x = 0` and reaction `u_t − ρu(1−u) = 0` (Krishnapriyan et al., NeurIPS 2021) with exact solutions, and Allen–Cahn `u_t − εu_xx + κ(u³ − u) = 0`
 - **FBPINN ODE** (`du/dx = cos(ω x)`) — domain decomposition into overlapping subdomains; defeats the spectral bias that stalls a single PINN at high ω
 - 1-D periodic / Dirichlet viscous Burgers — grid (finite-difference) residual for FNO1D (`BurgersGrid1D`)
 - 2-D periodic viscous Burgers — grid residual for FNO2D / CViT, selectable central or upwind advection stencil (`BurgersGrid2D`)
@@ -109,13 +118,19 @@ Unlike the point networks above (one collocation point in, one value out), these
 
 ### Diagnostics
 `underPINN.diagnostics` explains *why* a network trained the way it did — method-agnostic (any solver, optimizer or network) through a small `Problem` adapter (loss terms on a fixed batch, plus optionally the residual, `rho` with `loss == sum(rho**2)`, the network output and hidden activations):
-- **`TrainingMonitor`** — one call per step: loss-term balance and per-term gradient norms, per-layer update ratio `‖Δθ_ℓ‖/‖θ_ℓ‖`, distance from initialisation (lazy vs feature learning), and the best iterate (`best_params()`); `best_so_far` / `iterations_to` give `min_{j≤k} L` and `k(ε)`
+- **`TrainingMonitor`** — one call per step: loss-term balance, per-term gradient norms and their most negative pairwise cosine (term conflict), per-layer update ratio `‖Δθ_ℓ‖/‖θ_ℓ‖`, distance from initialisation (lazy vs feature learning), and the best iterate (`best_params()`); `best_so_far` / `iterations_to` give `min_{j≤k} L` and `k(ε)`
 - **Curvature** — sharpness `λ_max`, effective dimension `#{λ_i > 10⁻³ λ_max}`, top-ten condition number `κ₁₀` and its Jacobi-scaled (Adam-like) version, per-layer block curvature, and Gauss-Newton fidelity `‖H − 2JᵀJ‖₂/‖H‖₂`; exact Hessian for small networks, Lanczos / stochastic Lanczos quadrature (Hessian-vector products only) above that
 - **Residual NTK** spectrum and drift; **filter-normalised loss slices** (Li et al., 2018) with a non-convexity count
 - **Representation** — feature conditioning `κ(G_Φ)` (and the operator-mapped `κ(G_DΦ)`), effective rank, saturation, linear probes, CKA, mean-ablation importance
 - **Network design** — exact least-squares **output-layer refit** (float64 SVD; a free check of whether Adam converged the last layer), **refit-pruning** for effective width, off-grid residual ratio
 - **Spectral & modal analysis** — Hann-windowed error/residual spectra and energy below a cutoff; sine-mode error `δa_n` and modal tangent kernel `μ_n` for Dirichlet problems
-- **`run_checkpoint(problem, params, cfg=Config(...))`** runs them all, skips (with the reason) any that the `Problem` cannot support, and writes `ckpt_<step>.json` + `.npz`. See the [Diagnostics guide](https://docs.underpinn.dev/diagnostics.html)
+- **Loss blocks** — `problem_from_blocks` / `problem_from_pinnloss` build the `Problem` from weighted mean-squared blocks, so loss, `rho` and residual agree by construction (and reproduce a `PINNLoss` exactly)
+- **Loss balance** — per-term gradient norms, pairwise cosines, step shares and learning-rate-annealing factors (`gradient_conflict`); per-term NTK convergence rates and NTK-balanced weights (`term_ntk`)
+- **Causality & localisation** — residual and error profiles along time with causal weights, residual–error rank correlation (is the residual a usable error indicator?), residual concentration (top-10 % share, Gini, worst points)
+- **N-D spectra** — radially averaged spectra and the resolved bandwidth from `|E(k)|/|U(k)|` on grids of any dimension (`radial_spectrum`, `spectral_error`)
+- **Any architecture** — `generic_hidden_fn` captures every submodule's output (PirateNet, KANs, PINNsFormer, PINNMamba, your own), so the representation diagnostics are not limited to Dense chains
+- **Findings** — `interpret(res)` turns the numbers into ranked findings (severity, evidence, suggested action); `to_markdown` formats them
+- **`run_checkpoint(problem, params, cfg=Config(...))`** runs them all, skips (with the reason) any that the `Problem` cannot support, and writes `ckpt_<step>.json` + `.npz` and `findings_<step>.md`. See the [Diagnostics guide](https://docs.underpinn.dev/diagnostics.html)
 
 ### Benchmark Suite
 - One command (`python -m underPINN bench`) runs all registered problems across multiple epoch budgets
@@ -696,7 +711,10 @@ underPINN/
 │   ├── mlp.py             # MLP, FourierMLP
 │   ├── fbpinn.py          # FBPINN (domain-decomposed network), StackedFBPINN (model-parallel layout)
 │   ├── attention.py       # HybridAttention, SimpleGate
-│   ├── embeddings.py      # Fourier / positional embeddings
+│   ├── embeddings.py      # Fourier / positional embeddings, PeriodicInput (exact periodicity)
+│   ├── kan.py             # ChebyKAN, BSplineKAN (PIKANs), refine_bspline_kan
+│   ├── pirate.py          # PirateNet, pirate_output_init
+│   ├── sequence.py        # PINNsFormer, PINNMamba (pseudo-time sequence models)
 │   ├── subdomain.py       # SubdomainNetwork
 │   ├── operators.py       # FNO1D, FNO2D, DeepONet1D, CVit, cvit_grid_predict
 │   └── factory.py         # build_model / network_config — single model-building path
@@ -718,6 +736,7 @@ underPINN/
 │   ├── euler_1d_unsteady.py  # 1-D unsteady Euler (Sod) — learnable artificial viscosity
 │   ├── pipe_flow_unsteady.py # Unsteady pipe cross-section  (y, z, t) → u
 │   ├── k_epsilon.py       # RANS k-ε turbulence model
+│   ├── failure_modes.py   # convection, reaction, Allen–Cahn benchmarks
 │   └── ode.py             # Exponential decay, Harmonic oscillator
 │
 ├── geometry/
@@ -761,19 +780,24 @@ underPINN/
 │   ├── resample.py        # rar_d_resample, rar_d_resample_split  (RAR-D adaptive collocation)
 │   ├── natural_gradient.py # train_gauss_newton — L-M-damped Gauss-Newton / natural-gradient training
 │   ├── parallel.py        # DataParallel  (split batches across devices)
+│   ├── strategies.py      # causal_pde_loss, grad_norm_weights, ema_update, lbfgs_refine
 │   └── model_parallel.py  # ModelParallel  (split FBPINN subdomains across devices)
 │
 ├── diagnostics/           # method-agnostic training & network diagnostics (docs/diagnostics.md)
-│   ├── core.py            # Problem adapter, param_groups, flax_hidden_fn
+│   ├── core.py            # Problem adapter, param_groups, flax_hidden_fn, generic_hidden_fn
+│   ├── blocks.py          # LossBlock, problem_from_blocks, problem_from_pinnloss
+│   ├── balance.py         # gradient_conflict, term_ntk, block_jacobian
+│   ├── profile.py         # residual / error profiles, causal weights, concentration, correlation
 │   ├── monitor.py         # TrainingMonitor, best_so_far, iterations_to
 │   ├── curvature.py       # sharpness, n_eps, kappa_10, Jacobi scaling, Gauss-Newton fidelity
 │   ├── kernel.py          # residual NTK, drift
 │   ├── landscape.py       # filter-normalised 1-D / 2-D slices, extrema count
 │   ├── representation.py  # feature_gram, erank, saturation, linear_probe, linear_cka, ablation
 │   ├── design.py          # output_layer_refit, refit_pruning, offgrid_residual_ratio
-│   ├── spectral.py        # amplitude_spectrum, energy_fraction_below
+│   ├── spectral.py        # amplitude / radial spectra, energy_fraction_below, spectral_error
 │   ├── modal.py           # sine coefficients, modal error, modal tangent kernel
-│   └── report.py          # run_checkpoint + Config (all checkpoint diagnostics -> json/npz)
+│   ├── advice.py          # interpret, Finding, to_markdown (rules -> findings)
+│   └── report.py          # run_checkpoint + Config (all checkpoint diagnostics -> json/npz/md)
 │
 ├── config/
 │   └── loader.py          # load_config, generate_sweep_configs, cfg_get
@@ -806,6 +830,7 @@ examples/                  # self-contained: each folder holds script + YAML
 │                          # Adding a new case = create folder + add 1 line to dispatch.py
 ├── PINNs/                 # collocation-based PINN examples
 │   ├── burgers/           burgers.py  +  config.yaml            (1-D Burgers FBPINN + RBA)
+│   │                      config_{piratenet,pinnsformer,pinnmamba}.yaml  (same case, other networks)
 │   ├── wave/              wave.py     +  config.yaml            (1-D wave FourierMLP)
 │   ├── heat/              forward.py  +  heat_forward.yaml      (2-D steady heat / Poisson)
 │   │                      inverse.py  +  heat_inverse.yaml      (recover α from noisy data)
@@ -865,6 +890,7 @@ resolves a problem name to its script via `underPINN/runner/dispatch.py`.
 | Harmonic Oscillator | d²u/dt² + ω²u = 0 | MLP [1,32,32,1] | `ODESolver`, IC derivative | `examples/PINNs/ode/config.yaml` |
 | FBPINN ODE | du/dx = cos(ω x) | FBPINN — 15 subnets [1,16,16,1] | Overlapping subdomains + partition-of-unity windows, hard IC constraint | `examples/PINNs/fbpinn_ode/config.yaml` |
 | 1-D Burgers | u_t + uu_x = νu_xx | MLP [2,64,64,64,1] | FBPINN, RBA, cosine LR | `examples/PINNs/burgers/config.yaml` |
+| 1-D Burgers, new networks | u_t + uu_x = νu_xx | PirateNet / PINNsFormer / PINNMamba | Same case, only `network.type` changes | `examples/PINNs/burgers/config_{piratenet,pinnsformer,pinnmamba}.yaml` |
 | 1-D Heat — Forward | u_t = αu_xx | MLP [2,64,64,64,1] | `FBPINNSolver`, exact Gaussian IC | `examples/PINNs/heat/heat_forward.yaml` |
 | 1-D Heat — Inverse | u_t = αu_xx | MLP [2,64,64,64,1] | Recover α from 50 noisy observations | `examples/PINNs/heat/heat_inverse.yaml` |
 | 1-D Wave | u_tt = c²u_xx | FourierMLP [2,128,128,1] | Dual IC (u and u_t), n_fourier=32 | `examples/PINNs/wave/config.yaml` |

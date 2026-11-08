@@ -63,16 +63,18 @@ class Pipe:
   - `BasePDE`, `BaseLoss`, `BaseSolver`, `TrainingConfig`
 * - `nn/`
   - `MLP`, `GatedMLP`, `FourierMLP`, `FBPINN`, `StackedFBPINN` (FBPINN laid out for
-    model parallelism), `HybridAttention`, `SimpleGate`,
+    model parallelism), `HybridAttention`, `SimpleGate`; `ChebyKAN`, `BSplineKAN`
+    (PIKANs), `PirateNet`, `PINNsFormer`, `PINNMamba`, `PeriodicInput`;
     `FNO1D`, `FNO2D`, `DeepONet1D`, `CViT`, `factory.py` (single model-building path)
 * - `pde/`
   - Burgers, Wave, Helmholtz, Heat, N-S 2-D/3-D (steady + unsteady), Carreau N-S,
-    k-ε, Euler (2-D ramp + 1-D Sod/Toro3), ODE, operator-grid residuals
+    k-ε, Euler (2-D ramp + 1-D Sod/Toro3), ODE, operator-grid residuals; convection,
+    reaction and Allen–Cahn failure-mode benchmarks
 * - `solver/`
   - `FBPINNSolver`, `SteadySolver`, `ODESolver`, `LDCSolver`, `RANSSolver`,
     `OperatorSolver`, `DeepONetSolver`
 * - `losses/`
-  - `PINNLoss` (with RBA), `ODELoss`, `SteadyLoss`, `OperatorLoss`, `DeepONetLoss`
+  - `PINNLoss` (RBA, periodic BC, initial velocity), `ODELoss`, `SteadyLoss`, `OperatorLoss`, `DeepONetLoss`
 * - `callbacks/`
   - `ConsoleLogger`, `EarlyStopping`, `ModelCheckpoint`
 * - `geometry/`
@@ -82,12 +84,16 @@ class Pipe:
   - `rar_d_resample`, `rar_d_resample_split` (RAR-D adaptive collocation);
     `train_gauss_newton` (L-M-damped Gauss-Newton / natural-gradient training);
     `make_data_parallel`, `data_parallel_from_cfg` (data parallelism);
-    `make_model_parallel`, `model_parallel_from_cfg` (FBPINN model parallelism)
+    `make_model_parallel`, `model_parallel_from_cfg` (FBPINN model parallelism);
+    `causal_pde_loss`, `grad_norm_weights`, `ema_update`, `lbfgs_refine` (training
+    strategies)
 * - `diagnostics/`
   - `Problem` adapter, `TrainingMonitor`, `run_checkpoint` + `Config`; curvature (sharpness,
     effective dimension, κ₁₀, Gauss–Newton fidelity), residual NTK, loss slices,
     representation (erank, probes, CKA), output-layer refit and refit-pruning, error spectra,
-    modal analysis — see {doc}`diagnostics`
+    modal analysis; loss blocks (`problem_from_blocks`, `problem_from_pinnloss`), loss
+    balance, causality and localisation profiles, N-D spectral error, rule-based findings
+    (`interpret`) — see {doc}`diagnostics`
 * - `config/`
   - `load_config`, `generate_sweep_configs`, `cfg_get`
 * - `runner/`
@@ -114,7 +120,10 @@ underPINN/
 │   ├── mlp.py             # MLP, FourierMLP
 │   ├── fbpinn.py          # FBPINN (domain-decomposed network), StackedFBPINN
 │   ├── attention.py       # HybridAttention, SimpleGate
-│   ├── embeddings.py      # Fourier / positional embeddings
+│   ├── embeddings.py      # Fourier / positional embeddings, PeriodicInput
+│   ├── kan.py             # ChebyKAN, BSplineKAN (PIKANs), refine_bspline_kan
+│   ├── pirate.py          # PirateNet, pirate_output_init
+│   ├── sequence.py        # PINNsFormer, PINNMamba (pseudo-time sequence models)
 │   ├── subdomain.py       # SubdomainNetwork
 │   ├── operators.py       # FNO1D, FNO2D, DeepONet1D, CVit, cvit_grid_predict
 │   └── factory.py         # build_model / network_config — single model-building path
@@ -136,6 +145,7 @@ underPINN/
 │   ├── euler_1d_unsteady.py   # 1-D unsteady Euler (Sod) — learnable artificial viscosity
 │   ├── pipe_flow_unsteady.py  # Unsteady pipe cross-section  (y, z, t) → u
 │   ├── k_epsilon.py           # RANS k-ε turbulence model
+│   ├── failure_modes.py       # Convection, reaction, Allen–Cahn benchmarks
 │   └── ode.py                 # Exponential decay, Harmonic oscillator
 │
 ├── geometry/
@@ -158,7 +168,7 @@ underPINN/
 │   └── operator.py         # OperatorSolver (FNO/CViT), DeepONetSolver
 │
 ├── losses/
-│   ├── loss.py              # PINNLoss  (with optional RBA)
+│   ├── loss.py              # PINNLoss  (optional RBA, periodic BC, initial velocity)
 │   ├── ode_loss.py          # ODELoss
 │   ├── steady_loss.py       # SteadyLoss
 │   └── operator_loss.py     # OperatorLoss (data+PDE+warmup+RBA), DeepONetLoss
@@ -179,19 +189,24 @@ underPINN/
 │   ├── resample.py           # rar_d_resample, rar_d_resample_split  (RAR-D adaptive collocation)
 │   ├── natural_gradient.py   # train_gauss_newton  (L-M-damped Gauss-Newton / natural gradient)
 │   ├── parallel.py           # DataParallel  (split batches across devices)
+│   ├── strategies.py         # causal_pde_loss, grad_norm_weights, lbfgs_refine
 │   └── model_parallel.py     # ModelParallel  (split FBPINN subdomains across devices)
 │
 ├── diagnostics/              # method-agnostic training & network diagnostics
-│   ├── core.py               # Problem adapter, param_groups, flax_hidden_fn
+│   ├── core.py               # Problem adapter, param_groups, flax_hidden_fn, generic_hidden_fn
+│   ├── blocks.py             # LossBlock, problem_from_blocks, problem_from_pinnloss
+│   ├── balance.py            # gradient_conflict, term_ntk, block_jacobian
+│   ├── profile.py            # residual / error profiles, causal weights, concentration
 │   ├── monitor.py            # TrainingMonitor, best_so_far, iterations_to
 │   ├── curvature.py          # sharpness, n_eps, kappa_10, Jacobi scaling, Gauss-Newton fidelity
 │   ├── kernel.py             # residual NTK, drift
 │   ├── landscape.py          # filter-normalised 1-D / 2-D slices, extrema count
 │   ├── representation.py     # feature_gram, erank, saturation, linear_probe, linear_cka, ablation
 │   ├── design.py             # output_layer_refit, refit_pruning, offgrid_residual_ratio
-│   ├── spectral.py           # amplitude_spectrum, energy_fraction_below
+│   ├── spectral.py           # amplitude / radial spectra, energy_fraction_below, spectral_error
 │   ├── modal.py              # sine coefficients, modal error, modal tangent kernel
-│   └── report.py             # run_checkpoint + Config (all checkpoint diagnostics -> json/npz)
+│   ├── advice.py             # interpret, Finding, to_markdown (rules -> findings)
+│   └── report.py             # run_checkpoint + Config (all checkpoint diagnostics -> json/npz/md)
 │
 ├── config/
 │   └── loader.py             # load_config, generate_sweep_configs, cfg_get

@@ -76,6 +76,18 @@ its governing equation, and the examples that use it.
   - `d²u/dt² + ω²u = 0`
   - `HarmonicODE.residual`
   - `examples/PINNs/ode/`
+* - Convection (1-D, periodic)
+  - `u_t + βu_x = 0`, exact `sin(x − βt)`
+  - `ConvectionPDE.residual`
+  - benchmark (`underPINN.pde.failure_modes`)
+* - Reaction (1-D, periodic)
+  - `u_t − ρu(1 − u) = 0`, exact logistic solution
+  - `ReactionPDE.residual`
+  - benchmark (`underPINN.pde.failure_modes`)
+* - Allen–Cahn (1-D, periodic)
+  - `u_t − εu_xx + κ(u³ − u) = 0`
+  - `AllenCahnPDE.residual`
+  - benchmark (`underPINN.pde.failure_modes`)
 * - Burgers grid (1-D, FNO)
   - `u_t + uu_x = νu_xx` (FD residual)
   - `BurgersGrid1D.residual`

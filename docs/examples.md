@@ -58,6 +58,12 @@ organisational, not behavioural.
   - MLP `[2,64,64,64,1]`
   - FBPINN, RBA, cosine LR
   - `examples/PINNs/burgers/config.yaml`
+* - 1-D Burgers, other networks
+  - `u_t + uu_x = νu_xx`
+  - PirateNet / PINNsFormer / PINNMamba
+  - Same case; only `network.type` and its hyperparameters change
+  - `examples/PINNs/burgers/config_piratenet.yaml`, `config_pinnsformer.yaml`,
+    `config_pinnmamba.yaml`
 * - 1-D Heat — Forward
   - `u_t = αu_xx`
   - MLP `[2,64,64,64,1]`

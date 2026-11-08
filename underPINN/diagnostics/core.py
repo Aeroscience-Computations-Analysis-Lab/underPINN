@@ -67,6 +67,7 @@ class Problem:
     hidden_fn: Optional[Callable] = None
     group_fn: Callable = default_group
     name: str = "problem"
+    blocks: Optional[Dict[str, Any]] = None     # {name: LossBlock}; set by problem_from_blocks
 
     def terms(self, params) -> Dict[str, jnp.ndarray]:
         return self.loss_terms_fn(params, self.batch)
@@ -113,4 +114,43 @@ def flax_hidden_fn(model, act: Callable = jnp.tanh, input_transform: Optional[Ca
         inter = state["intermediates"]
         names = sorted((k for k in inter if k.startswith("Dense_")), key=lambda s: int(s.split("_")[1]))
         return {n: (inter[n]["__call__"][0], act(inter[n]["__call__"][0])) for n in names[:-1]}
+    return fn
+
+
+def generic_hidden_fn(model, input_transform: Optional[Callable] = None,
+                      include: Optional[Callable[[str], bool]] = None, max_layers: int = 64):
+    """``hidden_fn`` for *any* flax network: the output of every submodule call.
+
+    Uses flax ``capture_intermediates``, so it works for PirateNet, KANs, transformers and
+    state-space models as well as MLPs. Each captured output with a leading batch axis is
+    flattened to ``(N, features)`` (token axes are folded into features). The network's own
+    output is excluded, including the submodule that produces it (an MLP's last Dense, a
+    PirateNet head); ``include(path)`` filters by the '/'-joined module path.
+
+    Returns ``{path: (h, h)}``. Pre-activations are not identifiable for a general module, so
+    ``z`` is the module output itself: effective rank, probes, CKA and singular values are
+    exact; ``saturation`` then measures |output| > threshold rather than pre-activation size.
+    """
+    def fn(params, x):
+        xin = x if input_transform is None else input_transform(x)
+        n = xin.shape[0]
+        y, state = model.apply(params, xin, capture_intermediates=True, mutable=["intermediates"])
+        out = {}
+
+        def walk(d, prefix):
+            for k, v in d.items():
+                path = f"{prefix}/{k}" if prefix else str(k)
+                if k == "__call__":
+                    for i, a in enumerate(v):
+                        if (hasattr(a, "shape") and a.ndim >= 2 and a.shape[0] == n and prefix
+                                and a is not y):           # the output layer is not hidden
+                            name = prefix if len(v) == 1 else f"{prefix}#{i}"
+                            if include is None or include(name):
+                                h = jnp.reshape(a, (n, -1))
+                                out[name] = (h, h)
+                elif isinstance(v, dict):
+                    walk(v, path)
+        walk(dict(state["intermediates"]), "")
+        out.pop("", None)
+        return dict(list(out.items())[:max_layers])
     return fn

@@ -70,7 +70,7 @@ class TrainingMonitor:
         self._jac = jax.jit(jax.jacrev(terms_vec)) if grad_terms else None
         self._prev = self.flat0
         self.rec: Dict[str, List] = {"step": [], "wall": [], "terms": [], "grad_term": [], "update": [],
-                                     "dist0": [], "grad_layer": [], "train_loss": []}
+                                     "dist0": [], "grad_layer": [], "train_loss": [], "grad_cos_min": []}
         self.best_loss, self.best_step, self.best_flat = float("inf"), -1, self.flat0
         self._t0 = time.time()
 
@@ -98,7 +98,13 @@ class TrainingMonitor:
         self.rec["train_loss"].append(np.nan if train_loss is None else float(train_loss))
         if self._jac is not None:
             Jt = np.asarray(self._jac(flat), np.float64)                      # (n_terms, P)
-            self.rec["grad_term"].append(np.linalg.norm(Jt, axis=1))
+            nrm = np.linalg.norm(Jt, axis=1)
+            self.rec["grad_term"].append(nrm)
+            if len(nrm) > 1:                      # most negative pairwise cosine: term conflict
+                C = (Jt @ Jt.T) / np.outer(np.maximum(nrm, 1e-300), np.maximum(nrm, 1e-300))
+                self.rec["grad_cos_min"].append(float(C[np.triu_indices(len(nrm), 1)].min()))
+            else:
+                self.rec["grad_cos_min"].append(1.0)
             g = Jt.sum(0)
             self.rec["grad_layer"].append([float(np.linalg.norm(g[np.asarray(m)])) for m in self.groups.values()])
         self._prev = flat

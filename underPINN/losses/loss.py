@@ -31,14 +31,27 @@ class PINNLoss(BaseLoss):
         reg_weight=0.0,
         rba=False,
         rba_eps=1e-6,
+        ic_velocity_weight=0.0,
+        periodic_length=None,
     ):
+        """
+        ic_velocity_weight : weight of an extra initial condition u_t(x, 0) = 0
+            (second-order-in-time problems such as the wave equation started
+            from rest); added to the IC term. 0 disables it (default).
+        periodic_length : if set to L, the boundary term enforces periodicity
+            u(x_b, t_b) = u(x_b + L, t_b) instead of Dirichlet values -- pass
+            the left-boundary points as x_b; u_b is ignored. None (default)
+            keeps the Dirichlet term.
+        """
         self.model = model
         self.pde = pde
         self.ic_weight = ic_weight
-        self.bc_weight = bc_weight   
+        self.bc_weight = bc_weight
         self.reg_weight = reg_weight
         self.rba = rba
         self.rba_eps = rba_eps
+        self.ic_velocity_weight = ic_velocity_weight
+        self.periodic_length = periodic_length
 
 
         if loss_type == "l2":
@@ -74,13 +87,24 @@ class PINNLoss(BaseLoss):
             params, jnp.stack([x_i, jnp.zeros_like(x_i)], axis=1)
         )[:, 0]
         ic_loss = self.norm(u_pred - u_i)
+        if self.ic_velocity_weight:
+            def u_of_t(x, t):
+                return self.model.apply(params, jnp.stack([x, t])[None, :])[0, 0]
+            ut0 = jax.vmap(jax.grad(u_of_t, argnums=1))(x_i, jnp.zeros_like(x_i))
+            ic_loss = ic_loss + self.ic_velocity_weight * self.norm(ut0)
 
         # ---------- Boundary condition ----------
         if x_b is not None:
             u_b_pred = self.model.apply(
                 params, jnp.stack([x_b, t_b], axis=1)
             )[:, 0]
-            bc_loss = self.norm(u_b_pred - u_b)
+            if self.periodic_length is not None:
+                u_b_pair = self.model.apply(
+                    params, jnp.stack([x_b + self.periodic_length, t_b], axis=1)
+                )[:, 0]
+                bc_loss = self.norm(u_b_pred - u_b_pair)
+            else:
+                bc_loss = self.norm(u_b_pred - u_b)
         else:
             bc_loss = 0.0
 

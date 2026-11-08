@@ -116,7 +116,35 @@ multiple calls.
   - Overlapping subdomain decomposition with sigmoid partition-of-unity windows.
     `HybridAttention` and `SimpleGate` gated residual blocks live inside each
     subdomain for complex geometries.
+* - **ChebyKAN / BSplineKAN** (PIKANs)
+  - Kolmogorov–Arnold networks: a learnable 1-D function on every edge. ChebyKAN uses
+    a Chebyshev series in `tanh x` (`network.type: chebykan`, `degree`); BSplineKAN
+    uses B-splines plus a SiLU base (`network.type: kan`, `grid_size`,
+    `spline_order`, `grid_range`). Same `layers` list as `MLP`; scale inputs to about
+    [−1, 1]. `refine_bspline_kan` moves a checkpoint onto a finer spline grid between
+    runs.
+* - **PirateNet**
+  - Residual adaptive network (Wang et al., JMLR 2024; `network.type: piratenet`;
+    `width`, `n_blocks`, `fourier_scale`, `rwf`). Fourier features, U/V gates and
+    residual blocks whose skip weights start at 0, so the network starts linear in its
+    features. `pirate_output_init` fits the output layer to the initial condition by
+    least squares.
+* - **PINNsFormer / PINNMamba**
+  - Sequence models over a short pseudo-time window built inside the network
+    (`network.type: pinnsformer` / `pinnmamba`; `k`, `dt`, `time_index`): a
+    transformer encoder–decoder with wavelet activations, or Mamba state-space blocks.
+    The point contract `(N, D) → (N, out)` is unchanged, so every PDE, loss and solver
+    works as is. PINNMamba is memory-heavy: about 3.3 GB of XLA temporaries per step
+    for the Burgers config at `batch_r: 2048`.
+* - **PeriodicInput**
+  - Wraps any network so chosen inputs enter as (cos, sin). The result is exactly
+    periodic in them, derivatives included, so periodic boundary conditions hold by
+    construction.
 ```
+
+`examples/PINNs/burgers/` has a config for PirateNet, PINNsFormer and PINNMamba
+(`config_piratenet.yaml`, `config_pinnsformer.yaml`, `config_pinnmamba.yaml`). Only
+the `network` block and the output directory differ from `config.yaml`.
 
 ```{seealso}
 Neural operators (FNO, DeepONet, CViT) live in a separate family — see
@@ -280,8 +308,8 @@ The examples all use the same three calls; a custom loop can do the same:
 ```python
 from underPINN.training import data_parallel_from_cfg
 
-dp = data_parallel_from_cfg(cfg.training)        # inert unless data_parallel: true;
-                                                 # honours data_parallel_devices
+# inert unless data_parallel: true; honours data_parallel_devices
+dp = data_parallel_from_cfg(cfg.training)
 # after any restart-restore, so restored params get replicated too:
 params, opt_state = dp.prepare(params, opt_state,
                                {"batch_r": batch_r, "batch_bc": batch_bc})
@@ -336,11 +364,12 @@ reference to it):
 ```python
 from underPINN.training import model_parallel_from_cfg
 
-mp    = model_parallel_from_cfg(cfg.training)     # inert unless model_parallel: true
-model = mp.wrap(FBPINN(...))                       # -> StackedFBPINN, padded for D
+mp = model_parallel_from_cfg(cfg.training)   # inert unless model_parallel
+model = mp.wrap(FBPINN(...))                 # -> StackedFBPINN, padded for D
 pde   = MyPDE(model, ...)
 params = model.init(key, x0)
-params, opt_state = mp.prepare(params, opt.init(params), model=model)  # after restore
+# after any restore:
+params, opt_state = mp.prepare(params, opt.init(params), model=model)
 ...
 save_checkpoint(mp.export(model, params), out_dir)  # ordinary FBPINN layout
 ```
@@ -446,7 +475,7 @@ new_points = qr_deim_resample(
     pde, params, sampler,
     n_keep=20000,          # collocation batch size
     n_candidates=200000,   # candidate pool to select from
-    augment_coords=True,   # add residual-scaled coordinates to the feature basis
+    augment_coords=True,   # residual-scaled coordinates join the feature basis
 )
 ```
 
@@ -535,9 +564,8 @@ final_params, loss_hist, damping_hist = train_gauss_newton(
 **Scoped to small networks.** The step performs an explicit dense solve costing
 $O(n_\text{params}^3)$, so it is practical only for networks in the low hundreds to
 a few thousand parameters. It is *not* a replacement for the Adam-based solvers on
-the large 3-D or compressible-flow benchmarks — for those, `optax.lbfgs`
-limited-memory quasi-Newton refinement *after* Adam is the scalable second-order
-option.
+the large 3-D or compressible-flow benchmarks — for those, L-BFGS refinement
+*after* Adam (`lbfgs_refine`, below) is the scalable second-order option.
 ```
 
 ```{note}
@@ -549,6 +577,82 @@ and the whole traced body runs under forced `jax.default_matmul_precision("float
 make the Jacobian wrong in exactly the low-order digits Newton's method depends on.
 See {doc}`performance` for the precision naming caveat.
 ```
+
+## Loss options and training strategies
+
+`underPINN.training.strategies` has three standard PINN strategies. They work with any
+network and any loss function.
+
+### Causal weighting
+
+`causal_pde_loss` (Wang, Sankaran & Perdikaris 2022) splits the collocation points into
+`n_bins` time slices by their time coordinate. It weights slice *k*'s mean squared
+residual {math}`L_k` by {math}`w_k=\exp(-\varepsilon\sum_{j<k}L_j)`, with no gradient
+through {math}`w`. Late slices only count once earlier ones are resolved. This prevents
+the network from fitting late times to a wrong early state, the failure mode of
+transport problems.
+
+```python
+from underPINN.training.strategies import causal_pde_loss
+
+res = pde.residual(params, xt)          # (N,) residual at the (x, t) points
+loss_pde, w, L = causal_pde_loss(res, xt[:, 1], t_range=(0.0, 1.0),
+                                 n_bins=32, eps=1.0)
+```
+
+Watch `w.min()`: once it is close to 1, every slice is being trained. A larger `eps`
+enforces the ordering more strictly.
+
+### Gradient-norm loss balancing
+
+`grad_norm_weights` returns
+{math}`\lambda_i=\sum_j\lVert\nabla L_j\rVert/\lVert\nabla L_i\rVert` for the
+unweighted terms, so every weighted term pulls with the same gradient magnitude.
+Recompute it every few hundred to a thousand steps and smooth it with `ema_update`:
+
+```python
+from underPINN.training.strategies import ema_update, grad_norm_weights
+
+def terms(p):                           # unweighted loss terms
+    return {"pde": pde_loss(p), "ic": ic_loss(p), "bc": bc_loss(p)}
+
+lam = {"pde": 1.0, "ic": 1.0, "bc": 1.0}
+lam = ema_update(lam, grad_norm_weights(terms, params, list(lam)), 0.9)
+total = sum(lam[k] * v for k, v in terms(params).items())
+```
+
+### L-BFGS refinement
+
+`lbfgs_refine` runs optax L-BFGS with a zoom line search on a fixed, deterministic
+loss. This is the usual finishing phase after Adam. It stops at `max_iters`, at the
+`time_budget` in seconds (compilation excluded), after `patience` steps without
+improvement, or on a non-finite loss, and returns the best iterate:
+
+```python
+from underPINN.training.strategies import lbfgs_refine
+
+def loss_fn(p):                         # fixed points: deterministic
+    return loss(p, x_r, t_r, x_i, u_i, x_b, t_b, u_b)[0]
+
+params, hist = lbfgs_refine(loss_fn, params, max_iters=2000,
+                            time_budget=600.0)
+print(hist["iters"], hist["best"])      # also hist["loss"], hist["seconds"]
+```
+
+### Periodic and initial-velocity conditions in `PINNLoss`
+
+```python
+from underPINN.losses.loss import PINNLoss
+
+loss = PINNLoss(model, pde, ic_weight=100.0,
+                periodic_length=2 * jnp.pi,  # BC: u(x_b, t) = u(x_b + L, t)
+                ic_velocity_weight=1.0)      # IC term gains u_t(x, 0) = 0
+```
+
+With `periodic_length` set, pass the left-boundary points as `x_b`; `u_b` is ignored.
+`ic_velocity_weight` is for second-order-in-time problems started from rest, such as
+the wave equation. For exact periodicity instead of a penalty, wrap the network in
+`PeriodicInput`.
 
 ## Callbacks
 

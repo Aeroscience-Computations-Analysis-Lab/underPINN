@@ -24,7 +24,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax.flatten_util import ravel_pytree
 
-from . import curvature, design, kernel, landscape, representation, spectral
+from . import advice, balance, curvature, design, kernel, landscape, profile, representation, spectral
 from .core import Problem, param_groups
 
 
@@ -49,6 +49,17 @@ class Config:
                                       # spectrum when x_dense is a uniform 1-D grid); needs Problem.apply_fn
     residual_weights: Any = None
     full_hessian_max: int = 3000      # exact Hessian (spectrum, Jacobi scaling, Gauss-Newton) when P <= this
+    # ── loss balance, causality, localisation, spectra, interpretation ──────────────────────
+    grad_conflict: bool = True        # per-term gradient norms / cosines / LRA factors (cheap)
+    term_ntk: int = 0                 # points per block for the per-term NTK (needs Problem.blocks; 0 = skip)
+    profile_axis: Optional[int] = None  # coordinate to profile residual/error along (e.g. -1 = time); None = skip
+    profile_x: Any = None             # points for profiles / localisation (default: x_dense)
+    profile_bins: int = 20
+    causal_eps: Optional[float] = None  # adds causal weights w_k = exp(-eps sum_{j<k} L_j) to the profile
+    grid_shape: Optional[tuple] = None  # x_dense is a C-ordered grid of this shape -> N-D spectral error
+    grid_spacings: Any = None
+    lr: Optional[float] = None        # learning rate, for the stability rule in the findings
+    interpret: bool = True            # attach res["findings"] (see advice.interpret)
 
 
 def _run(res, name, fn):
@@ -169,8 +180,45 @@ def run_checkpoint(problem: Problem, params, params0=None, ntk0=None, cfg: Optio
             return out
         _run(res, "error", err)
 
+    # ── loss balance ───────────────────────────────────────────────────────────────────────
+    if cfg.grad_conflict:
+        _run(res, "gradient_conflict", lambda: balance.gradient_conflict(problem, params))
+    if cfg.term_ntk:
+        _run(res, "term_ntk", lambda: balance.term_ntk(problem, params, cfg.term_ntk))
+    # ── causality and localisation ─────────────────────────────────────────────────────────
+    xp = cfg.profile_x if cfg.profile_x is not None else cfg.x_dense
+    if xp is not None and cfg.profile_axis is not None:
+        _run(res, "residual_profile", lambda: profile.residual_profile(
+            problem, params, xp, cfg.profile_axis, cfg.profile_bins, cfg.causal_eps))
+        if cfg.reference_fn is not None:
+            _run(res, "error_profile", lambda: profile.error_profile(
+                problem, params, xp, cfg.reference_fn, cfg.profile_axis, cfg.profile_bins))
+    if xp is not None:
+        _run(res, "residual_concentration", lambda: profile.residual_concentration(problem, params, xp))
+        if cfg.reference_fn is not None:
+            _run(res, "residual_error_correlation", lambda: profile.residual_error_correlation(
+                problem, params, xp, cfg.reference_fn))
+    # ── N-D spectral error (spectral bias as a bandwidth) ──────────────────────────────────
+    if cfg.x_dense is not None and cfg.reference_fn is not None and cfg.grid_shape is not None:
+        def spec():
+            if problem.apply_fn is None:
+                raise ValueError("needs Problem.apply_fn")
+            xd = jnp.asarray(cfg.x_dense)
+            u = np.asarray(problem.apply_fn(params, xd), np.float64).reshape(cfg.grid_shape)
+            ref = np.asarray(cfg.reference_fn(xd), np.float64).reshape(cfg.grid_shape)
+            return spectral.spectral_error(u, ref, cfg.grid_spacings)
+        _run(res, "spectral_error", spec)
+    if cfg.interpret:
+        def interp():
+            f = advice.interpret(res, lr=cfg.lr)
+            res["findings_md"] = advice.to_markdown(f)
+            return [vars(x) for x in f]
+        _run(res, "findings", interp)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
+        if "findings_md" in res:
+            with open(os.path.join(out_dir, f"findings_{step:07d}.md"), "w") as fh:
+                fh.write(res["findings_md"])
         np.savez_compressed(os.path.join(out_dir, f"ckpt_{step:07d}.npz"), **_flatten(res))
         with open(os.path.join(out_dir, f"ckpt_{step:07d}.json"), "w") as fh:
             json.dump(_jsonable(res), fh, indent=1)

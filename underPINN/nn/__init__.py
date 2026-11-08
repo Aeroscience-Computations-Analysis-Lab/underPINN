@@ -13,6 +13,9 @@ from underPINN.nn.mlp import (
     TemporalFourierMLP,
     SIREN,
 )
+from underPINN.nn.kan import ChebyKAN, BSplineKAN, refine_bspline_kan
+from underPINN.nn.pirate import PirateNet, pirate_output_init
+from underPINN.nn.sequence import PINNsFormer, PINNMamba
 from underPINN.nn.fbpinn import (
     FBPINN,
     StackedFBPINN,
@@ -35,6 +38,13 @@ __all__ = [
     "FourierMLP",
     "TemporalFourierMLP",
     "SIREN",
+    "ChebyKAN",
+    "BSplineKAN",
+    "refine_bspline_kan",
+    "PirateNet",
+    "pirate_output_init",
+    "PINNsFormer",
+    "PINNMamba",
     "FBPINN",
     "StackedFBPINN",
     "stack_fbpinn_params",

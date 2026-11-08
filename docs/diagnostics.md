@@ -163,6 +163,49 @@ compares the two before any diagnostic relies on them. A mismatch raises a `Valu
 naming both values, instead of returning a silently wrong answer.
 ```
 
+### Building a `Problem` from loss blocks
+
+Writing `loss_terms_fn` and `rho_fn` by hand is the easiest way to get a silently wrong
+curvature number. Describe the loss as weighted mean-squared **blocks** instead, and the
+loss, `rho` and the PDE residual are derived from one definition:
+
+```python
+from underPINN import diagnostics as dg
+
+def u(p, xt):                   # (N, 2) points -> (N,) network output
+    return model.apply(p, xt)[:, 0]
+
+def misfit(p, z):               # z = [x, t, target]
+    return u(p, z[:, :2]) - z[:, 2]
+
+blocks = {
+    "pde": dg.LossBlock(pde.residual, xt_r, weight=1.0),
+    "ic": dg.LossBlock(misfit, ic_points, weight=100.0),
+    "bc": dg.LossBlock(misfit, bc_points, weight=10.0),
+}
+problem = dg.problem_from_blocks(blocks, residual_block="pde", apply_fn=u)
+```
+
+Each block contributes `weight · mean(fn(params, points)**2)`. Row *i* of `fn` must depend
+only on `points[i]`, which holds for every PINN residual. Targets can ride along as extra
+columns of `points`. For underPINN's `PINNLoss`, one call reproduces the training loss:
+
+```python
+problem = dg.problem_from_pinnloss(loss, x_r, t_r, x_i, u_i, x_b, t_b, u_b)
+```
+
+This handles the IC, BC, initial-velocity (`ic_velocity_weight`) and periodic
+(`periodic_length`) terms. RBA and weight regularisation are not sums of fixed squares; they
+are left out with a warning.
+
+Blocks also enable the per-term NTK (`term_ntk`, see *Loss balance, causality and
+localisation* below).
+
+For networks that are not plain Dense chains (PirateNet, KANs, PINNsFormer, PINNMamba, or
+your own), use `dg.generic_hidden_fn(model)`. It captures every submodule's output through
+flax `capture_intermediates`, leaving out the layer that produces the network output, so
+the representation diagnostics work for any architecture.
+
 ## Diagnostics checklist
 
 In the "Where" column, ★ marks quantities logged during training by `TrainingMonitor`. The
@@ -244,6 +287,30 @@ other rows come from `run_checkpoint` or the standalone functions.
   - `modal_error`, `modal_kernel`
   - is a mode's slow convergence due to the representation (small μ_n) or the loss (small w_n)?
   - representation vs loss formulation
+* - Term-gradient conflict ★
+  - `rec["grad_cos_min"]`, `res["gradient_conflict"]`
+  - gradient norm ratio ≫ 1; negative cosines while the error is large
+  - loss weights (LRA), gradient surgery, hard constraints
+* - Per-term NTK
+  - `res["term_ntk"]` (needs blocks)
+  - effective rates that differ by orders of magnitude
+  - NTK-balanced weights
+* - Residual and error along time
+  - `res["residual_profile"]`, `res["error_profile"]`
+  - late-time residual or error far above early; small causal weights
+  - causal training, time marching
+* - Residual concentration and residual–error correlation
+  - `res["residual_concentration"]`, `res["residual_error_correlation"]`
+  - residual in a few points; does it track the error?
+  - adaptive sampling (RAR-D) or not; singularities
+* - N-D spectral error
+  - `res["spectral_error"]`
+  - resolved bandwidth far below the solution's band
+  - Fourier features, multiscale networks, FBPINN
+* - Findings
+  - `res["findings"]`, `res["findings_md"]`
+  - the rules' verdict, with evidence
+  - where to start
 ```
 
 ## Definitions
@@ -481,6 +548,97 @@ multiscale problems, so check the error against a reference.
 Adam and feature learning break the diagonal-kernel assumption. Use {math}`\mu_n w_n` to
 order the modes, not to predict iteration counts.
 
+### Loss balance, causality and localisation
+
+These diagnostics answer the questions behind most PINN failures. All of them are
+architecture-agnostic.
+
+```{list-table}
+:header-rows: 1
+:widths: 24 36 40
+
+* - Function
+  - What it measures
+  - What to look for
+* - `gradient_conflict`
+  - ‖∇Lᵢ‖ per term, pairwise cos(∇Lᵢ, ∇Lⱼ), each term's share of the update direction,
+    learning-rate-annealing factors (Wang, Teng & Perdikaris 2021)
+  - norm ratio ≫ 1: one term starves the others. Negative cosine: the terms fight; use
+    re-weighting, gradient surgery or a hard constraint.
+* - `term_ntk` *(needs blocks)*
+  - NTK restricted to each block: mean diagonal = that term's convergence speed, the
+    effective rate wᵢ·mᵢ, imbalance, NTK-balanced weights (Wang, Yu & Perdikaris 2022)
+  - imbalance ≫ 1: the slowest term will be the last satisfied, if ever.
+* - `residual_profile`
+  - mean r² binned along a coordinate (time by default), late/early growth, causal weights
+    {math}`w_k=\exp(-\varepsilon\sum_{j<k}L_j)` (Wang, Sankaran & Perdikaris 2022)
+  - growth ≫ 1 or wₖ ≪ 1: late times are trained before early times are resolved.
+* - `error_profile`
+  - relative error per bin, `early` / `late` quarter values
+  - error that accumulates while the residual *falls* is a trivial (collapsed) solution.
+* - `residual_error_correlation`
+  - Spearman rank correlation of |r| and |e| point-wise
+  - high: residual-adaptive sampling targets the right places. Low or negative: it will not.
+* - `residual_concentration`
+  - share of Σr² in the worst 10 % of points; Gini of r²
+  - concentrated residual (shocks, layers) is where adaptive sampling pays off.
+* - `radial_spectrum`, `spectral_error`
+  - radially averaged spectra on N-D grids; per-wavenumber error ratio |E(k)|/|U(k)| and the
+    resolved bandwidth
+  - a resolved bandwidth far below the solution's band means spectral bias limits accuracy.
+```
+
+`TrainingMonitor` also logs `rec["grad_cos_min"]`, the most negative pairwise cosine
+between term gradients at each logged step, which flags term conflict during training.
+
+### Automatic findings
+
+`dg.interpret(res, lr=...)` reads any diagnostics dict and returns findings. Each finding
+has a severity, the evidence, and an action; `dg.to_markdown(findings)` formats them. The
+rules and thresholds are listed in `underPINN/diagnostics/advice.py`, and every finding
+quotes the numbers it is based on. `run_checkpoint` runs the new diagnostics through these
+`Config` fields and attaches `res["findings"]` and `res["findings_md"]` (also written to
+`findings_<step>.md`):
+
+```python
+cfg = dg.Config(
+    x_dense=xt_grid, reference_fn=u_exact,
+    term_ntk=64,                # per-term NTK, points per block
+    profile_axis=-1,            # profile residual / error along time
+    causal_eps=1.0,             # add causal weights
+    grid_shape=(nx, nt),        # x_dense is this C-ordered grid,
+    grid_spacings=(dx, dt),     #   for the N-D spectral error
+    lr=1e-3,                    # enables the stability rule
+)
+res = dg.run_checkpoint(problem, params, params0=params0, cfg=cfg,
+                        out_dir="diag")
+print(res["findings_md"])
+```
+
+Example output (abridged and wrapped) for an MLP that fails the convection benchmark
+(β = 50, relative error 0.84):
+
+```text
+- [high] loss balance: 'bc' is 85% of the loss
+- [high] loss balance: loss terms pull in opposing directions
+  (min cosine -0.27)
+- [high] causality: error accumulates along time (0.12 → 1) while the
+  residual falls (rank corr -0.83)
+  - action: Trivial / collapsed solution: the network satisfies the PDE
+    where it has given up on the true solution ... Train causally (causal
+    weights, time marching, curriculum on the horizon) and enforce IC/BC
+    harder or exactly; more collocation points will not help.
+- [medium] sampling: the residual does not indicate the error
+  (Spearman -0.31)
+```
+
+On models that train well (the same problem solved by PINNsFormer, or Burgers at 1e-3
+to 5e-5 error), the same rules return only `info` notes. Opposing term gradients and a
+dominant PDE term are expected near convergence, so they are escalated only when the
+error is large or an IC/BC term dominates. Pass the overall error as `res["rel_l2"]` (or
+let `run_checkpoint` compute `res["error"]` from `reference_fn`) so the rules can tell
+the two situations apart.
+
 ## Configuration, cost and caveats
 
 ### `Config` fields
@@ -518,10 +676,33 @@ order the modes, not to predict iteration counts.
   - output Dense layer to refit (e.g. `"Dense_2"`); also refit-prune its inputs
 * - `x_dense`, `reference_fn`
   - `None`, `None`
-  - dense points for the off-grid check; exact solution for the error and its spectrum
+  - dense points for the off-grid check, profiles and localisation; exact solution for the
+    error, its spectrum and the error profile
 * - `residual_weights`
   - `None`
   - per-equation weights in the NTK
+* - `grad_conflict`
+  - `True`
+  - per-term gradient norms, cosines, step shares and LRA factors
+* - `term_ntk`
+  - `0`
+  - points per block for the per-term NTK (needs `Problem.blocks`; 0 = skip)
+* - `profile_axis`, `profile_x`, `profile_bins`
+  - `None`, `None`, `20`
+  - coordinate to profile along (e.g. `-1` = time; `None` = skip); points (default
+    `x_dense`); number of bins
+* - `causal_eps`
+  - `None`
+  - adds causal weights {math}`\exp(-\varepsilon\sum_{j<k}L_j)` to the residual profile
+* - `grid_shape`, `grid_spacings`
+  - `None`, `None`
+  - `x_dense` is a C-ordered grid of this shape and spacing: enables the N-D spectral error
+* - `lr`
+  - `None`
+  - learning rate, for the λ_max·lr stability rule in the findings
+* - `interpret`
+  - `True`
+  - attach `res["findings"]` and `res["findings_md"]`
 ```
 
 ### Cost and precision
@@ -544,6 +725,12 @@ order the modes, not to predict iteration counts.
 * - Refit / pruning
   - one forward-mode Jacobian of the output layer; then small dense solves whose cost does
     not depend on the number of collocation points
+* - Gradient conflict
+  - one reverse pass per loss term
+* - Per-term NTK
+  - `term_ntk` residual Jacobians per block
+* - Profiles, localisation, spectral error
+  - one residual (and output) evaluation on the profile points
 ```
 
 ```{admonition} Run post-processing in float64 when you need small eigenvalues

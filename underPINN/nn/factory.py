@@ -17,6 +17,8 @@ from typing import Any, Dict
 from underPINN.nn.mlp import MLP, GatedMLP, FourierMLP, TemporalFourierMLP, SIREN
 
 _TEMPORAL = ("temporal_fourier", "fourier_time", "tfmlp")
+_CHEBYKAN = ("chebykan", "cheby_kan", "cpikan")
+_BSPLINEKAN = ("kan", "bspline_kan", "pikan")
 _OPERATORS = ("fno1d", "fno2d", "deeponet", "cvit")
 
 
@@ -24,7 +26,12 @@ def build_model(net_cfg: Dict[str, Any]):
     """Build a Flax module from a ``network`` config dict.
 
     Recognised ``type`` values: ``mlp``, ``gated_mlp``, ``fourier_mlp``,
-    ``temporal_fourier``, ``siren``.  Unknown types fall back to a plain MLP.
+    ``temporal_fourier``, ``siren``, ``chebykan`` (cPIKAN; ``degree``),
+    ``kan`` (B-spline KAN; ``grid_size``, ``spline_order``, ``grid_range``)
+    -- see :mod:`underPINN.nn.kan` --, ``piratenet`` (:mod:`underPINN.nn.pirate`),
+    ``pinnsformer`` / ``pinnmamba`` (:mod:`underPINN.nn.sequence`), plus the
+    neural operators.  Unknown
+    types fall back to a plain MLP.
 
     Point networks read ``layers`` (``[in, h1, …, out]``); architectures that
     do not use a flat layer list (e.g. future neural operators) read their own
@@ -47,6 +54,36 @@ def build_model(net_cfg: Dict[str, Any]):
         )
     if t == "gated_mlp":
         return GatedMLP(layers=_layers())
+    if t in ("piratenet", "pirate"):
+        from underPINN.nn.pirate import PirateNet
+        return PirateNet(width=int(net_cfg.get("width", 256)),
+                         n_blocks=int(net_cfg.get("n_blocks", 3)),
+                         out_dim=int(net_cfg.get("out_dim", 1)),
+                         fourier_scale=float(net_cfg.get("fourier_scale", 1.0)),
+                         rwf=bool(net_cfg.get("rwf", True)))
+    if t == "pinnsformer":
+        from underPINN.nn.sequence import PINNsFormer
+        return PINNsFormer(**{k: (int(v) if k not in ("dt",) else float(v))
+                              for k, v in net_cfg.items()
+                              if k in ("out_dim", "d_model", "heads", "d_ff", "d_hidden",
+                                       "n_layers", "k", "dt", "time_index")})
+    if t == "pinnmamba":
+        from underPINN.nn.sequence import PINNMamba
+        return PINNMamba(**{k: (int(v) if k not in ("dt", "norm_eps") else float(v))
+                            for k, v in net_cfg.items()
+                            if k in ("out_dim", "d_model", "n_layers", "d_state", "expand",
+                                     "d_hidden", "k", "dt", "time_index", "norm_eps")})
+    if t in _CHEBYKAN:
+        from underPINN.nn.kan import ChebyKAN
+        return ChebyKAN(layers=_layers(), degree=int(net_cfg.get("degree", 5)))
+    if t in _BSPLINEKAN:
+        from underPINN.nn.kan import BSplineKAN
+        return BSplineKAN(
+            layers=_layers(),
+            grid_size=int(net_cfg.get("grid_size", 5)),
+            spline_order=int(net_cfg.get("spline_order", 3)),
+            grid_range=tuple(float(v) for v in net_cfg.get("grid_range", (-1.0, 1.0))),
+        )
     if t == "siren":
         return SIREN(layers=_layers(), w0=float(net_cfg.get("w0", 15.0)))
     if t in ("fourier_mlp", "fourier"):
@@ -133,6 +170,20 @@ def network_config(cfg) -> Dict[str, Any]:
         out["omega"] = float(omega)
     elif out["type"] == "siren":
         out["w0"] = float(cfg_get(nc, "w0", default=15.0))
+    elif out["type"] in ("piratenet", "pirate", "pinnsformer", "pinnmamba"):
+        # architecture hyper-parameters are passed through as given
+        for k in ("width", "n_blocks", "out_dim", "fourier_scale", "rwf", "d_model", "heads",
+                  "d_ff", "d_hidden", "n_layers", "k", "dt", "time_index", "d_state", "expand",
+                  "norm_eps"):
+            v = cfg_get(nc, k, default=None)
+            if v is not None:
+                out[k] = v
+    elif out["type"] in _CHEBYKAN:
+        out["degree"] = int(cfg_get(nc, "degree", default=5))
+    elif out["type"] in _BSPLINEKAN:
+        out["grid_size"]    = int(cfg_get(nc, "grid_size", default=5))
+        out["spline_order"] = int(cfg_get(nc, "spline_order", default=3))
+        out["grid_range"]   = [float(v) for v in cfg_get(nc, "grid_range", default=[-1.0, 1.0])]
     elif out["type"] in ("fourier_mlp", "fourier"):
         out["n_fourier"] = int(cfg_get(nc, "n_fourier", default=16))
         out["sigma"]     = float(cfg_get(nc, "sigma", default=1.0))
